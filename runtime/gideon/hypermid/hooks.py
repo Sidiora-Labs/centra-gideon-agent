@@ -7,7 +7,7 @@ import time
 from collections import deque
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, cast
 
 from .models import Cursor, JsonValue, Scope, Trace
 
@@ -23,7 +23,9 @@ HookKind = Literal[
     "diagnostic_fault",
 ]
 HookPhase = Literal["pre", "post"]
-HookOutcome = Literal["allow", "deny", "inject", "committed", "rejected", "timed_out", "failed"]
+HookOutcome = Literal[
+    "allow", "deny", "inject", "committed", "rejected", "timed_out", "failed"
+]
 FailurePolicy = Literal["continue", "deny"]
 
 MAX_METADATA = 64
@@ -31,7 +33,15 @@ MAX_SYNTHETIC_BLOCKS = 128
 MAX_SYNTHETIC_TOKENS = 65_536
 _REASON = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
-_SENSITIVE_KEYS = ("authorization", "credential", "password", "secret", "token", "content", "prompt")
+_SENSITIVE_KEYS = (
+    "authorization",
+    "credential",
+    "password",
+    "secret",
+    "token",
+    "content",
+    "prompt",
+)
 _KINDS = {
     "session_bind",
     "ingest",
@@ -56,7 +66,10 @@ def _redact_metadata(metadata: Mapping[str, object]) -> dict[str, bool | int | s
         raise ValueError("hook metadata exceeds its bound")
     result: dict[str, bool | int | str] = {}
     for key, value in metadata.items():
-        if not isinstance(key, str) or re.fullmatch(r"[a-z][a-z0-9_]{0,63}", key) is None:
+        if (
+            not isinstance(key, str)
+            or re.fullmatch(r"[a-z][a-z0-9_]{0,63}", key) is None
+        ):
             raise ValueError("hook metadata key is invalid")
         if any(marker in key.lower() for marker in _SENSITIVE_KEYS):
             result[key] = "[redacted]"
@@ -65,11 +78,17 @@ def _redact_metadata(metadata: Mapping[str, object]) -> dict[str, bool | int | s
         elif isinstance(value, int):
             result[key] = value
         elif isinstance(value, str):
-            cleaned = "".join(character for character in value if character == " " or character.isprintable())
+            cleaned = "".join(
+                character
+                for character in value
+                if character == " " or character.isprintable()
+            )
             lowered = cleaned.lower()
             result[key] = (
                 "[redacted]"
-                if "bearer " in lowered or "authorization:" in lowered or "token=" in lowered
+                if "bearer " in lowered
+                or "authorization:" in lowered
+                or "token=" in lowered
                 else cleaned[:512]
             )
         else:
@@ -93,7 +112,11 @@ class HookEvent:
     def __post_init__(self) -> None:
         if self.kind not in _KINDS or self.phase not in ("pre", "post"):
             raise ValueError("hook kind or phase is invalid")
-        if isinstance(self.policy_revision, bool) or not isinstance(self.policy_revision, int) or self.policy_revision < 1:
+        if (
+            isinstance(self.policy_revision, bool)
+            or not isinstance(self.policy_revision, int)
+            or self.policy_revision < 1
+        ):
             raise ValueError("hook policy revision is invalid")
         if not self.created_at or len(self.created_at) > 64:
             raise ValueError("hook timestamp is invalid")
@@ -109,7 +132,7 @@ class HookEvent:
             "cursor": self.cursor.to_wire(),
             "policy_revision": self.policy_revision,
             "phase": self.phase,
-            "metadata": dict(self.metadata),
+            "metadata": cast(dict[str, JsonValue], dict(self.metadata)),
             "created_at": self.created_at,
         }
 
@@ -121,9 +144,16 @@ class SyntheticBlockRef:
     token_mass: int
 
     def __post_init__(self) -> None:
-        if not isinstance(self.content_digest, str) or _DIGEST.fullmatch(self.content_digest) is None:
+        if (
+            not isinstance(self.content_digest, str)
+            or _DIGEST.fullmatch(self.content_digest) is None
+        ):
             raise ValueError("synthetic block digest is invalid")
-        if isinstance(self.token_mass, bool) or not isinstance(self.token_mass, int) or not 0 <= self.token_mass <= MAX_SYNTHETIC_TOKENS:
+        if (
+            isinstance(self.token_mass, bool)
+            or not isinstance(self.token_mass, int)
+            or not 0 <= self.token_mass <= MAX_SYNTHETIC_TOKENS
+        ):
             raise ValueError("synthetic block token mass is invalid")
 
     def to_wire(self) -> dict[str, JsonValue]:
@@ -148,9 +178,15 @@ class HookDecision:
         if self.outcome == "deny" and self.reason_code is None:
             raise ValueError("denial requires a reason code")
         if self.outcome == "inject":
-            if not self.synthetic_blocks or len(self.synthetic_blocks) > MAX_SYNTHETIC_BLOCKS:
+            if (
+                not self.synthetic_blocks
+                or len(self.synthetic_blocks) > MAX_SYNTHETIC_BLOCKS
+            ):
                 raise ValueError("injection requires bounded synthetic blocks")
-            if sum(block.token_mass for block in self.synthetic_blocks) > MAX_SYNTHETIC_TOKENS:
+            if (
+                sum(block.token_mass for block in self.synthetic_blocks)
+                > MAX_SYNTHETIC_TOKENS
+            ):
                 raise ValueError("synthetic block token limit exceeded")
         elif self.synthetic_blocks:
             raise ValueError("only injection may contain synthetic blocks")
@@ -180,7 +216,11 @@ class HookRegistration:
     callback: HookCallable = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if isinstance(self.timeout_ms, bool) or not isinstance(self.timeout_ms, int) or not 1 <= self.timeout_ms <= 60_000:
+        if (
+            isinstance(self.timeout_ms, bool)
+            or not isinstance(self.timeout_ms, int)
+            or not 1 <= self.timeout_ms <= 60_000
+        ):
             raise ValueError("hook timeout must be between 1 and 60000 milliseconds")
 
 
@@ -226,7 +266,11 @@ class HookReplay:
 
 class HookOutcomeStore:
     def __init__(self, *, retention: int = 256) -> None:
-        if isinstance(retention, bool) or not isinstance(retention, int) or not 1 <= retention <= 4096:
+        if (
+            isinstance(retention, bool)
+            or not isinstance(retention, int)
+            or not 1 <= retention <= 4096
+        ):
             raise ValueError("hook retention must be between 1 and 4096")
         self._lock = asyncio.Lock()
         self._outcomes: deque[HookOutcomeRecord] = deque(maxlen=retention)
@@ -253,13 +297,17 @@ class HookOutcomeStore:
 
     async def read_after(self, cursor: int) -> HookReplay:
         async with self._lock:
-            oldest = self._outcomes[0].sequence if self._outcomes else self._next_sequence
+            oldest = (
+                self._outcomes[0].sequence if self._outcomes else self._next_sequence
+            )
             latest = self._next_sequence - 1
             return HookReplay(
                 gap=cursor + 1 < oldest,
                 oldest_cursor=max(0, oldest - 1),
                 next_cursor=latest,
-                outcomes=tuple(record for record in self._outcomes if record.sequence > cursor),
+                outcomes=tuple(
+                    record for record in self._outcomes if record.sequence > cursor
+                ),
             )
 
 
@@ -272,7 +320,9 @@ class HookDispatchResult:
 
 
 class HookDispatcher:
-    def __init__(self, store: HookOutcomeStore, *, failure_policy: FailurePolicy = "deny") -> None:
+    def __init__(
+        self, store: HookOutcomeStore, *, failure_policy: FailurePolicy = "deny"
+    ) -> None:
         if failure_policy not in ("continue", "deny"):
             raise ValueError("hook failure policy is invalid")
         self._store = store
@@ -283,17 +333,27 @@ class HookDispatcher:
         self._hooks.append(registration)
         self._hooks.sort(key=lambda hook: hook.hook_id)
 
-    async def dispatch_pre(self, event: HookEvent, *, recorded_at_ms: int) -> HookDispatchResult:
+    async def dispatch_pre(
+        self, event: HookEvent, *, recorded_at_ms: int
+    ) -> HookDispatchResult:
         if event.phase != "pre":
             raise ValueError("dispatch_pre requires a pre event")
-        return await self._dispatch(event, recorded_at_ms=recorded_at_ms, enforcing=True)
+        return await self._dispatch(
+            event, recorded_at_ms=recorded_at_ms, enforcing=True
+        )
 
-    async def dispatch_post(self, event: HookEvent, *, recorded_at_ms: int) -> HookDispatchResult:
+    async def dispatch_post(
+        self, event: HookEvent, *, recorded_at_ms: int
+    ) -> HookDispatchResult:
         if event.phase != "post":
             raise ValueError("dispatch_post requires a post event")
-        return await self._dispatch(event, recorded_at_ms=recorded_at_ms, enforcing=False)
+        return await self._dispatch(
+            event, recorded_at_ms=recorded_at_ms, enforcing=False
+        )
 
-    async def _dispatch(self, event: HookEvent, *, recorded_at_ms: int, enforcing: bool) -> HookDispatchResult:
+    async def _dispatch(
+        self, event: HookEvent, *, recorded_at_ms: int, enforcing: bool
+    ) -> HookDispatchResult:
         blocks: list[SyntheticBlockRef] = []
         outcomes: list[HookOutcomeRecord] = []
         allowed = True
@@ -343,15 +403,23 @@ class HookDispatcher:
                 continue
             if outcome == "inject":
                 candidate = [*blocks, *hook_blocks]
-                if len(candidate) > MAX_SYNTHETIC_BLOCKS or sum(block.token_mass for block in candidate) > MAX_SYNTHETIC_TOKENS:
+                if (
+                    len(candidate) > MAX_SYNTHETIC_BLOCKS
+                    or sum(block.token_mass for block in candidate)
+                    > MAX_SYNTHETIC_TOKENS
+                ):
                     allowed = False
                     denial_reason = "synthetic_block_limit"
                     blocks.clear()
                     break
                 blocks = candidate
-            elif outcome == "deny" or (outcome in ("timed_out", "failed") and self._failure_policy == "deny"):
+            elif outcome == "deny" or (
+                outcome in ("timed_out", "failed") and self._failure_policy == "deny"
+            ):
                 allowed = False
                 denial_reason = reason_code
                 blocks.clear()
                 break
-        return HookDispatchResult(allowed, denial_reason, tuple(blocks), tuple(outcomes))
+        return HookDispatchResult(
+            allowed, denial_reason, tuple(blocks), tuple(outcomes)
+        )

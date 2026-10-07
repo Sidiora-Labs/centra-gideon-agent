@@ -14,7 +14,6 @@ from .memory_client import MemoryClient
 from .network_policy import Redactor, SecretDenied, SecretHandle
 from .security_operations import SecurityOperations
 
-
 _BACKUP_OPERATION = "hypermid.backup"
 _RESTORE_OPERATION = "hypermid.restore"
 _OPERATIONS = frozenset({_BACKUP_OPERATION, _RESTORE_OPERATION})
@@ -24,7 +23,8 @@ T = TypeVar("T")
 
 
 class _Credential(Protocol):
-    secret: str | None
+    @property
+    def secret(self) -> str | None: ...
 
 
 class _CredentialStore(Protocol):
@@ -65,12 +65,11 @@ class CredentialStoreSecretVault:
             separators=(",", ":"),
             sort_keys=True,
         ).encode("utf-8")
-        identifier = "hypermid_credential_" + hashlib.sha256(
-            b"hypermid.credential.handle.v1\0" + material
-        ).hexdigest()
-        self._bindings[identifier] = _Binding(
-            principal_id, operation, credential_name
+        identifier = (
+            "hypermid_credential_"
+            + hashlib.sha256(b"hypermid.credential.handle.v1\0" + material).hexdigest()
         )
+        self._bindings[identifier] = _Binding(principal_id, operation, credential_name)
         return SecretHandle(identifier)
 
     def dispatch_with_secret(
@@ -124,8 +123,7 @@ class CredentialStoreSecretVault:
 
 def local_backup_credential_name(scope: Scope) -> str:
     owner_digest = hashlib.sha256(
-        b"hypermid.backup.credential.owner.v1\0"
-        + str(scope.owner_id).encode("utf-8")
+        b"hypermid.backup.credential.owner.v1\0" + str(scope.owner_id).encode("utf-8")
     ).hexdigest()[:24]
     return f"hypermid-backup-key-{owner_digest}"
 
@@ -146,7 +144,10 @@ def attach_security_operations(
     enrollment.require_live(scope)
     operations = frozenset(getattr(enrollment, "operations", ()))
     resources = frozenset(getattr(enrollment, "resources", ()))
-    if not _REQUIRED_CAPABILITY_OPERATIONS.issubset(operations) or _PORTABILITY_RESOURCE not in resources:
+    if (
+        not _REQUIRED_CAPABILITY_OPERATIONS.issubset(operations)
+        or _PORTABILITY_RESOURCE not in resources
+    ):
         return None
 
     if credential_store is None:

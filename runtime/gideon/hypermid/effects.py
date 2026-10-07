@@ -6,7 +6,7 @@ import secrets
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping
+from typing import Mapping, cast
 
 from .client import HypermidClient
 from .foundation import Digest, Id, Scope
@@ -244,7 +244,7 @@ class EffectReviewPlan:
                 effect_id=Id(raw["effect_id"]),
                 idempotency_key=Id(raw["idempotency_key"]),
                 module_id=Id(raw["module_id"]),
-                operation=raw["operation"],
+                operation=cast(str, raw["operation"]),
                 scope=Scope.from_wire(_mapping(raw["scope"], "review scope")),
                 input_digest=Digest(raw["input_digest"]),
                 provider_id=Id(raw["provider_id"]),
@@ -256,7 +256,7 @@ class EffectReviewPlan:
                     if raw.get("result_digest") is not None
                     else None
                 ),
-                reason=raw.get("reason"),
+                reason=cast(str | None, raw.get("reason")),
                 created_ms=_wire_millis(raw["created_ms"], "created_ms"),
                 plan_digest=Digest(raw["plan_digest"]),
             )
@@ -396,9 +396,7 @@ class EffectService:
             expected_review_id=review_id,
         )
 
-    async def reconcile(
-        self, scope: Scope, plan: EffectReviewPlan
-    ) -> EffectSnapshot:
+    async def reconcile(self, scope: Scope, plan: EffectReviewPlan) -> EffectSnapshot:
         self._require_scope(scope)
         if plan.scope != scope:
             raise EffectContractError(
@@ -442,18 +440,25 @@ class EffectService:
     def _require_scope(self, scope: Scope) -> None:
         if scope != self._client.scope:
             raise EffectContractError(
-                "SCOPE_MISMATCH", "effect request does not match the authenticated scope"
+                "SCOPE_MISMATCH",
+                "effect request does not match the authenticated scope",
             )
 
 
 def _mapping(value: object, name: str) -> Mapping[str, object]:
     if not isinstance(value, Mapping):
-        raise EffectContractError("INVALID_EFFECT_RESPONSE", f"{name} must be an object")
+        raise EffectContractError(
+            "INVALID_EFFECT_RESPONSE", f"{name} must be an object"
+        )
     return value
 
 
 def _wire_millis(value: object, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 9_007_199_254_740_991:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= 9_007_199_254_740_991
+    ):
         raise EffectContractError("INVALID_EFFECT_RESPONSE", f"{name} is invalid")
     return value
 

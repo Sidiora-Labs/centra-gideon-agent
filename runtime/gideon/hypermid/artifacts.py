@@ -3,8 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Iterable, Mapping
-
+from typing import Iterable, Mapping, cast
 
 CAPABILITY_CLASSES = frozenset(
     {
@@ -68,7 +67,9 @@ class ArtifactApproval:
         *,
         now_ms: int,
     ) -> frozenset[str]:
-        requested = frozenset(str(item) for item in manifest.get("capabilities", ()))
+        requested = frozenset(
+            str(item) for item in cast(Iterable[str], manifest.get("capabilities", ()))
+        )
         current = frozenset(current_capabilities)
         expansion = requested - current
         if not expansion:
@@ -86,4 +87,3 @@ class ArtifactApproval:
                 "artifact capability expansion requires approval for this exact manifest",
             )
         return expansion
-

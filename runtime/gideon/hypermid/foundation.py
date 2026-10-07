@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
 import hashlib
 import os
-from pathlib import Path
 import re
-from typing import Any, Mapping
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+from typing import Any, Mapping, TypeAlias, cast
 
+JsonValue: TypeAlias = (
+    None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
+)
 
 MAX_SAFE_INTEGER = 9_007_199_254_740_991
 MAX_RECOVERY_COMPONENTS = 64
@@ -22,16 +25,22 @@ class ContractViolation(ValueError):
 
 
 class Id(str):
-    def __new__(cls, value: str) -> Id:
-        if not isinstance(value, str) or len(value) > 160 or not _ID_PATTERN.fullmatch(value):
+    def __new__(cls, value: object) -> Id:
+        if (
+            not isinstance(value, str)
+            or len(value) > 160
+            or not _ID_PATTERN.fullmatch(value)
+        ):
             raise ContractViolation("Id does not match the Hypermid Id contract")
         return str.__new__(cls, value)
 
 
 class Digest(str):
-    def __new__(cls, value: str) -> Digest:
+    def __new__(cls, value: object) -> Digest:
         if not isinstance(value, str) or not _DIGEST_PATTERN.fullmatch(value):
-            raise ContractViolation("digest must be exactly 64 lowercase hexadecimal characters")
+            raise ContractViolation(
+                "digest must be exactly 64 lowercase hexadecimal characters"
+            )
         return str.__new__(cls, value)
 
     @classmethod
@@ -51,15 +60,19 @@ class Scope:
         if self.workspace_id is not None:
             object.__setattr__(self, "workspace_id", Id(self.workspace_id))
 
-    def to_wire(self) -> dict[str, str]:
-        value = {"owner_id": str(self.owner_id), "project_id": str(self.project_id)}
+    def to_wire(self) -> dict[str, JsonValue]:
+        value: dict[str, JsonValue] = {
+            "owner_id": str(self.owner_id),
+            "project_id": str(self.project_id),
+        }
         if self.workspace_id is not None:
             value["workspace_id"] = str(self.workspace_id)
         return value
 
     @classmethod
-    def from_wire(cls, value: Mapping[str, Any]) -> Scope:
+    def from_wire(cls, value: object) -> Scope:
         _require_keys(value, {"owner_id", "project_id"}, {"workspace_id"})
+        value = cast(Mapping[str, Any], value)
         return cls(
             owner_id=Id(value["owner_id"]),
             project_id=Id(value["project_id"]),
@@ -75,18 +88,24 @@ class Cursor:
     def __post_init__(self) -> None:
         if isinstance(self.epoch, bool) or not 1 <= self.epoch <= MAX_SAFE_INTEGER:
             raise ContractViolation("cursor epoch is outside the Hypermid wire range")
-        if isinstance(self.sequence, bool) or not 0 <= self.sequence <= MAX_SAFE_INTEGER:
-            raise ContractViolation("cursor sequence is outside the Hypermid wire range")
+        if (
+            isinstance(self.sequence, bool)
+            or not 0 <= self.sequence <= MAX_SAFE_INTEGER
+        ):
+            raise ContractViolation(
+                "cursor sequence is outside the Hypermid wire range"
+            )
 
     def next(self) -> Cursor:
         return Cursor(self.epoch, self.sequence + 1)
 
-    def to_wire(self) -> dict[str, int]:
+    def to_wire(self) -> dict[str, JsonValue]:
         return {"epoch": self.epoch, "sequence": self.sequence}
 
     @classmethod
-    def from_wire(cls, value: Mapping[str, Any]) -> Cursor:
+    def from_wire(cls, value: object) -> Cursor:
         _require_keys(value, {"epoch", "sequence"})
+        value = cast(Mapping[str, Any], value)
         return cls(value["epoch"], value["sequence"])
 
 
@@ -105,17 +124,24 @@ class Error:
     effect_state: EffectState | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.code, str) or not _ERROR_CODE_PATTERN.fullmatch(self.code):
-            raise ContractViolation("error code does not match the Hypermid Error contract")
+        if not isinstance(self.code, str) or not _ERROR_CODE_PATTERN.fullmatch(
+            self.code
+        ):
+            raise ContractViolation(
+                "error code does not match the Hypermid Error contract"
+            )
         if not isinstance(self.message, str) or len(self.message) > 2_048:
             raise ContractViolation("error message exceeds the Hypermid Error contract")
         if not isinstance(self.retryable, bool):
             raise ContractViolation("retryable must be a boolean")
         if self.retry_after_ms is not None and (
-            isinstance(self.retry_after_ms, bool) or not 0 <= self.retry_after_ms <= 86_400_000
+            isinstance(self.retry_after_ms, bool)
+            or not 0 <= self.retry_after_ms <= 86_400_000
         ):
             raise ContractViolation("retry delay exceeds the Hypermid Error contract")
-        if self.effect_state is not None and not isinstance(self.effect_state, EffectState):
+        if self.effect_state is not None and not isinstance(
+            self.effect_state, EffectState
+        ):
             object.__setattr__(self, "effect_state", EffectState(self.effect_state))
 
     def to_wire(self) -> dict[str, Any]:
@@ -131,18 +157,21 @@ class Error:
         return value
 
     @classmethod
-    def from_wire(cls, value: Mapping[str, Any]) -> Error:
+    def from_wire(cls, value: object) -> Error:
         _require_keys(
             value,
             {"code", "message", "retryable"},
             {"retry_after_ms", "effect_state"},
         )
+        value = cast(Mapping[str, Any], value)
         return cls(
             code=value["code"],
             message=value["message"],
             retryable=value["retryable"],
             retry_after_ms=value.get("retry_after_ms"),
-            effect_state=(EffectState(value["effect_state"]) if "effect_state" in value else None),
+            effect_state=(
+                EffectState(value["effect_state"]) if "effect_state" in value else None
+            ),
         )
 
 
@@ -155,12 +184,13 @@ class Trace:
         object.__setattr__(self, "trace_id", Id(self.trace_id))
         object.__setattr__(self, "request_id", Id(self.request_id))
 
-    def to_wire(self) -> dict[str, str]:
+    def to_wire(self) -> dict[str, JsonValue]:
         return {"trace_id": str(self.trace_id), "request_id": str(self.request_id)}
 
     @classmethod
-    def from_wire(cls, value: Mapping[str, Any]) -> Trace:
+    def from_wire(cls, value: object) -> Trace:
         _require_keys(value, {"trace_id", "request_id"})
+        value = cast(Mapping[str, Any], value)
         return cls(Id(value["trace_id"]), Id(value["request_id"]))
 
 
@@ -182,7 +212,9 @@ class ProjectRoot:
 
     def require_live(self) -> None:
         if not self.permits_new_state:
-            raise ContractViolation("recovery-only identity cannot create durable state")
+            raise ContractViolation(
+                "recovery-only identity cannot create durable state"
+            )
 
     def to_wire(self) -> dict[str, Any]:
         return {
@@ -240,7 +272,9 @@ class HomeResolution:
     is_relative: bool
 
 
-def resolve_home(value: str | os.PathLike[str] | None, fallback: str | os.PathLike[str]) -> HomeResolution:
+def resolve_home(
+    value: str | os.PathLike[str] | None, fallback: str | os.PathLike[str]
+) -> HomeResolution:
     selected = Path(value) if value is not None and os.fspath(value) else Path(fallback)
     return HomeResolution(selected, not selected.is_absolute())
 
@@ -264,7 +298,7 @@ def _check_symlink_bound(path: Path) -> None:
 
 
 def _require_keys(
-    value: Mapping[str, Any], required: set[str], optional: set[str] | None = None
+    value: object, required: set[str], optional: set[str] | None = None
 ) -> None:
     if not isinstance(value, Mapping):
         raise ContractViolation("wire value must be an object")

@@ -4,7 +4,7 @@ import re
 import threading
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Literal, Mapping
+from typing import Literal, Mapping, cast
 
 from .foundation import Digest
 from .models import Cursor, JsonValue, Scope, Trace
@@ -42,7 +42,11 @@ def _digest(value: str) -> str:
 
 
 def _count(value: int, name: str, *, maximum: int = MAX_TOKENS) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= maximum:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= maximum
+    ):
         raise ValueError(f"{name} is outside the supported range")
     return value
 
@@ -77,11 +81,15 @@ class UsageAccounting:
         for value in values:
             if value is not None:
                 _count(value, "usage token count")
-        if self.state in ("no_call", "missing") and any(value is not None for value in values):
+        if self.state in ("no_call", "missing") and any(
+            value is not None for value in values
+        ):
             raise ValueError("no-call and missing usage cannot contain token values")
         if self.state == "reported_zero" and values != (0, 0, 0, 0):
             raise ValueError("reported-zero usage requires explicit zero values")
-        if self.state == "reported" and (any(value is None for value in values) or not any(values)):
+        if self.state == "reported" and (
+            any(value is None for value in values) or not any(values)
+        ):
             raise ValueError("reported usage requires complete nonzero accounting")
         if self.state not in ("no_call", "missing", "reported_zero", "reported"):
             raise ValueError("usage state is invalid")
@@ -121,7 +129,10 @@ class RegionDiagnostics:
             raise ValueError("region kind is invalid")
         _digest(self.digest)
         _count(self.token_mass, "region token mass")
-        if len(self.item_ids) > MAX_IDENTITIES or len(self.summary_ids) > MAX_IDENTITIES:
+        if (
+            len(self.item_ids) > MAX_IDENTITIES
+            or len(self.summary_ids) > MAX_IDENTITIES
+        ):
             raise ValueError("region identity list exceeds its bound")
 
     def to_wire(self) -> dict[str, JsonValue]:
@@ -162,9 +173,15 @@ class ModelBudgetDiagnostics:
         _count(self.max_images, "max_images", maximum=4096)
         if self.context_window_tokens == 0 or self.max_items == 0:
             raise ValueError("model budget requires a nonzero window and item bound")
-        if self.reserved_output_tokens + self.max_input_tokens > self.context_window_tokens:
+        if (
+            self.reserved_output_tokens + self.max_input_tokens
+            > self.context_window_tokens
+        ):
             raise ValueError("input and output reservations exceed the context window")
-        if self.baseline_tokens + self.delta_tokens + self.tail_tokens > self.max_input_tokens:
+        if (
+            self.baseline_tokens + self.delta_tokens + self.tail_tokens
+            > self.max_input_tokens
+        ):
             raise ValueError("region token mass exceeds the input budget")
         if self.confidence not in ("measured", "calibrated", "conservative"):
             raise ValueError("budget confidence is invalid")
@@ -229,8 +246,12 @@ class ContextDiagnostics:
     subagent_usage: UsageAccounting
     generated_at: str
     render_mode: Literal["host_serialized"] = "host_serialized"
-    overflow_policy: Literal["reclaim_then_refuse", "refuse_immediately"] = "reclaim_then_refuse"
-    refusal_policy: Literal["refuse", "compatible_last_known_good", "host_passthrough"] = "refuse"
+    overflow_policy: Literal["reclaim_then_refuse", "refuse_immediately"] = (
+        "reclaim_then_refuse"
+    )
+    refusal_policy: Literal[
+        "refuse", "compatible_last_known_good", "host_passthrough"
+    ] = "refuse"
     policy_revision: int = 1
     protected_item_ids: tuple[str, ...] = ()
     selected_tiers: Mapping[str, int] = field(default_factory=dict)
@@ -249,13 +270,29 @@ class ContextDiagnostics:
         _count(self.summary_jobs, "summary_jobs", maximum=1_000_000)
         if self.mode not in ("off", "pass_through", "shadow", "primary"):
             raise ValueError("context mode is invalid")
-        if self.pressure_band not in ("normal", "advisory", "action", "emergency", "hard_wall"):
+        if self.pressure_band not in (
+            "normal",
+            "advisory",
+            "action",
+            "emergency",
+            "hard_wall",
+        ):
             raise ValueError("pressure band is invalid")
-        if (self.baseline.kind, self.delta.kind, self.tail.kind) != ("baseline", "delta", "tail"):
+        if (self.baseline.kind, self.delta.kind, self.tail.kind) != (
+            "baseline",
+            "delta",
+            "tail",
+        ):
             raise ValueError("diagnostic regions are not ordered baseline/delta/tail")
-        if len(self.protected_item_ids) > MAX_IDENTITIES or len(self.selected_tiers) > MAX_IDENTITIES:
+        if (
+            len(self.protected_item_ids) > MAX_IDENTITIES
+            or len(self.selected_tiers) > MAX_IDENTITIES
+        ):
             raise ValueError("diagnostic identity collection exceeds its bound")
-        if any(isinstance(tier, bool) or not isinstance(tier, int) or tier not in range(4) for tier in self.selected_tiers.values()):
+        if any(
+            isinstance(tier, bool) or not isinstance(tier, int) or tier not in range(4)
+            for tier in self.selected_tiers.values()
+        ):
             raise ValueError("selected tier is invalid")
         if len(self.recent_outcomes) > MAX_OUTCOMES:
             raise ValueError("recent diagnostic outcomes exceed their bound")
@@ -334,13 +371,27 @@ class ContextDiagnosticsSnapshot:
     def __post_init__(self) -> None:
         _count(self.observed_at_ms, "observed_at_ms", maximum=9_007_199_254_740_991)
         if self.state == "available":
-            if self.disposition != "active" or self.value is None or self.current_error is not None:
-                raise ValueError("available diagnostics require a current successful value")
+            if (
+                self.disposition != "active"
+                or self.value is None
+                or self.current_error is not None
+            ):
+                raise ValueError(
+                    "available diagnostics require a current successful value"
+                )
         elif self.state == "unavailable":
-            if self.disposition not in ("degraded", "parked") or self.value is not None or self.current_error is None:
+            if (
+                self.disposition not in ("degraded", "parked")
+                or self.value is not None
+                or self.current_error is None
+            ):
                 raise ValueError("unavailable diagnostics require a current error")
         elif self.state == "unsupported":
-            if self.value is not None or self.current_error is not None or self.last_good is not None:
+            if (
+                self.value is not None
+                or self.current_error is not None
+                or self.last_good is not None
+            ):
                 raise ValueError("unsupported diagnostics cannot claim evidence")
         else:
             raise ValueError("diagnostic evidence state is invalid")
@@ -362,7 +413,11 @@ class ContextDiagnosticsSnapshot:
 
 class DiagnosticStore:
     def __init__(self, *, retention: int = 64, observed_at_ms: int = 0) -> None:
-        if isinstance(retention, bool) or not isinstance(retention, int) or not 1 <= retention <= 256:
+        if (
+            isinstance(retention, bool)
+            or not isinstance(retention, int)
+            or not 1 <= retention <= 256
+        ):
             raise ValueError("diagnostic retention must be between 1 and 256")
         self._lock = threading.Lock()
         self._retained: deque[ContextDiagnosticsSnapshot] = deque(maxlen=retention)
@@ -370,7 +425,9 @@ class DiagnosticStore:
             state="unsupported", observed_at_ms=observed_at_ms, disposition="parked"
         )
 
-    def record_good(self, value: ContextDiagnostics, *, observed_at_ms: int) -> ContextDiagnosticsSnapshot:
+    def record_good(
+        self, value: ContextDiagnostics, *, observed_at_ms: int
+    ) -> ContextDiagnosticsSnapshot:
         snapshot = ContextDiagnosticsSnapshot(
             state="available",
             observed_at_ms=observed_at_ms,
@@ -406,7 +463,9 @@ class DiagnosticStore:
         with self._lock:
             return tuple(self._retained)
 
-    def _record(self, snapshot: ContextDiagnosticsSnapshot) -> ContextDiagnosticsSnapshot:
+    def _record(
+        self, snapshot: ContextDiagnosticsSnapshot
+    ) -> ContextDiagnosticsSnapshot:
         with self._lock:
             self._retained.append(snapshot)
             self._latest = snapshot
@@ -431,7 +490,9 @@ class MemoryRecoveryDiagnostics:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "schema_digest", Digest(self.schema_digest))
-        object.__setattr__(self, "authoritative_digest", Digest(self.authoritative_digest))
+        object.__setattr__(
+            self, "authoritative_digest", Digest(self.authoritative_digest)
+        )
         for name in (
             "schema_version",
             "compatibility_floor",
@@ -444,7 +505,10 @@ class MemoryRecoveryDiagnostics:
             "embedding_count",
         ):
             _count(getattr(self, name), name, maximum=9_007_199_254_740_991)
-        if self.schema_version < 1 or not 1 <= self.compatibility_floor <= self.schema_version:
+        if (
+            self.schema_version < 1
+            or not 1 <= self.compatibility_floor <= self.schema_version
+        ):
             raise ValueError("memory recovery schema evidence is invalid")
 
     def to_wire(self) -> dict[str, JsonValue]:
@@ -484,17 +548,17 @@ class MemoryRecoveryDiagnostics:
         if set(value) != expected:
             raise ValueError("memory recovery diagnostic fields are not canonical")
         return cls(
-            schema_version=value["schema_version"],
-            compatibility_floor=value["compatibility_floor"],
+            schema_version=cast(int, value["schema_version"]),
+            compatibility_floor=cast(int, value["compatibility_floor"]),
             schema_digest=Digest(value["schema_digest"]),
             scope=Scope.from_wire(value["scope"]),
             cursor=Cursor.from_wire(value["cursor"]),
             authoritative_digest=Digest(value["authoritative_digest"]),
-            record_count=value["record_count"],
-            revision_count=value["revision_count"],
-            source_count=value["source_count"],
-            lineage_count=value["lineage_count"],
-            memory_fts_count=value["memory_fts_count"],
-            source_fts_count=value["source_fts_count"],
-            embedding_count=value["embedding_count"],
+            record_count=cast(int, value["record_count"]),
+            revision_count=cast(int, value["revision_count"]),
+            source_count=cast(int, value["source_count"]),
+            lineage_count=cast(int, value["lineage_count"]),
+            memory_fts_count=cast(int, value["memory_fts_count"]),
+            source_fts_count=cast(int, value["source_fts_count"]),
+            embedding_count=cast(int, value["embedding_count"]),
         )

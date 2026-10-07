@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from .memory import HypermidMemoryProvider
+
 import asyncio
 import hashlib
 import json
@@ -32,7 +37,9 @@ class ThreadedPrimaryBridge:
     def __init__(self, connection_record: str | Path, scope: Scope) -> None:
         self.connection_record = Path(connection_record)
         self.scope = scope
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hypermid-primary")
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="hypermid-primary"
+        )
 
     def request(
         self, payload: Mapping[str, Any], *, trace: Trace | None = None
@@ -90,7 +97,10 @@ class PrimaryContextEngine:
         summary_capability_id: Id | None = None,
         inspection_sink: Callable[[str, Mapping[str, object]], None] | None = None,
     ) -> None:
-        if context_window_tokens < 1 or not 0 <= reserved_output_tokens < context_window_tokens:
+        if (
+            context_window_tokens < 1
+            or not 0 <= reserved_output_tokens < context_window_tokens
+        ):
             raise ValueError("primary provider budget is invalid")
         self.bridge = bridge
         self.scope = bridge.scope
@@ -123,9 +133,11 @@ class PrimaryContextEngine:
         **kwargs: Any,
     ) -> AssembledContext:
         from gideon.extensions.apps.app_work import active_for
+
         work = active_for(str(kwargs.get("session_key") or "default"))
         if work is not None and work.current_tier() == "text":
             from gideon.engine.hooks import HookResult
+
             return AssembledContext(
                 message=text,
                 hook_result=HookResult.passthrough(),
@@ -133,17 +145,29 @@ class PrimaryContextEngine:
                 metadata={"app_task_only": True, "app": work.app},
                 components=[Component(name="app task", text=text, compressible=False)],
             )
-        from gideon.security.session_credentials import memory_reach
         from gideon.cognition.memory_service import service_for
+        from gideon.security.session_credentials import memory_reach
+
         provider = service_for(builder.memory).provider
-        app_receipt = provider._app_receipt() if getattr(provider, "scope", None) == self.scope and hasattr(provider, "_app_receipt") else None
+        app_receipt = (
+            provider._app_receipt()
+            if getattr(provider, "scope", None) == self.scope
+            and hasattr(provider, "_app_receipt")
+            else None
+        )
         target_scope = app_receipt.scope if app_receipt is not None else self.scope
         reach = memory_reach(target_scope, app_receipt=app_receipt)
-        kwargs["blocks_writes"] = bool(kwargs.get("blocks_writes")) or not reach.write_allowed
+        kwargs["blocks_writes"] = (
+            bool(kwargs.get("blocks_writes")) or not reach.write_allowed
+        )
         if not reach.read_allowed:
             restricted = dict(kwargs)
-            restricted.update(blocks_reads=True, blocks_writes=True, active_recall=False)
-            return self._delegate.assemble(builder, text, is_new_session=is_new_session, **restricted)
+            restricted.update(
+                blocks_reads=True, blocks_writes=True, active_recall=False
+            )
+            return self._delegate.assemble(
+                builder, text, is_new_session=is_new_session, **restricted
+            )
         lease = self._primary_lease()
         if lease is None or self._context_bridge is None:
             return self._delegate.assemble(
@@ -163,7 +187,8 @@ class PrimaryContextEngine:
             self._request_payload(
                 session_id=session_id,
                 app_receipt=app_receipt,
-                shared_memory=app_receipt is not None and provider._shared_reads(),
+                shared_memory=app_receipt is not None
+                and cast("HypermidMemoryProvider", provider)._shared_reads(),
                 new_items=bridge_sources,
                 trace=trace,
                 writer_lease={
@@ -316,7 +341,13 @@ class PrimaryContextEngine:
             "reserved_output_tokens": self.reserved_output_tokens,
             "roles": ["system", "user", "assistant", "tool"],
             "part_kinds": [
-                "text", "reasoning", "tool_call", "tool_result", "image", "file", "context_marker"
+                "text",
+                "reasoning",
+                "tool_call",
+                "tool_result",
+                "image",
+                "file",
+                "context_marker",
             ],
             "requires_tool_adjacency": True,
             "supports_reasoning": True,
@@ -340,7 +371,8 @@ class PrimaryContextEngine:
             "budget_inputs": {
                 "context_window_tokens": self.context_window_tokens,
                 "reserved_output_tokens": self.reserved_output_tokens,
-                "max_input_tokens": self.context_window_tokens - self.reserved_output_tokens,
+                "max_input_tokens": self.context_window_tokens
+                - self.reserved_output_tokens,
                 "max_items": 100_000,
                 "max_images": 64,
             },
@@ -362,9 +394,17 @@ class PrimaryContextEngine:
             "reclaim_candidates": [],
         }
         from gideon.security.session_credentials import memory_reach
+
         target_scope = app_receipt.scope if app_receipt is not None else self.scope
-        capability_id = app_receipt.capability_id if app_receipt is not None else self._summary_capability_id
-        if capability_id is not None and memory_reach(target_scope, app_receipt=app_receipt).read_allowed:
+        capability_id = (
+            app_receipt.capability_id
+            if app_receipt is not None
+            else self._summary_capability_id
+        )
+        if (
+            capability_id is not None
+            and memory_reach(target_scope, app_receipt=app_receipt).read_allowed
+        ):
             payload["summary_access"] = {
                 "capability_id": str(capability_id),
                 "request": {
@@ -379,14 +419,28 @@ class PrimaryContextEngine:
             }
         else:
             payload["summary_access"] = None
-        payload["summary_sources"] = []
-        if (shared_memory and app_receipt is not None and self._summary_capability_id is not None
-                and memory_reach(self.scope, app_receipt=app_receipt).read_allowed):
-            payload["summary_sources"].append({
-                "capability_id": str(self._summary_capability_id),
-                "request": {"operation": "read", "actor_scope": self.scope.to_wire(),
-                    "target_scope": self.scope.to_wire(), "resource_id": "memory-list",
-                    "category": "context_summary", "trace": trace.to_wire()}, "limit": 1000})
+        summary_sources: list[Mapping[str, object]] = []
+        payload["summary_sources"] = summary_sources
+        if (
+            shared_memory
+            and app_receipt is not None
+            and self._summary_capability_id is not None
+            and memory_reach(self.scope, app_receipt=app_receipt).read_allowed
+        ):
+            summary_sources.append(
+                {
+                    "capability_id": str(self._summary_capability_id),
+                    "request": {
+                        "operation": "read",
+                        "actor_scope": self.scope.to_wire(),
+                        "target_scope": self.scope.to_wire(),
+                        "resource_id": "memory-list",
+                        "category": "context_summary",
+                        "trace": trace.to_wire(),
+                    },
+                    "limit": 1000,
+                }
+            )
         return payload
 
     @staticmethod
@@ -409,8 +463,13 @@ class PrimaryContextEngine:
             separators=(",", ":"),
             sort_keys=True,
         ).encode("utf-8")
-        if projection.get("output_digest") != hashlib.sha256(canonical_blocks).hexdigest():
-            raise HypermidProtocolError("primary projection output digest does not match blocks")
+        if (
+            projection.get("output_digest")
+            != hashlib.sha256(canonical_blocks).hexdigest()
+        ):
+            raise HypermidProtocolError(
+                "primary projection output digest does not match blocks"
+            )
         digest_input = {
             "blocks": blocks,
             "model_budget": serialized.get("model_budget"),
@@ -419,7 +478,9 @@ class PrimaryContextEngine:
         }
         expected = hashlib.sha256(canonical_json_bytes(digest_input)).hexdigest()
         if serialized.get("serialized_digest") != expected:
-            raise HypermidProtocolError("host serialization digest does not match response")
+            raise HypermidProtocolError(
+                "host serialization digest does not match response"
+            )
         return blocks
 
     @classmethod

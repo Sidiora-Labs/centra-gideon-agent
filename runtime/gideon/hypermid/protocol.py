@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import re
@@ -10,7 +11,6 @@ from enum import Enum
 from typing import Any, Mapping
 
 from .foundation import Cursor, Digest, Id, Scope, Trace
-
 
 PROTOCOL_VERSION = "1.0"
 MAX_ENVELOPE_BYTES = 8 * 1024 * 1024
@@ -75,7 +75,9 @@ class WriterLease:
             "cursor",
         }
         if set(data) != required:
-            raise ProtocolViolation("INVALID_LEASE", "writer lease fields are incomplete")
+            raise ProtocolViolation(
+                "INVALID_LEASE", "writer lease fields are incomplete"
+            )
         return cls(
             lease_id=data["lease_id"],
             session_id=data["session_id"],
@@ -149,7 +151,9 @@ class ProtocolRequest:
 
     def __post_init__(self) -> None:
         if self.protocol_version != PROTOCOL_VERSION:
-            raise ProtocolViolation("UNSUPPORTED_VERSION", "unsupported protocol version")
+            raise ProtocolViolation(
+                "UNSUPPORTED_VERSION", "unsupported protocol version"
+            )
         _require_id(self.session_id, "session_id")
         if not isinstance(self.payload, Mapping):
             raise ProtocolViolation("INVALID_PAYLOAD", "payload must be an object")
@@ -188,7 +192,9 @@ class ProtocolRequest:
             "payload",
         }
         if set(data) - allowed:
-            raise ProtocolViolation("INVALID_ENVELOPE", "request contains unknown fields")
+            raise ProtocolViolation(
+                "INVALID_ENVELOPE", "request contains unknown fields"
+            )
         try:
             return cls(
                 protocol_version=data["protocol_version"],
@@ -198,7 +204,9 @@ class ProtocolRequest:
                 session_id=data["session_id"],
                 render_mode=RenderMode(data["render_mode"]),
                 expected_cursor=(
-                    Cursor.from_wire(_mapping(data["expected_cursor"], "expected_cursor"))
+                    Cursor.from_wire(
+                        _mapping(data["expected_cursor"], "expected_cursor")
+                    )
                     if "expected_cursor" in data
                     else None
                 ),
@@ -282,7 +290,9 @@ class FrameDecoder:
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise ProtocolViolation("INVALID_JSON", str(exc)) from exc
             if not isinstance(decoded, dict):
-                raise ProtocolViolation("INVALID_ENVELOPE", "envelope must be an object")
+                raise ProtocolViolation(
+                    "INVALID_ENVELOPE", "envelope must be an object"
+                )
             frames.append(decoded)
         return frames
 
@@ -304,22 +314,30 @@ class TransferChunk:
 
     def payload(self) -> bytes:
         if self.protocol_version != PROTOCOL_VERSION:
-            raise ProtocolViolation("UNSUPPORTED_VERSION", "unsupported protocol version")
+            raise ProtocolViolation(
+                "UNSUPPORTED_VERSION", "unsupported protocol version"
+            )
         _require_id(self.transfer_id, "transfer_id")
         _require_digest(self.chunk_digest, "chunk_digest")
         _require_digest(self.full_digest, "full_digest")
         if not 1 <= self.total <= MAX_CHUNKS or not 0 <= self.ordinal < self.total:
-            raise ProtocolViolation("INVALID_CHUNK_ORDER", "chunk ordinal is out of range")
+            raise ProtocolViolation(
+                "INVALID_CHUNK_ORDER", "chunk ordinal is out of range"
+            )
         if len(self.payload_base64) > 87_384:
             raise ProtocolViolation("CHUNK_TOO_LARGE", "chunk exceeds 64 KiB")
         try:
             decoded = base64.b64decode(self.payload_base64, validate=True)
-        except (ValueError, base64.binascii.Error) as exc:
-            raise ProtocolViolation("INVALID_CHUNK", "payload is not valid base64") from exc
+        except (ValueError, binascii.Error) as exc:
+            raise ProtocolViolation(
+                "INVALID_CHUNK", "payload is not valid base64"
+            ) from exc
         if len(decoded) > MAX_CHUNK_BYTES:
             raise ProtocolViolation("CHUNK_TOO_LARGE", "chunk exceeds 64 KiB")
         if hashlib.sha256(decoded).hexdigest() != self.chunk_digest:
-            raise ProtocolViolation("CHUNK_DIGEST_MISMATCH", "chunk digest does not match")
+            raise ProtocolViolation(
+                "CHUNK_DIGEST_MISMATCH", "chunk digest does not match"
+            )
         return decoded
 
 
@@ -345,10 +363,14 @@ class ChunkAssembler:
         assembled = b"".join(parts)
         self._transfers.pop(chunk.transfer_id, None)
         if hashlib.sha256(assembled).hexdigest() != full_digest:
-            raise ProtocolViolation("FULL_DIGEST_MISMATCH", "transfer digest does not match")
+            raise ProtocolViolation(
+                "FULL_DIGEST_MISMATCH", "transfer digest does not match"
+            )
         return assembled
 
     def finish(self, transfer_id: str) -> None:
         if transfer_id in self._transfers:
             self._transfers.pop(transfer_id, None)
-            raise ProtocolViolation("INCOMPLETE_TRANSFER", "transfer ended before all chunks")
+            raise ProtocolViolation(
+                "INCOMPLETE_TRANSFER", "transfer ended before all chunks"
+            )

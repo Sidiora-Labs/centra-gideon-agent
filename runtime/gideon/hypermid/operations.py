@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, cast
 
 from .client import HypermidClient, HypermidOutcomeUnknown
 from .models import Cursor, JsonValue, Scope
@@ -20,9 +20,7 @@ _SECRET_VALUE = re.compile(
 )
 
 TerminalState = Literal["committed", "failed", "cancelled", "outcome_unknown"]
-ReceiptState = Literal[
-    "running", "committed", "failed", "cancelled", "outcome_unknown"
-]
+ReceiptState = Literal["running", "committed", "failed", "cancelled", "outcome_unknown"]
 
 
 class OperatorContractError(ValueError):
@@ -63,7 +61,9 @@ def _scope(value: object, expected: Scope) -> Scope:
     except ValueError as exc:
         raise OperatorContractError("response scope is invalid") from exc
     if result != expected:
-        raise OperatorContractError("response scope does not match the authenticated scope")
+        raise OperatorContractError(
+            "response scope does not match the authenticated scope"
+        )
     return result
 
 
@@ -202,7 +202,9 @@ class LogPage:
             raise OperatorContractError("log gap flag must be boolean")
         recovery = raw.get("recovery_cursor")
         if gap and recovery is None:
-            raise OperatorContractError("a log retention gap requires a recovery cursor")
+            raise OperatorContractError(
+                "a log retention gap requires a recovery cursor"
+            )
         return cls(
             scope=_scope(raw.get("scope"), expected_scope),
             entries=tuple(LogEntry.from_wire(item) for item in entries),
@@ -252,7 +254,11 @@ class PlanStep:
             title=_text(raw.get("title"), "plan step title", 240),
             effect=effect,
             state=state,
-            detail=(str(_redact(_text(detail, "plan step detail", 2048))) if detail else None),
+            detail=(
+                str(_redact(_text(detail, "plan step detail", 2048)))
+                if detail
+                else None
+            ),
         )
 
 
@@ -308,7 +314,7 @@ class ActionPlan:
                 if blocker_digest is not None
                 else None
             ),
-            raw=_redact(raw),
+            raw=cast(Mapping[str, JsonValue], _redact(raw)),
         )
 
 

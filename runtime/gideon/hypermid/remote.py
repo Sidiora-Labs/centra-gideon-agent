@@ -9,12 +9,12 @@ import signal
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, TypedDict, cast
 
 from gideon.integrations.sandbox_providers.base import SandboxSpec
 from gideon.integrations.sandbox_providers.registry import resolve_provider
 from gideon.security.net.guard import evaluate
-from gideon.security.net.policy import EgressPolicy, STRICT
+from gideon.security.net.policy import STRICT, EgressPolicy
 from gideon.security.security import redact_and_truncate
 
 from .federation import EffectClass, FederatedCall, FederationSession
@@ -53,6 +53,14 @@ class DeviceEnrollment:
         }
 
 
+class _DeviceState(TypedDict):
+    device_id: Id
+    name: str
+    expires_at: int
+    capabilities: tuple[str, ...]
+    state: str
+
+
 class RemoteAccessService:
     """Reviewed, durable local configuration for opt-in remote listening."""
 
@@ -64,9 +72,16 @@ class RemoteAccessService:
 
     def status(self) -> dict[str, object]:
         enabled = bool(self._state.get("enabled", False))
-        devices = [DeviceEnrollment(**item).to_wire() for item in self._state.get("devices", [])]
+        devices = [
+            DeviceEnrollment(**item).to_wire()
+            for item in cast(list[_DeviceState], self._state.get("devices", []))
+        ]
         state = "remote" if enabled else "local"
-        if enabled and devices and all(device["state"] == "revoked" for device in devices):
+        if (
+            enabled
+            and devices
+            and all(device["state"] == "revoked" for device in devices)
+        ):
             state = "revoked"
         tls: dict[str, object] = {"configured": enabled}
         if enabled:
@@ -90,8 +105,14 @@ class RemoteAccessService:
         expires_at: int,
         capabilities: list[str] | tuple[str, ...],
     ) -> dict[str, object]:
-        if not endpoint.startswith("tcp://") or not server_name or ":" not in endpoint[6:]:
-            raise RemoteViolation("remote endpoint must be an explicit TCP address protected by TLS")
+        if (
+            not endpoint.startswith("tcp://")
+            or not server_name
+            or ":" not in endpoint[6:]
+        ):
+            raise RemoteViolation(
+                "remote endpoint must be an explicit TCP address protected by TLS"
+            )
         if not device_name or len(device_name) > 128:
             raise RemoteViolation("remote device name is invalid")
         if (
@@ -112,7 +133,9 @@ class RemoteAccessService:
             or item in _RESERVED_AUTHORITIES
             for item in normalized
         ):
-            raise RemoteViolation("remote capabilities contain an invalid or Gideon-owned authority")
+            raise RemoteViolation(
+                "remote capabilities contain an invalid or Gideon-owned authority"
+            )
         plan: dict[str, object] = {
             "endpoint": endpoint,
             "server_name": server_name,
@@ -133,12 +156,14 @@ class RemoteAccessService:
         try:
             plan = self._pending.pop(Digest(plan_digest))
         except KeyError as exc:
-            raise RemoteViolation("remote enable requires the exact reviewed plan digest") from exc
+            raise RemoteViolation(
+                "remote enable requires the exact reviewed plan digest"
+            ) from exc
         device = {
             "device_id": Id(f"device-{str(plan_digest)[:24]}"),
             "name": plan["device_name"],
             "expires_at": plan["expires_at"],
-            "capabilities": tuple(plan["capabilities"]),
+            "capabilities": tuple(cast(list[str], plan["capabilities"])),
             "state": "active",
         }
         self._state = {
@@ -154,7 +179,7 @@ class RemoteAccessService:
     def revoke(self, device_id: Id) -> dict[str, object]:
         found = False
         devices: list[dict[str, object]] = []
-        for device in self._state.get("devices", []):
+        for device in cast(list[dict[str, object]], self._state.get("devices", [])):
             if device["device_id"] == device_id:
                 device = {**device, "state": "revoked"}
                 found = True
@@ -165,7 +190,9 @@ class RemoteAccessService:
         self._save()
         return self.status()
 
-    def invoke(self, operation: str, payload: Mapping[str, object]) -> dict[str, object]:
+    def invoke(
+        self, operation: str, payload: Mapping[str, object]
+    ) -> dict[str, object]:
         if operation == "remote.status":
             return self.status()
         if operation == "remote.enable.plan":
@@ -173,8 +200,8 @@ class RemoteAccessService:
                 endpoint=str(payload.get("endpoint", "")),
                 server_name=str(payload.get("server_name", "")),
                 device_name=str(payload.get("device_name", "")),
-                expires_at=payload.get("expires_at", 0),
-                capabilities=payload.get("capabilities", []),
+                expires_at=cast(int, payload.get("expires_at", 0)),
+                capabilities=cast(list[str], payload.get("capabilities", [])),
             )
         if operation == "remote.enable":
             return self.enable(Digest(payload.get("plan_digest", "")))
@@ -247,9 +274,17 @@ class RemoteEffectLedger:
         self._load()
         for record in tuple(self._records.values()):
             if record.state == "intent":
-                self.settle(record.effect_id, EffectState.NOT_STARTED, reason="restarted before dispatch")
+                self.settle(
+                    record.effect_id,
+                    EffectState.NOT_STARTED,
+                    reason="restarted before dispatch",
+                )
             elif record.state == "dispatched":
-                self.settle(record.effect_id, EffectState.UNKNOWN, reason="restarted after dispatch")
+                self.settle(
+                    record.effect_id,
+                    EffectState.UNKNOWN,
+                    reason="restarted after dispatch",
+                )
 
     def begin(self, call: FederatedCall) -> RemoteEffectRecord:
         if call.effect_id is None or call.input_digest is None:
@@ -288,9 +323,19 @@ class RemoteEffectLedger:
             if current.state == state.value:
                 return current
             raise RemoteViolation("effect is already settled")
-        digest = Digest.sha256(_canonical(result)) if state is EffectState.COMMITTED else None
+        digest = (
+            Digest.sha256(_canonical(result))
+            if state is EffectState.COMMITTED
+            else None
+        )
         return self._replace(
-            replace(current, state=state.value, result=result, result_digest=digest, reason=reason)
+            replace(
+                current,
+                state=state.value,
+                result=result,
+                result_digest=digest,
+                reason=reason,
+            )
         )
 
     def status(self, effect_id: Id) -> RemoteEffectRecord | None:
@@ -330,7 +375,9 @@ class RemoteEffectLedger:
                     operation=raw["operation"],
                     scope=Scope.from_wire(raw["scope"]),
                     state=raw["state"],
-                    result_digest=Digest(raw["result_digest"]) if "result_digest" in raw else None,
+                    result_digest=(
+                        Digest(raw["result_digest"]) if "result_digest" in raw else None
+                    ),
                     result=raw.get("result"),
                     reason=raw.get("reason"),
                 )
@@ -388,31 +435,51 @@ class RemoteModuleExecutor:
             working_directory = launch.working_directory.resolve(strict=True)
             executable.relative_to(working_directory)
         except (OSError, ValueError) as exc:
-            raise RemoteViolation("remote module executable escapes its working directory") from exc
-        if not executable.is_file() or Digest.sha256(executable.read_bytes()) != launch.executable_digest:
+            raise RemoteViolation(
+                "remote module executable escapes its working directory"
+            ) from exc
+        if (
+            not executable.is_file()
+            or Digest.sha256(executable.read_bytes()) != launch.executable_digest
+        ):
             raise RemoteViolation("remote module executable digest does not match")
         if os.fspath(launch.executable_path) not in launch.argv:
-            raise RemoteViolation("verified remote module executable is absent from argv")
+            raise RemoteViolation(
+                "verified remote module executable is absent from argv"
+            )
         for name, _value in launch.environment:
             upper = name.upper()
             if any(
                 token in upper
-                for token in ("AUTH", "CREDENTIAL", "KEY", "PASSWORD", "SECRET", "TOKEN")
+                for token in (
+                    "AUTH",
+                    "CREDENTIAL",
+                    "KEY",
+                    "PASSWORD",
+                    "SECRET",
+                    "TOKEN",
+                )
             ):
-                raise RemoteViolation("remote module environment cannot carry credentials")
+                raise RemoteViolation(
+                    "remote module environment cannot carry credentials"
+                )
         durable = call.effect is EffectClass.DURABLE
         if durable:
             current = self.ledger.begin(call)
             if current.state == EffectState.COMMITTED.value:
                 return current
             if current.state == EffectState.UNKNOWN.value:
-                raise RemoteOutcomeUnknown(current.reason or "remote effect outcome is unknown")
+                raise RemoteOutcomeUnknown(
+                    current.reason or "remote effect outcome is unknown"
+                )
             if current.state == EffectState.NOT_STARTED.value:
                 return current
         if cancellation is not None and cancellation.is_set():
             if durable and call.effect_id is not None:
                 return self.ledger.settle(
-                    call.effect_id, EffectState.NOT_STARTED, reason="cancelled before dispatch"
+                    call.effect_id,
+                    EffectState.NOT_STARTED,
+                    reason="cancelled before dispatch",
                 )
             raise asyncio.CancelledError
         handle = None
@@ -452,18 +519,28 @@ class RemoteModuleExecutor:
             process.stdin.close()
             read_task = asyncio.create_task(process.stdout.readline())
             cancel_task = (
-                asyncio.create_task(cancellation.wait()) if cancellation is not None else None
+                asyncio.create_task(cancellation.wait())
+                if cancellation is not None
+                else None
             )
             deadline = max(0.0, (call.deadline_ms - int(time.time() * 1000)) / 1000)
-            waiters = {read_task}
+            waiters: set[asyncio.Task[bytes] | asyncio.Task[bool]] = {read_task}
             if cancel_task is not None:
                 waiters.add(cancel_task)
-            done, _ = await asyncio.wait(waiters, timeout=deadline, return_when=asyncio.FIRST_COMPLETED)
+            done, _ = await asyncio.wait(
+                waiters, timeout=deadline, return_when=asyncio.FIRST_COMPLETED
+            )
             if read_task not in done:
                 await _terminate(process)
-                reason = "cancelled after dispatch" if cancel_task in done else "deadline elapsed after dispatch"
+                reason = (
+                    "cancelled after dispatch"
+                    if cancel_task in done
+                    else "deadline elapsed after dispatch"
+                )
                 if durable and call.effect_id is not None:
-                    self.ledger.settle(call.effect_id, EffectState.UNKNOWN, reason=reason)
+                    self.ledger.settle(
+                        call.effect_id, EffectState.UNKNOWN, reason=reason
+                    )
                     raise RemoteOutcomeUnknown(reason)
                 if cancel_task in done:
                     raise asyncio.CancelledError
@@ -477,9 +554,7 @@ class RemoteModuleExecutor:
                 kind = "empty" if not response_bytes else "oversized"
                 raise RemoteViolation(await _invalid_frame_reason(process, kind))
             wait_task = asyncio.create_task(process.wait())
-            remaining = max(
-                0.0, (call.deadline_ms - int(time.time() * 1000)) / 1000
-            )
+            remaining = max(0.0, (call.deadline_ms - int(time.time() * 1000)) / 1000)
             completion_waiters: set[asyncio.Task[object]] = {wait_task}
             if cancel_task is not None:
                 completion_waiters.add(cancel_task)
@@ -496,21 +571,29 @@ class RemoteModuleExecutor:
                     else "deadline elapsed after dispatch"
                 )
                 if durable and call.effect_id is not None:
-                    self.ledger.settle(call.effect_id, EffectState.UNKNOWN, reason=reason)
+                    self.ledger.settle(
+                        call.effect_id, EffectState.UNKNOWN, reason=reason
+                    )
                     raise RemoteOutcomeUnknown(reason)
                 if cancel_task in completed:
                     raise asyncio.CancelledError
                 raise TimeoutError(reason)
             if process.returncode != 0:
-                raise RemoteViolation("remote module exited without a committed response")
+                raise RemoteViolation(
+                    "remote module exited without a committed response"
+                )
             if await process.stdout.read(1):
                 raise RemoteViolation("remote module returned unsolicited extra frames")
             try:
                 response = json.loads(response_bytes)
             except (UnicodeError, json.JSONDecodeError) as exc:
                 raise RemoteViolation("remote module returned malformed JSON") from exc
-            if not isinstance(response, dict) or _RESERVED_AUTHORITIES.intersection(response):
-                raise RemoteViolation("remote module attempted to return Gideon-owned authority")
+            if not isinstance(response, dict) or _RESERVED_AUTHORITIES.intersection(
+                response
+            ):
+                raise RemoteViolation(
+                    "remote module attempted to return Gideon-owned authority"
+                )
             if set(response) != {"result"}:
                 raise RemoteViolation("remote module response fields are invalid")
             if durable and call.effect_id is not None:
@@ -535,7 +618,9 @@ class RemoteModuleExecutor:
                 state = EffectState.UNKNOWN if dispatched else EffectState.NOT_STARTED
                 record = self.ledger.settle(call.effect_id, state, reason=str(exc))
                 if state is EffectState.UNKNOWN:
-                    raise RemoteOutcomeUnknown(record.reason or "remote effect outcome is unknown") from exc
+                    raise RemoteOutcomeUnknown(
+                        record.reason or "remote effect outcome is unknown"
+                    ) from exc
                 return record
             raise
         finally:
@@ -563,9 +648,7 @@ async def _terminate(process: asyncio.subprocess.Process) -> None:
         await process.wait()
 
 
-async def _invalid_frame_reason(
-    process: asyncio.subprocess.Process, kind: str
-) -> str:
+async def _invalid_frame_reason(process: asyncio.subprocess.Process, kind: str) -> str:
     if process.returncode is None:
         try:
             await asyncio.wait_for(process.wait(), timeout=0.5)

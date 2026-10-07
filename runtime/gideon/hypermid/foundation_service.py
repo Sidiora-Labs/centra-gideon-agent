@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Mapping, Protocol, TypeAlias
+from typing import Any, Mapping, Protocol, TypeAlias, cast
 
 from .bus import BusMessage
 from .compaction import CompactionProvider
@@ -130,7 +130,9 @@ class FoundationLocalBus:
                         str(message.id),
                         message.subject,
                         str(message.digest),
-                        json.dumps(dict(message.headers), separators=(",", ":"), sort_keys=True),
+                        json.dumps(
+                            dict(message.headers), separators=(",", ":"), sort_keys=True
+                        ),
                         str(message.trace.trace_id),
                         str(message.trace.request_id),
                         payload,
@@ -294,7 +296,9 @@ class FoundationService:
         params: Mapping[str, Any],
         trace: Trace,
     ) -> RoleOutcome | Error:
-        return self._invoke_role(scope, "compaction", self._compaction, method, params, trace)
+        return self._invoke_role(
+            scope, "compaction", self._compaction, method, params, trace
+        )
 
     def invoke_transform(
         self,
@@ -303,7 +307,9 @@ class FoundationService:
         params: Mapping[str, Any],
         trace: Trace,
     ) -> RoleOutcome | Error:
-        return self._invoke_role(scope, "transform", self._transform, method, params, trace)
+        return self._invoke_role(
+            scope, "transform", self._transform, method, params, trace
+        )
 
     def emit_trace(
         self,
@@ -325,7 +331,8 @@ class FoundationService:
         now = datetime.now(UTC)
         record = redact_record(
             LogRecord(
-                timestamp=timestamp or now.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                timestamp=timestamp
+                or now.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
                 level=level,
                 logger="hypermid.foundation",
                 message=message,
@@ -335,7 +342,9 @@ class FoundationService:
             self._redaction,
         )
         try:
-            self._log_writer.append(utc_date or now.date().isoformat(), format_line(record))
+            self._log_writer.append(
+                utc_date or now.date().isoformat(), format_line(record)
+            )
         except Exception:
             self._settle(intent, "unknown", None, None)
             return _error(
@@ -362,7 +371,11 @@ class FoundationService:
         if isinstance(discovery, Error):
             return discovery
         role_description = next(
-            (item for item in discovery if item.role == role and method in item.operations),
+            (
+                item
+                for item in discovery
+                if item.role == role and method in item.operations
+            ),
             None,
         )
         if role_description is None:
@@ -403,16 +416,19 @@ class FoundationService:
 
     def _record_intent(self, kind: str, trace: Trace) -> int | Error:
         try:
-            return self._store.fenced_transaction(
-                self._store.fence,
-                lambda connection: connection.execute(
-                    """
+            return cast(
+                int,
+                self._store.fenced_transaction(
+                    self._store.fence,
+                    lambda connection: connection.execute(
+                        """
                     INSERT INTO hypermid_foundation_events(
                         kind, state, trace_id, request_id
                     ) VALUES (?, 'intent', ?, ?)
                     """,
-                    (kind, str(trace.trace_id), str(trace.request_id)),
-                ).lastrowid,
+                        (kind, str(trace.trace_id), str(trace.request_id)),
+                    ).lastrowid,
+                ),
             )
         except Exception:
             return _error(

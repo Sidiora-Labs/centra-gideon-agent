@@ -12,7 +12,7 @@ from typing import Any
 
 from .client import EventSubscription, HypermidClient, HypermidProtocolError
 from .foundation import Cursor, Digest, Id, Scope, Trace
-from .models import Envelope, Principal, SubscriptionSnapshot
+from .models import Envelope, JsonValue, Principal, SubscriptionSnapshot
 
 
 def _canonical_payload(value: object) -> bytes:
@@ -66,15 +66,28 @@ class ScopedEvent:
         delivery_count = value.get("delivery_count", 1)
         if not isinstance(topic, str) or not topic or len(topic) > 256:
             raise HypermidProtocolError("event topic is invalid")
-        if not isinstance(schema_name, str) or not schema_name or len(schema_name) > 160:
+        if (
+            not isinstance(schema_name, str)
+            or not schema_name
+            or len(schema_name) > 160
+        ):
             raise HypermidProtocolError("event schema name is invalid")
-        if any(isinstance(item, bool) or not isinstance(item, int) or item < 0 for item in (at_ms, schema_version)):
+        if any(
+            isinstance(item, bool) or not isinstance(item, int) or item < 0
+            for item in (at_ms, schema_version)
+        ):
             raise HypermidProtocolError("event numeric metadata is invalid")
-        if isinstance(delivery_count, bool) or not isinstance(delivery_count, int) or delivery_count < 1:
+        if (
+            isinstance(delivery_count, bool)
+            or not isinstance(delivery_count, int)
+            or delivery_count < 1
+        ):
             raise HypermidProtocolError("event delivery count is invalid")
         digest = Digest(value["payload_digest"])
         if Digest.sha256(_canonical_payload(value["payload"])) != digest:
-            raise HypermidProtocolError("event payload digest does not match its payload")
+            raise HypermidProtocolError(
+                "event payload digest does not match its payload"
+            )
         trace_value = value.get("trace")
         return cls(
             event_id=Id(value["event_id"]),
@@ -130,8 +143,15 @@ class ResumeStore:
         except FileNotFoundError:
             return None
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            raise HypermidProtocolError("subscription resume state is unreadable") from exc
-        if not isinstance(raw, dict) or set(raw) != {"consumer_id", "scope", "topic_filter", "cursor"}:
+            raise HypermidProtocolError(
+                "subscription resume state is unreadable"
+            ) from exc
+        if not isinstance(raw, dict) or set(raw) != {
+            "consumer_id",
+            "scope",
+            "topic_filter",
+            "cursor",
+        }:
             raise HypermidProtocolError("subscription resume state is invalid")
         return ResumePoint(
             consumer_id=Id(raw["consumer_id"]),
@@ -198,14 +218,23 @@ class DurableSubscription(AsyncIterator[ScopedEvent]):
 
     def _validate_event(self, event: ScopedEvent) -> None:
         if event.scope != self.point.scope:
-            raise HypermidProtocolError("daemon delivered an event outside the subscription scope")
-        if event.cursor.epoch != self._last_seen.epoch or event.cursor.sequence <= self._last_seen.sequence:
-            raise HypermidProtocolError("daemon delivered a replayed, reordered, or foreign-epoch event")
+            raise HypermidProtocolError(
+                "daemon delivered an event outside the subscription scope"
+            )
+        if (
+            event.cursor.epoch != self._last_seen.epoch
+            or event.cursor.sequence <= self._last_seen.sequence
+        ):
+            raise HypermidProtocolError(
+                "daemon delivered a replayed, reordered, or foreign-epoch event"
+            )
         self._last_seen = event.cursor
 
     async def acknowledge(self, event: ScopedEvent) -> None:
         if event.scope != self.point.scope:
-            raise HypermidProtocolError("cannot acknowledge an event from another scope")
+            raise HypermidProtocolError(
+                "cannot acknowledge an event from another scope"
+            )
         await self.client.request(
             "events.ack",
             {
@@ -262,7 +291,9 @@ class SubscriptionClient:
         trace: Trace | None = None,
     ) -> ScopedEvent:
         if scope != self.client.scope:
-            raise HypermidProtocolError("event scope does not match the authenticated session")
+            raise HypermidProtocolError(
+                "event scope does not match the authenticated session"
+            )
         draft: dict[str, Any] = {
             "event_id": str(event_id),
             "topic": topic,
@@ -289,18 +320,28 @@ class SubscriptionClient:
         after_cursor: Cursor | None = None,
     ) -> DurableSubscription:
         if scope != self.client.scope:
-            raise HypermidProtocolError("subscription scope does not match the authenticated session")
+            raise HypermidProtocolError(
+                "subscription scope does not match the authenticated session"
+            )
         stored = resume_store.load() if resume_store is not None else None
         if stored is not None and (
             stored.consumer_id != consumer_id
             or stored.scope != scope
             or stored.topic_filter != topic_filter
         ):
-            raise HypermidProtocolError("stored subscription identity does not match this request")
-        if stored is not None and after_cursor is not None and stored.cursor != after_cursor:
-            raise HypermidProtocolError("explicit cursor conflicts with durable resume state")
+            raise HypermidProtocolError(
+                "stored subscription identity does not match this request"
+            )
+        if (
+            stored is not None
+            and after_cursor is not None
+            and stored.cursor != after_cursor
+        ):
+            raise HypermidProtocolError(
+                "explicit cursor conflicts with durable resume state"
+            )
         after = stored.cursor if stored is not None else after_cursor
-        request: dict[str, object] = {
+        request: dict[str, JsonValue] = {
             "consumer_id": str(consumer_id),
             "scope": scope.to_wire(),
             "topic_filter": topic_filter,
@@ -326,14 +367,18 @@ class SubscriptionClient:
             raise
         if not isinstance(result, Mapping):
             await stream.close()
-            raise HypermidProtocolError("daemon returned an invalid subscription snapshot")
+            raise HypermidProtocolError(
+                "daemon returned an invalid subscription snapshot"
+            )
         try:
             snapshot_cursor = Cursor.from_wire(
                 result.get("cursor", result.get("snapshot_cursor"))
             )
             subscription_id = Id(result.get("subscription_id", consumer_id))
             if subscription_id != consumer_id:
-                raise HypermidProtocolError("daemon changed the durable consumer identity")
+                raise HypermidProtocolError(
+                    "daemon changed the durable consumer identity"
+                )
             replay_value = result.get("replay", [])
             if not isinstance(replay_value, list):
                 raise HypermidProtocolError("subscription replay must be an array")

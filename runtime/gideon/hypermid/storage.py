@@ -7,7 +7,7 @@ import sqlite3
 import stat
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Literal, TypeVar
+from typing import BinaryIO, Callable, Iterable, Literal, TypeVar
 
 
 class StorageError(RuntimeError):
@@ -74,7 +74,7 @@ class SQLiteStore:
         self,
         path: Path,
         connection: sqlite3.Connection,
-        lease_file: object,
+        lease_file: BinaryIO,
         fence: Fence,
         status: StoreStatus,
     ) -> None:
@@ -104,9 +104,7 @@ class SQLiteStore:
         if store_path.exists() and not stat.S_ISREG(store_path.lstat().st_mode):
             raise StorageError(f"store path is not a regular file: {store_path}")
 
-        lease_file, fence = _acquire_local_lease(
-            Path(f"{store_path}.lease"), lease_key
-        )
+        lease_file, fence = _acquire_local_lease(Path(f"{store_path}.lease"), lease_key)
         try:
             from gideon.core.database_privacy import prepare_database
 
@@ -210,9 +208,11 @@ class SQLiteStore:
 
 def postgres_database_name(module_id: str) -> str:
     slug = "".join(
-        character.lower()
-        if character.isascii() and (character.isalnum() or character == "_")
-        else "_"
+        (
+            character.lower()
+            if character.isascii() and (character.isalnum() or character == "_")
+            else "_"
+        )
         for character in module_id
     )
     if not slug or slug[0].isdigit():
@@ -224,12 +224,13 @@ def postgres_database_name(module_id: str) -> str:
 def _validate_migrations(migrations: tuple[Migration, ...]) -> None:
     for expected, migration in enumerate(migrations, start=1):
         if migration.version != expected or not migration.name:
-            raise StorageError("migration versions must be consecutive and begin at one")
+            raise StorageError(
+                "migration versions must be consecutive and begin at one"
+            )
 
 
 def _initialize_metadata(connection: sqlite3.Connection) -> None:
-    connection.executescript(
-        """
+    connection.executescript("""
         BEGIN IMMEDIATE;
         CREATE TABLE IF NOT EXISTS hypermid_migrations (
             version INTEGER PRIMARY KEY,
@@ -245,8 +246,7 @@ def _initialize_metadata(connection: sqlite3.Connection) -> None:
             PRIMARY KEY(module_id, backend, scope_key)
         );
         COMMIT;
-        """
-    )
+        """)
 
 
 def _read_applied(connection: sqlite3.Connection) -> list[tuple[int, str, str]]:
@@ -267,7 +267,9 @@ def _validate_applied(
         if expected <= len(migrations):
             migration = migrations[expected - 1]
             if name != migration.name or digest != migration.digest:
-                raise StorageError(f"migration {version} differs from its recorded value")
+                raise StorageError(
+                    f"migration {version} differs from its recorded value"
+                )
 
 
 def _apply_migration(connection: sqlite3.Connection, migration: Migration) -> None:
@@ -287,7 +289,7 @@ def _apply_migration(connection: sqlite3.Connection, migration: Migration) -> No
         raise
 
 
-def _acquire_local_lease(path: Path, key: LeaseKey) -> tuple[object, Fence]:
+def _acquire_local_lease(path: Path, key: LeaseKey) -> tuple[BinaryIO, Fence]:
     if path.exists() and not stat.S_ISREG(path.lstat().st_mode):
         raise StorageError(f"lease path is not a regular file: {path}")
     flags = os.O_RDWR | os.O_CREAT

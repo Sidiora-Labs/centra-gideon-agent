@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from gideon.cognition.memory_service import MemoryService
+
 import hashlib
 import json
 import os
@@ -10,11 +15,11 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
 
+from .contracts import GideonLegacySnapshot as ContractLegacySnapshot
+from .contracts import LegacyConversationLogEvidence as ContractConversationLogEvidence
+from .contracts import LegacyKnowledgeCategory as ContractKnowledgeCategory
+from .contracts import LegacySourceItem as ContractSourceItem
 from .contracts import (
-    GideonLegacySnapshot as ContractLegacySnapshot,
-    LegacyConversationLogEvidence as ContractConversationLogEvidence,
-    LegacyKnowledgeCategory as ContractKnowledgeCategory,
-    LegacySourceItem as ContractSourceItem,
     MutationRequest,
 )
 from .foundation import Cursor, Digest, Id, Scope
@@ -66,7 +71,9 @@ def canonical_bytes(value: object) -> bytes:
             sort_keys=True,
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
-        raise MigrationError("INVALID_JSON", "migration data is not canonical JSON") from exc
+        raise MigrationError(
+            "INVALID_JSON", "migration data is not canonical JSON"
+        ) from exc
 
 
 def canonical_digest(value: object) -> Digest:
@@ -120,7 +127,9 @@ def _json_value(value: object) -> Any:
         return [_json_value(child) for child in value]
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
-    raise MigrationError("INVALID_SOURCE", f"unsupported source value {type(value).__name__}")
+    raise MigrationError(
+        "INVALID_SOURCE", f"unsupported source value {type(value).__name__}"
+    )
 
 
 def _decoded(value: object) -> object:
@@ -266,7 +275,9 @@ class GideonSourceSnapshot:
         )
         keys = [(item.source_digest, item.item_key) for item in ordered_items]
         if len(set(keys)) != len(keys):
-            raise MigrationError("DUPLICATE_SOURCE", "source item identity is duplicated")
+            raise MigrationError(
+                "DUPLICATE_SOURCE", "source item identity is duplicated"
+            )
         logs = tuple(sorted(conversation_logs, key=lambda item: item.relative_path))
         material = {
             "scope": scope.to_wire(),
@@ -312,14 +323,20 @@ class GideonSourceSnapshot:
         )
 
 
-def fingerprint_conversation_logs(root: str | os.PathLike[str]) -> tuple[ConversationLogEvidence, ...]:
+def fingerprint_conversation_logs(
+    root: str | os.PathLike[str],
+) -> tuple[ConversationLogEvidence, ...]:
     base = Path(root).resolve(strict=True)
     if not base.is_dir():
-        raise MigrationError("INVALID_CONVERSATION_LOG", "ConversationLog root is not a directory")
+        raise MigrationError(
+            "INVALID_CONVERSATION_LOG", "ConversationLog root is not a directory"
+        )
     evidence: list[ConversationLogEvidence] = []
     for candidate in sorted(base.rglob("*.jsonl")):
         if candidate.is_symlink() or not stat.S_ISREG(candidate.stat().st_mode):
-            raise MigrationError("INVALID_CONVERSATION_LOG", "ConversationLog contains an unsafe entry")
+            raise MigrationError(
+                "INVALID_CONVERSATION_LOG", "ConversationLog contains an unsafe entry"
+            )
         data = candidate.read_bytes()
         evidence.append(
             ConversationLogEvidence(
@@ -334,7 +351,9 @@ def fingerprint_conversation_logs(root: str | os.PathLike[str]) -> tuple[Convers
 class GideonMemorySource:
     """Read every legacy MemoryService surface without copying transcript JSONL."""
 
-    def __init__(self, scope: Scope, memory_service: object, journal: object | None = None) -> None:
+    def __init__(
+        self, scope: Scope, memory_service: MemoryService, journal: object | None = None
+    ) -> None:
         self.scope = scope
         self.memory = memory_service
         self.journal = journal
@@ -403,7 +422,14 @@ class GideonMemorySource:
                 )
         for index, row in enumerate(self.memory.slots()):
             key = str(row.get("id") or row.get("name") or index)
-            items.append(SourceItem.build(f"slot:{key}", KnowledgeCategory.SLOT, f"MemoryService:slot:{key}", row))
+            items.append(
+                SourceItem.build(
+                    f"slot:{key}",
+                    KnowledgeCategory.SLOT,
+                    f"MemoryService:slot:{key}",
+                    row,
+                )
+            )
         for index, row in enumerate(self.memory.graph_entities()):
             key = str(row.get("id") or index)
             items.append(
@@ -445,7 +471,11 @@ class GideonMemorySource:
             if len(page) < 500:
                 break
             offset += len(page)
-        logs = fingerprint_conversation_logs(conversation_log_root) if conversation_log_root is not None else ()
+        logs = (
+            fingerprint_conversation_logs(conversation_log_root)
+            if conversation_log_root is not None
+            else ()
+        )
         return GideonSourceSnapshot.build(self.scope, items, logs)
 
 
@@ -488,13 +518,19 @@ class DestinationValidation:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "batch_id", Id(self.batch_id))
-        object.__setattr__(self, "migration_source_digest", Digest(self.migration_source_digest))
+        object.__setattr__(
+            self, "migration_source_digest", Digest(self.migration_source_digest)
+        )
         object.__setattr__(self, "destination_digest", Digest(self.destination_digest))
         if self.state != "applied":
-            raise MigrationError("DESTINATION_NOT_APPLIED", "Rust memory import is not applied")
+            raise MigrationError(
+                "DESTINATION_NOT_APPLIED", "Rust memory import is not applied"
+            )
         for value in (self.record_count, self.item_count):
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise MigrationError("INVALID_DESTINATION", "destination counts are invalid")
+                raise MigrationError(
+                    "INVALID_DESTINATION", "destination counts are invalid"
+                )
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -522,7 +558,9 @@ class RustLegacyImport:
         verification_export_id: Id,
     ) -> None:
         if memory.scope != snapshot.scope:
-            raise MigrationError("SCOPE_MISMATCH", "memory client scope differs from migration")
+            raise MigrationError(
+                "SCOPE_MISMATCH", "memory client scope differs from migration"
+            )
         self.memory = memory
         self.snapshot = snapshot
         self.request = request
@@ -591,8 +629,12 @@ class MigrationStore:
         self.scope = scope
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.path.parent, 0o700)
-        if self.path.exists() and (self.path.is_symlink() or not stat.S_ISREG(self.path.stat().st_mode)):
-            raise MigrationError("INVALID_STORE", "migration store must be a regular file")
+        if self.path.exists() and (
+            self.path.is_symlink() or not stat.S_ISREG(self.path.stat().st_mode)
+        ):
+            raise MigrationError(
+                "INVALID_STORE", "migration store must be a regular file"
+            )
         self._db = sqlite3.connect(self.path, isolation_level=None)
         self._db.row_factory = sqlite3.Row
         try:
@@ -606,8 +648,7 @@ class MigrationStore:
         os.chmod(self.path, 0o600)
 
     def _initialize(self) -> None:
-        self._db.executescript(
-            """
+        self._db.executescript("""
             BEGIN IMMEDIATE;
             CREATE TABLE IF NOT EXISTS migration_meta (
                 singleton INTEGER PRIMARY KEY CHECK(singleton=1),
@@ -652,23 +693,31 @@ class MigrationStore:
                 receipt_digest TEXT NOT NULL
             );
             COMMIT;
-            """
-        )
+            """)
         scope_json = canonical_bytes(self.scope.to_wire()).decode("utf-8")
         self._db.execute("BEGIN IMMEDIATE")
         try:
-            row = self._db.execute("SELECT schema_version, scope_json FROM migration_meta WHERE singleton=1").fetchone()
+            row = self._db.execute(
+                "SELECT schema_version, scope_json FROM migration_meta WHERE singleton=1"
+            ).fetchone()
             if row is None:
                 self._db.execute(
                     "INSERT INTO migration_meta VALUES (1, ?, ?, 'gideon', 1, NULL, NULL, NULL)",
                     (MIGRATION_SCHEMA_VERSION, scope_json),
                 )
             elif int(row["schema_version"]) > MIGRATION_SCHEMA_VERSION:
-                raise MigrationError("STORE_AHEAD", "migration store is newer than this runtime")
+                raise MigrationError(
+                    "STORE_AHEAD", "migration store is newer than this runtime"
+                )
             elif int(row["schema_version"]) < MIGRATION_SCHEMA_VERSION:
-                raise MigrationError("MIGRATION_REQUIRED", "older migration store is read-only pending explicit migration")
+                raise MigrationError(
+                    "MIGRATION_REQUIRED",
+                    "older migration store is read-only pending explicit migration",
+                )
             elif row["scope_json"] != scope_json:
-                raise MigrationError("SCOPE_MISMATCH", "migration store belongs to another scope")
+                raise MigrationError(
+                    "SCOPE_MISMATCH", "migration store belongs to another scope"
+                )
             self._db.commit()
         except BaseException:
             self._db.rollback()
@@ -697,17 +746,27 @@ class MigrationStore:
 
     def import_snapshot(self, snapshot: GideonSourceSnapshot) -> ImportReceipt:
         if snapshot.scope != self.scope:
-            raise MigrationError("SCOPE_MISMATCH", "source snapshot belongs to another scope")
+            raise MigrationError(
+                "SCOPE_MISMATCH", "source snapshot belongs to another scope"
+            )
         prepared = [(item, self._destination(item)) for item in snapshot.items]
         self._db.execute("BEGIN IMMEDIATE")
         imported = existing_count = 0
         try:
-            meta = self._db.execute("SELECT authority, source_digest FROM migration_meta WHERE singleton=1").fetchone()
+            meta = self._db.execute(
+                "SELECT authority, source_digest FROM migration_meta WHERE singleton=1"
+            ).fetchone()
             if meta["authority"] != "gideon":
-                raise MigrationError("ALREADY_CUT_OVER", "cannot import after authority cutover")
+                raise MigrationError(
+                    "ALREADY_CUT_OVER", "cannot import after authority cutover"
+                )
             if meta["source_digest"] not in (None, str(snapshot.source_digest)):
-                raise MigrationError("SOURCE_CHANGED", "migration source changed after import began")
-            tail = self._db.execute("SELECT sequence, entry_digest FROM imported_items ORDER BY sequence DESC LIMIT 1").fetchone()
+                raise MigrationError(
+                    "SOURCE_CHANGED", "migration source changed after import began"
+                )
+            tail = self._db.execute(
+                "SELECT sequence, entry_digest FROM imported_items ORDER BY sequence DESC LIMIT 1"
+            ).fetchone()
             sequence = 0 if tail is None else int(tail["sequence"])
             previous = "0" * 64 if tail is None else str(tail["entry_digest"])
             for item, destination_digest in prepared:
@@ -717,7 +776,10 @@ class MigrationStore:
                 ).fetchone()
                 if row is not None:
                     if row["destination_digest"] != str(destination_digest):
-                        raise MigrationError("IMPORT_CONFLICT", "idempotency key resolves to different content")
+                        raise MigrationError(
+                            "IMPORT_CONFLICT",
+                            "idempotency key resolves to different content",
+                        )
                     existing_count += 1
                     continue
                 sequence += 1
@@ -757,7 +819,9 @@ class MigrationStore:
                         (evidence.relative_path, *expected),
                     )
                 elif tuple(row) != expected:
-                    raise MigrationError("SOURCE_CHANGED", "ConversationLog evidence changed")
+                    raise MigrationError(
+                        "SOURCE_CHANGED", "ConversationLog evidence changed"
+                    )
             if imported:
                 self._db.execute(
                     "UPDATE migration_meta SET source_digest=?, validation_digest=NULL, destination_digest=? WHERE singleton=1",
@@ -772,7 +836,13 @@ class MigrationStore:
         except BaseException:
             self._db.rollback()
             raise
-        return ImportReceipt(snapshot.source_digest, Cursor(1, sequence), imported, existing_count, Digest(previous))
+        return ImportReceipt(
+            snapshot.source_digest,
+            Cursor(1, sequence),
+            imported,
+            existing_count,
+            Digest(previous),
+        )
 
     def validate(
         self,
@@ -782,22 +852,38 @@ class MigrationStore:
         source_adapter: SourceAdapter | None = None,
     ) -> ValidationReceipt:
         if snapshot.scope != self.scope:
-            raise MigrationError("SCOPE_MISMATCH", "validation scope differs from target")
-        rows = self._db.execute("SELECT * FROM imported_items ORDER BY sequence").fetchall()
+            raise MigrationError(
+                "SCOPE_MISMATCH", "validation scope differs from target"
+            )
+        rows = self._db.execute(
+            "SELECT * FROM imported_items ORDER BY sequence"
+        ).fetchall()
         if len(rows) != len(snapshot.items):
-            raise MigrationError("COUNT_MISMATCH", "destination does not contain the full source inventory")
-        expected = {(str(item.source_digest), str(item.item_key)): item for item in snapshot.items}
+            raise MigrationError(
+                "COUNT_MISMATCH",
+                "destination does not contain the full source inventory",
+            )
+        expected = {
+            (str(item.source_digest), str(item.item_key)): item
+            for item in snapshot.items
+        }
         counts = {category.value: 0 for category in KnowledgeCategory}
         previous = "0" * 64
         for sequence, row in enumerate(rows, start=1):
             item = expected.get((row["source_digest"], row["item_key"]))
             if item is None or row["category"] != item.category.value:
-                raise MigrationError("SOURCE_MISMATCH", "destination item has no exact source")
+                raise MigrationError(
+                    "SOURCE_MISMATCH", "destination item has no exact source"
+                )
             destination_digest = self._destination(item)
             if row["destination_digest"] != str(destination_digest):
-                raise MigrationError("DIGEST_MISMATCH", "destination record digest is invalid")
+                raise MigrationError(
+                    "DIGEST_MISMATCH", "destination record digest is invalid"
+                )
             if row["previous_digest"] != previous:
-                raise MigrationError("CHAIN_MISMATCH", "destination digest chain is broken")
+                raise MigrationError(
+                    "CHAIN_MISMATCH", "destination digest chain is broken"
+                )
             entry_digest = canonical_digest(
                 {
                     "cursor": {"epoch": 1, "sequence": sequence},
@@ -806,7 +892,9 @@ class MigrationStore:
                 }
             )
             if row["entry_digest"] != str(entry_digest):
-                raise MigrationError("CHAIN_MISMATCH", "destination entry digest is invalid")
+                raise MigrationError(
+                    "CHAIN_MISMATCH", "destination entry digest is invalid"
+                )
             previous = str(entry_digest)
             counts[row["category"]] += 1
         if counts != snapshot.counts():
@@ -827,12 +915,21 @@ class MigrationStore:
         for bundle in context_bundles:
             validate_context_export(bundle, self.scope)
             if source_adapter is None:
-                raise MigrationError("SOURCE_UNAVAILABLE", "context validation requires ConversationLog source access")
+                raise MigrationError(
+                    "SOURCE_UNAVAILABLE",
+                    "context validation requires ConversationLog source access",
+                )
             for record in bundle.records:
                 if record.kind is ContextPortabilityEntryKind.SOURCE_REFERENCE:
-                    source = source_adapter.resolve(self.scope, bundle.binding.session_id, Id(record.payload["source_event_id"]))
+                    source = source_adapter.resolve(
+                        self.scope,
+                        bundle.binding.session_id,
+                        Id(record.payload["source_event_id"]),
+                    )
                     if Digest.sha256(source) != Digest(record.payload["source_digest"]):
-                        raise MigrationError("SUMMARY_SOURCE_MISMATCH", "context source bytes changed")
+                        raise MigrationError(
+                            "SUMMARY_SOURCE_MISMATCH", "context source bytes changed"
+                        )
             context_digests.append(canonical_digest(bundle.to_mapping()))
         validation = canonical_digest(
             {
@@ -840,7 +937,9 @@ class MigrationStore:
                 "source_digest": str(snapshot.source_digest),
                 "destination_digest": previous,
                 "counts": counts,
-                "conversation_logs": [entry.to_mapping() for entry in snapshot.conversation_logs],
+                "conversation_logs": [
+                    entry.to_mapping() for entry in snapshot.conversation_logs
+                ],
                 "context_digests": [str(value) for value in context_digests],
             }
         )
@@ -854,11 +953,22 @@ class MigrationStore:
         except BaseException:
             self._db.rollback()
             raise
-        return ValidationReceipt(snapshot.source_digest, Digest(previous), validation, Cursor(1, len(rows)), counts, tuple(context_digests))
+        return ValidationReceipt(
+            snapshot.source_digest,
+            Digest(previous),
+            validation,
+            Cursor(1, len(rows)),
+            counts,
+            tuple(context_digests),
+        )
 
     def status(self) -> dict[str, Any]:
-        meta = self._db.execute("SELECT * FROM migration_meta WHERE singleton=1").fetchone()
-        count = int(self._db.execute("SELECT COUNT(*) FROM imported_items").fetchone()[0])
+        meta = self._db.execute(
+            "SELECT * FROM migration_meta WHERE singleton=1"
+        ).fetchone()
+        count = int(
+            self._db.execute("SELECT COUNT(*) FROM imported_items").fetchone()[0]
+        )
         return {
             "scope": self.scope.to_wire(),
             "storage_version": int(meta["schema_version"]),
@@ -913,8 +1023,13 @@ class MigrationStore:
         return receipt_digest
 
     def _require_known_effects(self) -> None:
-        if self._db.execute("SELECT 1 FROM migration_effects WHERE effect_state='unknown' LIMIT 1").fetchone():
-            raise MigrationError("OUTCOME_UNKNOWN", "unknown effects must be reconciled before authority changes")
+        if self._db.execute(
+            "SELECT 1 FROM migration_effects WHERE effect_state='unknown' LIMIT 1"
+        ).fetchone():
+            raise MigrationError(
+                "OUTCOME_UNKNOWN",
+                "unknown effects must be reconciled before authority changes",
+            )
 
     def authority_digest(self) -> Digest:
         status = self.status()
@@ -937,25 +1052,38 @@ class MigrationStore:
     ) -> AuthorityReceipt:
         self._require_known_effects()
         if str(self.authority_digest()) != expected_authority_digest:
-            raise MigrationError("AUTHORITY_CHANGED", "authority changed after plan review")
+            raise MigrationError(
+                "AUTHORITY_CHANGED", "authority changed after plan review"
+            )
         if not writer.owns_writes or writer.lease is None:
             raise MigrationError(
                 "WRITER_BARRIER_REQUIRED",
                 "Hypermid authority requires an acquired writer barrier",
             )
         if writer.lease.scope != self.scope:
-            raise MigrationError("SCOPE_MISMATCH", "writer lease belongs to another scope")
+            raise MigrationError(
+                "SCOPE_MISMATCH", "writer lease belongs to another scope"
+            )
         receipt_digest = self.record_destination_validation(destination)
         self._db.execute("BEGIN IMMEDIATE")
         try:
-            meta = self._db.execute("SELECT * FROM migration_meta WHERE singleton=1").fetchone()
+            meta = self._db.execute(
+                "SELECT * FROM migration_meta WHERE singleton=1"
+            ).fetchone()
             if not meta["validation_digest"]:
-                raise MigrationError("VALIDATION_REQUIRED", "complete validation is required before cutover")
+                raise MigrationError(
+                    "VALIDATION_REQUIRED",
+                    "complete validation is required before cutover",
+                )
             if meta["authority"] != "gideon":
-                raise MigrationError("AUTHORITY_CONFLICT", "Gideon is no longer the writer")
+                raise MigrationError(
+                    "AUTHORITY_CONFLICT", "Gideon is no longer the writer"
+                )
             epoch = writer.lease.fence_epoch
             if epoch <= int(meta["writer_epoch"]):
-                raise MigrationError("STALE_FENCE", "writer barrier did not advance the epoch")
+                raise MigrationError(
+                    "STALE_FENCE", "writer barrier did not advance the epoch"
+                )
             checkpoint = canonical_digest(
                 {
                     "authority": "hypermid",
@@ -965,8 +1093,14 @@ class MigrationStore:
                     "destination_digest": str(destination.destination_digest),
                 }
             )
-            self._db.execute("UPDATE migration_meta SET authority='hypermid', writer_epoch=? WHERE singleton=1", (epoch,))
-            self._db.execute("INSERT INTO cutover_markers VALUES (?, 'hypermid', ?)", (epoch, str(checkpoint)))
+            self._db.execute(
+                "UPDATE migration_meta SET authority='hypermid', writer_epoch=? WHERE singleton=1",
+                (epoch,),
+            )
+            self._db.execute(
+                "INSERT INTO cutover_markers VALUES (?, 'hypermid', ?)",
+                (epoch, str(checkpoint)),
+            )
             self._db.commit()
         except BaseException:
             self._db.rollback()
@@ -981,7 +1115,9 @@ class MigrationStore:
     ) -> AuthorityReceipt:
         self._require_known_effects()
         if str(self.authority_digest()) != expected_authority_digest:
-            raise MigrationError("AUTHORITY_CHANGED", "authority changed after plan review")
+            raise MigrationError(
+                "AUTHORITY_CHANGED", "authority changed after plan review"
+            )
         restore = writer.restore_receipt
         if (
             writer.writer != "gideon"
@@ -996,14 +1132,22 @@ class MigrationStore:
             )
         self._db.execute("BEGIN IMMEDIATE")
         try:
-            meta = self._db.execute("SELECT * FROM migration_meta WHERE singleton=1").fetchone()
+            meta = self._db.execute(
+                "SELECT * FROM migration_meta WHERE singleton=1"
+            ).fetchone()
             if meta["authority"] != "hypermid":
-                raise MigrationError("AUTHORITY_CONFLICT", "Hypermid is not the active writer")
+                raise MigrationError(
+                    "AUTHORITY_CONFLICT", "Hypermid is not the active writer"
+                )
             if restore.prior_fence_epoch != int(meta["writer_epoch"]):
-                raise MigrationError("STALE_FENCE", "writer handback does not release the active epoch")
+                raise MigrationError(
+                    "STALE_FENCE", "writer handback does not release the active epoch"
+                )
             epoch = restore.gideon_epoch
             if epoch <= restore.prior_fence_epoch:
-                raise MigrationError("STALE_FENCE", "Gideon handback epoch is not newer")
+                raise MigrationError(
+                    "STALE_FENCE", "Gideon handback epoch is not newer"
+                )
             checkpoint = canonical_digest(
                 {
                     "authority": "gideon",
@@ -1013,8 +1157,14 @@ class MigrationStore:
                     "journal_digest": str(restore.journal_digest),
                 }
             )
-            self._db.execute("UPDATE migration_meta SET authority='gideon', writer_epoch=? WHERE singleton=1", (epoch,))
-            self._db.execute("INSERT INTO cutover_markers VALUES (?, 'gideon', ?)", (epoch, str(checkpoint)))
+            self._db.execute(
+                "UPDATE migration_meta SET authority='gideon', writer_epoch=? WHERE singleton=1",
+                (epoch,),
+            )
+            self._db.execute(
+                "INSERT INTO cutover_markers VALUES (?, 'gideon', ?)",
+                (epoch, str(checkpoint)),
+            )
             self._db.commit()
         except BaseException:
             self._db.rollback()
@@ -1029,7 +1179,11 @@ class MigrationStore:
 
     def conversation_logs_for_export(self) -> tuple[ConversationLogEvidence, ...]:
         return tuple(
-            ConversationLogEvidence(row["relative_path"], int(row["byte_length"]), Digest(row["source_digest"]))
+            ConversationLogEvidence(
+                row["relative_path"],
+                int(row["byte_length"]),
+                Digest(row["source_digest"]),
+            )
             for row in self._db.execute(
                 "SELECT relative_path, byte_length, source_digest FROM conversation_log_evidence ORDER BY relative_path"
             )
@@ -1052,12 +1206,20 @@ def negotiate_versions(
     supported_storage: int = MIGRATION_SCHEMA_VERSION,
 ) -> VersionHandshake:
     supported_protocols = {client_current, client_current - 1}
-    overlap = sorted(supported_protocols.intersection(range(server_min, server_max + 1)))
+    overlap = sorted(
+        supported_protocols.intersection(range(server_min, server_max + 1))
+    )
     if not overlap:
-        raise MigrationError("UNSUPPORTED_PROTOCOL", "client and daemon protocol ranges do not overlap")
+        raise MigrationError(
+            "UNSUPPORTED_PROTOCOL", "client and daemon protocol ranges do not overlap"
+        )
     if storage_version > supported_storage:
         raise MigrationError("STORE_AHEAD", "newer storage cannot be downgraded")
-    mode = "ready" if storage_version == supported_storage else "read_only_migration_required"
+    mode = (
+        "ready"
+        if storage_version == supported_storage
+        else "read_only_migration_required"
+    )
     return VersionHandshake(max(overlap), storage_version, mode)
 
 
@@ -1089,7 +1251,9 @@ class MigrationCoordinator:
             )
             self.context_imports.stage(staging_id, self.store.scope, bundle)
             if source_adapter is None:
-                raise MigrationError("SOURCE_UNAVAILABLE", "context source adapter is required")
+                raise MigrationError(
+                    "SOURCE_UNAVAILABLE", "context source adapter is required"
+                )
             validate_context_export(bundle, self.store.scope)
             self._validate_context_sources(bundle, source_adapter)
             source_ids = tuple(
@@ -1135,16 +1299,27 @@ class MigrationCoordinator:
                 self._staged_context.append(staging_id)
             if migration_id not in self._context_runs:
                 self._context_runs.append(migration_id)
-        return self.store.validate(snapshot, context_bundles=context_bundles, source_adapter=source_adapter)
+        return self.store.validate(
+            snapshot, context_bundles=context_bundles, source_adapter=source_adapter
+        )
 
     @staticmethod
-    def _validate_context_sources(bundle: ContextExportBundle, source_adapter: SourceAdapter) -> None:
+    def _validate_context_sources(
+        bundle: ContextExportBundle, source_adapter: SourceAdapter
+    ) -> None:
         for record in bundle.records:
             if record.kind is not ContextPortabilityEntryKind.SOURCE_REFERENCE:
                 continue
-            source = source_adapter.resolve(bundle.binding.scope, bundle.binding.session_id, Id(record.payload["source_event_id"]))
+            source = source_adapter.resolve(
+                bundle.binding.scope,
+                bundle.binding.session_id,
+                Id(record.payload["source_event_id"]),
+            )
             if Digest.sha256(source) != Digest(record.payload["source_digest"]):
-                raise MigrationError("SUMMARY_SOURCE_MISMATCH", "ConversationLog source digest does not match")
+                raise MigrationError(
+                    "SUMMARY_SOURCE_MISMATCH",
+                    "ConversationLog source digest does not match",
+                )
 
     async def cutover(
         self,

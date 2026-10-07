@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from .lifecycle import HypermidLifecycle
+
 import asyncio
 import hashlib
 import inspect
@@ -15,7 +20,6 @@ from .foundation import Id, Trace
 from .memory_client import MemoryClient
 from .models import JsonValue, Scope
 from .modules import HypermidModuleSupervisor
-
 
 IntegrationOperation = Literal["enable", "disable", "reconnect", "stop"]
 ConnectionState = Literal[
@@ -132,7 +136,9 @@ class SmartNoteConditionSource:
                 "condition source scope does not match its authenticated memory client"
             )
         if not 1 <= limit <= 32:
-            raise IntegrationStatusError("condition source limit must be between 1 and 32")
+            raise IntegrationStatusError(
+                "condition source limit must be between 1 and 32"
+            )
         self._client = client
         self.scope = scope
         self._limit = limit
@@ -217,7 +223,9 @@ class SmartNoteConditionSource:
             ]
             if candidate.next_evaluation_at_ms is not None:
                 facts.append(
-                    ObservedFact("Next evaluation", str(candidate.next_evaluation_at_ms))
+                    ObservedFact(
+                        "Next evaluation", str(candidate.next_evaluation_at_ms)
+                    )
                 )
             observations.append(
                 ConditionObservation(
@@ -229,7 +237,9 @@ class SmartNoteConditionSource:
                 )
             )
         self._transitions = {
-            key: value for key, value in self._transitions.items() if key in current_keys
+            key: value
+            for key, value in self._transitions.items()
+            if key in current_keys
         }
         return tuple(observations)
 
@@ -237,7 +247,9 @@ class SmartNoteConditionSource:
 @dataclass(frozen=True, slots=True)
 class ConnectionSnapshot:
     connection_id: str
-    kind: Literal["host", "module_supervisor", "stdio_module", "mcp_bridge", "mcp_module"]
+    kind: Literal[
+        "host", "module_supervisor", "stdio_module", "mcp_bridge", "mcp_module"
+    ]
     coverage: Literal["full_host", "tool_bridge"]
     transport: Literal["daemon", "stdio"]
     state: ConnectionState
@@ -313,7 +325,7 @@ class IntegrationStatusFacade:
         self,
         scope: Scope,
         *,
-        lifecycle: object | None = None,
+        lifecycle: HypermidLifecycle | None = None,
         module_supervisor: HypermidModuleSupervisor | None = None,
         mcp_bridge: McpBridgeStatusSource | None = None,
         condition_source: ConditionStatusSource | None = None,
@@ -393,8 +405,14 @@ class IntegrationStatusFacade:
                 item.connection_id
                 for item in (await self.snapshot(scope, session_key)).connections
             }
-            code = "operation_unsupported" if connection_id in known else "connection_unknown"
-            return IntegrationActionResult(connection_id, operation, "unsupported", code)
+            code = (
+                "operation_unsupported"
+                if connection_id in known
+                else "connection_unknown"
+            )
+            return IntegrationActionResult(
+                connection_id, operation, "unsupported", code
+            )
         except Exception:
             return IntegrationActionResult(
                 connection_id, operation, "failed", "lifecycle_failed"
@@ -419,10 +437,11 @@ class IntegrationStatusFacade:
         status = adapter.status()
         availability = str(getattr(status, "availability", "unavailable"))
         state: ConnectionState = (
-            availability
+            cast(ConnectionState, availability)
             if availability in {"disabled", "stopped", "unavailable"}
-            else "ready" if bool(getattr(status, "available", False))
-            else "disconnected"
+            else (
+                "ready" if bool(getattr(status, "available", False)) else "disconnected"
+            )
         )
         return ConnectionSnapshot(
             "hypermid-host",
@@ -540,9 +559,7 @@ class IntegrationStatusFacade:
                     (),
                     module_id=module_id,
                     connected_sessions=sessions,
-                    catalog_generation=_count(
-                        getattr(value, "catalog_generation", 0)
-                    ),
+                    catalog_generation=_count(getattr(value, "catalog_generation", 0)),
                     active_calls=_count(getattr(value, "active_calls", 0)),
                     process_ready=ready,
                 )
@@ -625,7 +642,9 @@ class IntegrationStatusFacade:
 
     def _require_scope(self, scope: Scope) -> None:
         if scope != self.scope:
-            raise IntegrationScopeError("integration scope does not match runtime scope")
+            raise IntegrationScopeError(
+                "integration scope does not match runtime scope"
+            )
 
 
 def _now_ms() -> int:
@@ -645,7 +664,11 @@ def _session_key(value: object) -> str:
 
 
 def _count(value: object) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 2**53 - 1:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= 2**53 - 1
+    ):
         raise IntegrationStatusError("integration count is invalid")
     return value
 

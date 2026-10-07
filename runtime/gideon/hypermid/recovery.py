@@ -5,11 +5,12 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping, cast
 
 from .diagnostics import MemoryRecoveryDiagnostics
 from .foundation import Cursor, Digest, Error, Id, Scope, Trace
 from .history import HistoryJournal, JournalRange, RecoveredItem, SourceAdapter
+from .models import JsonValue
 
 if TYPE_CHECKING:
     from .client import HypermidClient
@@ -191,7 +192,9 @@ class LastKnownGood:
             raise RecoveryError("last-known-good record is corrupt or partial") from exc
         if not isinstance(projection, Mapping):
             raise RecoveryError("last-known-good projection must be an object")
-        expected = RecoveryBinding.from_projection(projection, self.binding.model_budget)
+        expected = RecoveryBinding.from_projection(
+            projection, self.binding.model_budget
+        )
         blocks = projection.get("blocks")
         if (
             expected != self.binding
@@ -373,7 +376,11 @@ def rebuild_from_journal(
 
 def _canonical(value: object) -> bytes:
     return json.dumps(
-        value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
     ).encode()
 
 
@@ -404,7 +411,11 @@ class MemorySnapshotReceipt:
     def __post_init__(self) -> None:
         object.__setattr__(self, "manifest_digest", Digest(self.manifest_digest))
         object.__setattr__(self, "image_digest", Digest(self.image_digest))
-        if isinstance(self.byte_length, bool) or not isinstance(self.byte_length, int) or self.byte_length < 0:
+        if (
+            isinstance(self.byte_length, bool)
+            or not isinstance(self.byte_length, int)
+            or self.byte_length < 0
+        ):
             raise RecoveryError("memory snapshot byte length is invalid")
 
     def to_mapping(self) -> dict[str, Any]:
@@ -443,7 +454,11 @@ class MemoryRestoreReceipt:
     def __post_init__(self) -> None:
         object.__setattr__(self, "manifest_digest", Digest(self.manifest_digest))
         object.__setattr__(self, "active_digest", Digest(self.active_digest))
-        if isinstance(self.byte_length, bool) or not isinstance(self.byte_length, int) or self.byte_length < 0:
+        if (
+            isinstance(self.byte_length, bool)
+            or not isinstance(self.byte_length, int)
+            or self.byte_length < 0
+        ):
             raise RecoveryError("memory restore byte length is invalid")
 
     def to_mapping(self) -> dict[str, Any]:
@@ -483,7 +498,7 @@ class MemoryRecoveryClient:
             trace=trace,
             effect_kind="query",
         )
-        return MemoryRecoveryDiagnostics.from_wire(value)
+        return MemoryRecoveryDiagnostics.from_wire(cast(Mapping[str, JsonValue], value))
 
     async def snapshot(
         self, *, scope: Scope, artifact_id: Id, trace: Trace
@@ -622,9 +637,7 @@ class StartupRecoveryStatus:
             or self.observed_at_ms < 0
             or self.mode not in {"ready", "read_only_recovery"}
             or any(
-                isinstance(version, bool)
-                or not isinstance(version, int)
-                or version < 1
+                isinstance(version, bool) or not isinstance(version, int) or version < 1
                 for version in self.unfinished_migration_versions
             )
             or tuple(sorted(set(self.unfinished_migration_versions)))

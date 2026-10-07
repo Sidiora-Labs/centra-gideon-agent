@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from gideon.integrations.tool_providers.base import RiskLevel
+
 import asyncio
 import json
 from dataclasses import dataclass
@@ -121,10 +126,14 @@ class HypermidRoleToolProvider(ToolProvider):
         async with self._catalog_lock:
             response = await self._request("catalog", self._catalog_request)
             result = _require_result(response)
-            generation = _positive_integer(result.get("generation"), "catalog generation")
+            generation = _positive_integer(
+                result.get("generation"), "catalog generation"
+            )
             tools = result.get("tools")
             session_capabilities = result.get("session_capabilities", [])
-            if not isinstance(tools, list) or not isinstance(session_capabilities, list):
+            if not isinstance(tools, list) or not isinstance(
+                session_capabilities, list
+            ):
                 raise HypermidToolViolation("tool catalog is malformed")
             parsed: dict[str, _CatalogTool] = {}
             for raw in tools:
@@ -155,7 +164,9 @@ class HypermidRoleToolProvider(ToolProvider):
                 )
         tool = self._catalog.get(tool_name)
         if tool is None:
-            return _failure("tool is not owned by this Hypermid provider", EffectState.NOT_STARTED)
+            return _failure(
+                "tool is not owned by this Hypermid provider", EffectState.NOT_STARTED
+            )
         call_key = f"call-{uuid4().hex}"
         self._active_calls.add(call_key)
         try:
@@ -181,17 +192,34 @@ class HypermidRoleToolProvider(ToolProvider):
             return _error_result(response["error"], call_key)
         result = response.get("result")
         if not isinstance(result, Mapping) or result.get("kind") != "final":
-            return _failure("Hypermid tool omitted its terminal frame", EffectState.UNKNOWN, call_key=call_key)
+            return _failure(
+                "Hypermid tool omitted its terminal frame",
+                EffectState.UNKNOWN,
+                call_key=call_key,
+            )
         value = result.get("result")
-        output = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        output = (
+            value
+            if isinstance(value, str)
+            else json.dumps(
+                value, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+            )
+        )
         return ToolResult(
             True,
             output=output,
-            metadata={"call_key": call_key, "effect_state": EffectState.COMMITTED.value},
+            metadata={
+                "call_key": call_key,
+                "effect_state": EffectState.COMMITTED.value,
+            },
         )
 
     async def cancel(self, call_key: str, requester_id: Id) -> CancellationOutcome:
-        if not call_key or len(call_key) > 256 or any(character.isprintable() is False for character in call_key):
+        if (
+            not call_key
+            or len(call_key) > 256
+            or any(character.isprintable() is False for character in call_key)
+        ):
             raise HypermidToolViolation("call key is invalid")
         response = await self._request(
             "withdraw",
@@ -204,7 +232,11 @@ class HypermidRoleToolProvider(ToolProvider):
         )
         if "error" in response:
             error = response["error"]
-            effect = _effect_state(error.get("effect_state"), EffectState.NOT_STARTED) if isinstance(error, Mapping) else EffectState.NOT_STARTED
+            effect = (
+                _effect_state(error.get("effect_state"), EffectState.NOT_STARTED)
+                if isinstance(error, Mapping)
+                else EffectState.NOT_STARTED
+            )
             return CancellationOutcome(CancellationState.REFUSED, effect)
         result = response.get("result")
         if not isinstance(result, Mapping):
@@ -260,7 +292,9 @@ def _catalog_tool(value: Any, provider: str) -> _CatalogTool:
         or not isinstance(capabilities, list)
         or not all(isinstance(item, str) for item in capabilities)
         or not isinstance(result_operations, list)
-        or not all(item in {"prepend", "append", "replace"} for item in result_operations)
+        or not all(
+            item in {"prepend", "append", "replace"} for item in result_operations
+        )
     ):
         raise HypermidToolViolation("tool entry is malformed")
     definition = ToolDefinition(
@@ -269,7 +303,7 @@ def _catalog_tool(value: Any, provider: str) -> _CatalogTool:
         provider=provider,
         parameters=schema,
         requires_approval=True,
-        risk_level=infer_risk_from_name(name),
+        risk_level=cast("RiskLevel", infer_risk_from_name(name)),
     )
     capability = ToolCapability(
         name=name,
@@ -288,7 +322,11 @@ def _catalog_tool(value: Any, provider: str) -> _CatalogTool:
 def _require_result(response: Mapping[str, Any]) -> Mapping[str, Any]:
     if "error" in response:
         error = response["error"]
-        message = error.get("message") if isinstance(error, Mapping) else "role refused request"
+        message = (
+            error.get("message")
+            if isinstance(error, Mapping)
+            else "role refused request"
+        )
         raise HypermidToolViolation(str(message)[:300])
     result = response.get("result")
     if not isinstance(result, Mapping):
@@ -311,7 +349,11 @@ def _effect_state(value: Any, fallback: EffectState) -> EffectState:
 
 def _error_result(value: Any, call_key: str) -> ToolResult:
     if not isinstance(value, Mapping):
-        return _failure("Hypermid role returned a malformed error", EffectState.UNKNOWN, call_key=call_key)
+        return _failure(
+            "Hypermid role returned a malformed error",
+            EffectState.UNKNOWN,
+            call_key=call_key,
+        )
     return _failure(
         str(value.get("message") or value.get("code") or "Hypermid tool failed")[:300],
         _effect_state(value.get("effect_state"), EffectState.NOT_STARTED),

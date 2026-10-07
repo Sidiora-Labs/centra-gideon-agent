@@ -9,7 +9,6 @@ from typing import Iterable, Sequence
 
 from .models import Cursor, Scope, Trace
 
-
 _TOKEN = re.compile(r"[\w]+", re.UNICODE)
 
 
@@ -148,14 +147,21 @@ def _tokens(text: str) -> tuple[str, ...]:
     return tuple(match.group(0).casefold() for match in _TOKEN.finditer(text))
 
 
-def _lexical_scores(query: str, candidates: Sequence[SearchCandidate]) -> dict[str, float]:
+def _lexical_scores(
+    query: str, candidates: Sequence[SearchCandidate]
+) -> dict[str, float]:
     query_terms = set(_tokens(query))
     if not query_terms or not candidates:
         return {}
-    documents = {candidate.id: Counter(_tokens(candidate.content)) for candidate in candidates}
-    average_length = max(1.0, sum(sum(doc.values()) for doc in documents.values()) / len(documents))
+    documents = {
+        candidate.id: Counter(_tokens(candidate.content)) for candidate in candidates
+    }
+    average_length = max(
+        1.0, sum(sum(doc.values()) for doc in documents.values()) / len(documents)
+    )
     document_frequency = {
-        term: sum(1 for doc in documents.values() if term in doc) for term in query_terms
+        term: sum(1 for doc in documents.values() if term in doc)
+        for term in query_terms
     }
     scores: dict[str, float] = {}
     k1, b = 1.2, 0.75
@@ -168,10 +174,14 @@ def _lexical_scores(query: str, candidates: Sequence[SearchCandidate]) -> dict[s
             if not frequency:
                 continue
             inverse_frequency = math.log(
-                1.0 + (len(candidates) - document_frequency[term] + 0.5) / (document_frequency[term] + 0.5)
+                1.0
+                + (len(candidates) - document_frequency[term] + 0.5)
+                / (document_frequency[term] + 0.5)
             )
-            score += inverse_frequency * (frequency * (k1 + 1.0)) / (
-                frequency + k1 * (1.0 - b + b * length / average_length)
+            score += (
+                inverse_frequency
+                * (frequency * (k1 + 1.0))
+                / (frequency + k1 * (1.0 - b + b * length / average_length))
             )
         if score > 0.0:
             scores[candidate.id] = score
@@ -187,7 +197,9 @@ def _cosine(left: Sequence[float], right: Sequence[float]) -> float | None:
     right_norm = math.sqrt(sum(value * value for value in right))
     if left_norm == 0.0 or right_norm == 0.0:
         return None
-    return sum(a * b for a, b in zip(left, right, strict=True)) / (left_norm * right_norm)
+    return sum(a * b for a, b in zip(left, right, strict=True)) / (
+        left_norm * right_norm
+    )
 
 
 class SearchEngine:
@@ -197,7 +209,9 @@ class SearchEngine:
     def explicit_retrieval_count(self, candidate_id: str) -> int:
         return self._explicit_retrievals[candidate_id]
 
-    def acknowledge_delivery(self, response: SearchResponse, *, automatic: bool) -> None:
+    def acknowledge_delivery(
+        self, response: SearchResponse, *, automatic: bool
+    ) -> None:
         if automatic:
             return
         for hit in response.hits:
@@ -211,7 +225,7 @@ class SearchEngine:
         cursor: Cursor,
     ) -> SearchResponse:
         collected = list(candidates)
-        suppression = Counter()
+        suppression: Counter[str] = Counter()
         eligible: list[SearchCandidate] = []
         semantic_available = (
             request.query_vector is not None
@@ -219,18 +233,34 @@ class SearchEngine:
             and _cosine(request.query_vector, request.query_vector) is not None
         )
         for candidate in collected:
-            if candidate.owner_scope != request.scope and request.scope not in candidate.readable_scopes:
+            if (
+                candidate.owner_scope != request.scope
+                and request.scope not in candidate.readable_scopes
+            ):
                 suppression["unauthorized"] += 1
                 continue
-            if candidate.status in {"tombstoned", "stale"} or (
-                candidate.status == "archived" and not request.include_archived
-            ) or (candidate.expires_at_ms is not None and candidate.expires_at_ms <= request.now_ms):
+            if (
+                candidate.status in {"tombstoned", "stale"}
+                or (candidate.status == "archived" and not request.include_archived)
+                or (
+                    candidate.expires_at_ms is not None
+                    and candidate.expires_at_ms <= request.now_ms
+                )
+            ):
                 suppression["state"] += 1
                 continue
-            if request.from_ms is not None and candidate.source_time_ms is not None and candidate.source_time_ms < request.from_ms:
+            if (
+                request.from_ms is not None
+                and candidate.source_time_ms is not None
+                and candidate.source_time_ms < request.from_ms
+            ):
                 suppression["state"] += 1
                 continue
-            if request.to_ms is not None and candidate.source_time_ms is not None and candidate.source_time_ms > request.to_ms:
+            if (
+                request.to_ms is not None
+                and candidate.source_time_ms is not None
+                and candidate.source_time_ms > request.to_ms
+            ):
                 suppression["state"] += 1
                 continue
             if request.sources and candidate.source not in request.sources:
@@ -245,7 +275,11 @@ class SearchEngine:
             if candidate.content_digest in request.visible_digests:
                 suppression["visible"] += 1
                 continue
-            if request.mode is not SearchMode.LEXICAL and semantic_available and candidate.vector is not None:
+            if (
+                request.mode is not SearchMode.LEXICAL
+                and semantic_available
+                and candidate.vector is not None
+            ):
                 vector = candidate.vector
                 if (
                     vector.input_digest != candidate.content_digest
@@ -260,15 +294,17 @@ class SearchEngine:
         semantic: dict[str, float] = {}
         if request.mode is not SearchMode.LEXICAL and semantic_available:
             for candidate in eligible:
-                vector = candidate.vector
-                if vector is None:
+                semantic_vector = candidate.vector
+                if semantic_vector is None:
                     continue
-                similarity = _cosine(request.query_vector or (), vector.values)
+                similarity = _cosine(request.query_vector or (), semantic_vector.values)
                 assert similarity is not None
                 semantic[candidate.id] = max(0.0, similarity)
 
         degraded = request.mode is not SearchMode.LEXICAL and not semantic_available
-        if degraded and (request.semantic_required or request.mode is SearchMode.SEMANTIC):
+        if degraded and (
+            request.semantic_required or request.mode is SearchMode.SEMANTIC
+        ):
             raise SearchError(
                 "SEARCH_SEMANTIC_UNAVAILABLE",
                 "semantic retrieval requires a compatible query vector",
@@ -297,19 +333,44 @@ class SearchEngine:
             seen_digests.add(candidate.content_digest)
             lexical_component = lexical.get(candidate_id, 0.0)
             semantic_component = semantic.get(candidate_id, 0.0)
-            fusion = (0.65 / (60 + lexical_rank[candidate_id]) if candidate_id in lexical_rank else 0.0) + (
-                0.35 / (60 + semantic_rank[candidate_id]) if candidate_id in semantic_rank else 0.0
+            fusion = (
+                0.65 / (60 + lexical_rank[candidate_id])
+                if candidate_id in lexical_rank
+                else 0.0
+            ) + (
+                0.35 / (60 + semantic_rank[candidate_id])
+                if candidate_id in semantic_rank
+                else 0.0
             )
             importance = max(0.0, min(candidate.importance, 1.0)) * 0.08
-            age_ms = max(0, request.now_ms - (candidate.source_time_ms or request.now_ms))
+            age_ms = max(
+                0, request.now_ms - (candidate.source_time_ms or request.now_ms)
+            )
             recency = math.exp(-age_ms / (30 * 24 * 60 * 60 * 1000)) * 0.04
-            verification = {"supported": 0.06, "disputed": -0.04, "refuted": -0.12}.get(candidate.verification, 0.0)
+            verification = {"supported": 0.06, "disputed": -0.04, "refuted": -0.12}.get(
+                candidate.verification, 0.0
+            )
             provenance = min(len(candidate.provenance), 3) * 0.02
             stability = 0.05 if candidate.kind == "anchor" else 0.0
-            usefulness = max(-0.03, min(0.03, (candidate.useful_count - candidate.not_useful_count) * 0.005))
+            usefulness = max(
+                -0.03,
+                min(
+                    0.03, (candidate.useful_count - candidate.not_useful_count) * 0.005
+                ),
+            )
             decay = -max(0.0, min(candidate.decay, 1.0)) * 0.08
             contradiction = -0.04 if candidate.contradiction_group is not None else 0.0
-            total = fusion + importance + recency + verification + provenance + stability + usefulness + decay + contradiction
+            total = (
+                fusion
+                + importance
+                + recency
+                + verification
+                + provenance
+                + stability
+                + usefulness
+                + decay
+                + contradiction
+            )
             ranked.append(
                 SearchHit(
                     id=candidate.id,
@@ -341,7 +402,12 @@ class SearchEngine:
         return SearchResponse(
             hits=tuple(ranked[: request.limit]),
             cursor=cursor,
-            suppressed=SuppressionCounts(**{key: suppression[key] for key in SuppressionCounts.__dataclass_fields__}),
+            suppressed=SuppressionCounts(
+                **{
+                    key: suppression[key]
+                    for key in SuppressionCounts.__dataclass_fields__
+                }
+            ),
             degraded=degraded,
             degradation_reason="semantic_unavailable" if degraded else None,
             trace=request.trace,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence, cast
 
 from .models import MAX_SAFE_INTEGER, Cursor, JsonValue, Scope, Trace
 
@@ -26,7 +26,11 @@ def _require_mapping(value: object, field: str) -> Mapping[str, Any]:
 
 
 def _require_int(value: object, field: str, *, minimum: int = 0) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= MAX_SAFE_INTEGER:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not minimum <= value <= MAX_SAFE_INTEGER
+    ):
         raise ReductionToolError(f"{field} is outside the Hypermid integer range")
     return value
 
@@ -43,7 +47,9 @@ def _require_id(value: object, field: str) -> str:
 def _reject_source_content(value: object) -> None:
     if isinstance(value, Mapping):
         if "source_content" in value:
-            raise ReductionToolError("reduction markers cannot contain authoritative source content")
+            raise ReductionToolError(
+                "reduction markers cannot contain authoritative source content"
+            )
         for item in value.values():
             _reject_source_content(item)
     elif isinstance(value, (list, tuple)):
@@ -100,7 +106,7 @@ class ReductionCommand:
             "expected_cursor": self.expected_cursor.to_wire(),
             "writer_lease": dict(self.writer_lease),
             "idempotency_key": self.idempotency_key,
-            "targets": [target.to_wire() for target in self.targets],
+            "targets": [cast(JsonValue, target.to_wire()) for target in self.targets],
             "trace": self.trace.to_wire(),
         }
 
@@ -132,21 +138,39 @@ def parse_reduction_result(value: object) -> ReductionResult:
     if set(raw) - required - optional or not required <= set(raw):
         raise ReductionToolError("reduction result fields do not match the contract")
     outcomes_raw = raw["outcomes"]
-    if not isinstance(outcomes_raw, list) or not 1 <= len(outcomes_raw) <= MAX_REDUCTION_TARGETS:
-        raise ReductionToolError("reduction outcomes are outside the bounded result size")
+    if (
+        not isinstance(outcomes_raw, list)
+        or not 1 <= len(outcomes_raw) <= MAX_REDUCTION_TARGETS
+    ):
+        raise ReductionToolError(
+            "reduction outcomes are outside the bounded result size"
+        )
     outcomes: list[ReductionOutcome] = []
     for index, value in enumerate(outcomes_raw):
         item = _require_mapping(value, f"outcomes[{index}]")
-        allowed = {"tag", "status", "reason_code", "item_id", "estimated_tokens", "marker"}
+        allowed = {
+            "tag",
+            "status",
+            "reason_code",
+            "item_id",
+            "estimated_tokens",
+            "marker",
+        }
         if set(item) - allowed or not {"tag", "status", "reason_code"} <= set(item):
-            raise ReductionToolError(f"outcomes[{index}] fields do not match the contract")
+            raise ReductionToolError(
+                f"outcomes[{index}] fields do not match the contract"
+            )
         status = item["status"]
         reason = item["reason_code"]
         if status not in _STATUSES or not isinstance(reason, str) or not reason:
-            raise ReductionToolError(f"outcomes[{index}] has an invalid status or reason")
+            raise ReductionToolError(
+                f"outcomes[{index}] has an invalid status or reason"
+            )
         marker = item.get("marker")
         if status == "applied" and not isinstance(marker, Mapping):
-            raise ReductionToolError("an applied reduction must include its recovery marker")
+            raise ReductionToolError(
+                "an applied reduction must include its recovery marker"
+            )
         if marker is not None:
             _reject_source_content(marker)
         outcomes.append(
@@ -160,7 +184,9 @@ def parse_reduction_result(value: object) -> ReductionResult:
                     else None
                 ),
                 estimated_tokens=(
-                    _require_int(item["estimated_tokens"], f"outcomes[{index}].estimated_tokens")
+                    _require_int(
+                        item["estimated_tokens"], f"outcomes[{index}].estimated_tokens"
+                    )
                     if "estimated_tokens" in item
                     else None
                 ),
@@ -192,8 +218,13 @@ class HypermidReductionTool:
         result = parse_reduction_result(response)
         if result.scope != command.scope or result.session_id != command.session_id:
             raise ReductionToolError("daemon returned a foreign reduction result")
-        if result.idempotency_key != command.idempotency_key or result.trace != command.trace:
-            raise ReductionToolError("daemon returned a reduction result for another request")
+        if (
+            result.idempotency_key != command.idempotency_key
+            or result.trace != command.trace
+        ):
+            raise ReductionToolError(
+                "daemon returned a reduction result for another request"
+            )
         return result
 
 
@@ -230,15 +261,19 @@ def context_reduction_tool_schema() -> dict[str, JsonValue]:
 
 def targets_from_tool_input(value: object) -> tuple[ReductionTarget, ...]:
     raw = _require_mapping(value, "tool input")
-    if set(raw) != {"targets"} or not isinstance(raw["targets"], Sequence) or isinstance(
-        raw["targets"], (str, bytes)
+    if (
+        set(raw) != {"targets"}
+        or not isinstance(raw["targets"], Sequence)
+        or isinstance(raw["targets"], (str, bytes))
     ):
         raise ReductionToolError("tool input must contain only a targets array")
     targets: list[ReductionTarget] = []
     for index, value in enumerate(raw["targets"]):
         target = _require_mapping(value, f"targets[{index}]")
         if set(target) != {"tag_start", "tag_end"}:
-            raise ReductionToolError(f"targets[{index}] fields do not match the contract")
+            raise ReductionToolError(
+                f"targets[{index}] fields do not match the contract"
+            )
         targets.append(ReductionTarget(target["tag_start"], target["tag_end"]))
     return tuple(targets)
 

@@ -4,7 +4,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping, cast
 
 from gideon.cognition.context_headroom import Component, Headroom
 from gideon.hypermid.cache import CacheGeneration
@@ -25,7 +25,9 @@ class WriterStatus:
         }
 
 
-def _component_evidence(components: Iterable[Component]) -> tuple[list[dict], list[str]]:
+def _component_evidence(
+    components: Iterable[Component],
+) -> tuple[list[dict], list[str]]:
     evidence: list[dict] = []
     mismatches: list[str] = []
     for component in components:
@@ -43,7 +45,12 @@ def _component_evidence(components: Iterable[Component]) -> tuple[list[dict], li
 
 def _cache_evidence(cache: CacheGeneration | None) -> dict[str, object]:
     if cache is None:
-        return {"freshness": "unavailable", "generation": None, "bytes": 0, "regions": []}
+        return {
+            "freshness": "unavailable",
+            "generation": None,
+            "bytes": 0,
+            "regions": [],
+        }
     regions = []
     total = 0
     for name, region in (
@@ -88,13 +95,14 @@ def _projection_region_evidence(
         if not isinstance(block, Mapping):
             continue
         source_ids = block.get("source_item_ids", ())
-        if isinstance(source_ids, list) and any(value in item_ids for value in source_ids):
+        if isinstance(source_ids, list) and any(
+            value in item_ids for value in source_ids
+        ):
             selected.append(block)
             continue
         block_id = block.get("block_id")
         if isinstance(block_id, str) and any(
-            block_id.startswith(f"summary:{summary_id}:")
-            for summary_id in summary_ids
+            block_id.startswith(f"summary:{summary_id}:") for summary_id in summary_ids
         ):
             selected.append(block)
     encoded = json.dumps(
@@ -120,7 +128,7 @@ def _projection_region_evidence(
         len(item_ids) != len(item_values)
         or len(summary_ids) != len(summary_values)
         or type(region.get("token_mass")) is not int
-        or region.get("token_mass", -1) < 0
+        or cast(int, region.get("token_mass", -1)) < 0
     ):
         mismatches.append(f"projection:{name}_metadata")
     if region.get("digest") != digest.hexdigest():
@@ -180,7 +188,9 @@ def inspect_runtime(
     if isinstance(recall, Mapping):
         recall_evidence = dict(recall)
     elif recall is not None and callable(getattr(recall, "inspection", None)):
-        recall_evidence = recall.inspection()
+        recall_evidence = cast(
+            Callable[[], dict[str, object]], getattr(recall, "inspection")
+        )()
     provenance = sorted(
         {
             (
@@ -196,7 +206,9 @@ def inspect_runtime(
         "writer": writer,
         "writer_status": writer_status.to_dict(),
         "scope": scope.to_wire(),
-        "observed_at": observed_at_ms if observed_at_ms is not None else int(time.time() * 1000),
+        "observed_at": (
+            observed_at_ms if observed_at_ms is not None else int(time.time() * 1000)
+        ),
         "digest_health": {
             "state": (
                 "mismatch" if mismatches else ("stale" if stale_policy else "healthy")
@@ -238,10 +250,21 @@ def inspect_primary_context(
             "writer_status": writer_status.to_dict(),
             "scope": scope.to_wire(),
             "observed_at": (
-                observed_at_ms if observed_at_ms is not None else int(time.time() * 1000)
+                observed_at_ms
+                if observed_at_ms is not None
+                else int(time.time() * 1000)
             ),
-            "digest_health": {"state": "unavailable", "component_count": 0, "mismatches": []},
-            "cache": {"freshness": "unavailable", "generation": None, "bytes": 0, "regions": []},
+            "digest_health": {
+                "state": "unavailable",
+                "component_count": 0,
+                "mismatches": [],
+            },
+            "cache": {
+                "freshness": "unavailable",
+                "generation": None,
+                "bytes": 0,
+                "regions": [],
+            },
             "recall_arms": [],
             "provenance": [],
             "recovery_action": "enable a healthy primary Hypermid context engine",
@@ -261,7 +284,10 @@ def inspect_primary_context(
         separators=(",", ":"),
     ).encode("utf-8")
     projection_digest = hashlib.sha256(encoded_blocks).hexdigest()
-    if not isinstance(projection, Mapping) or projection.get("output_digest") != projection_digest:
+    if (
+        not isinstance(projection, Mapping)
+        or projection.get("output_digest") != projection_digest
+    ):
         mismatches.append("projection:output_digest")
     if isinstance(projection, Mapping) and projection.get("scope") != scope.to_wire():
         mismatches.append("projection:scope")
@@ -273,7 +299,9 @@ def inspect_primary_context(
             if isinstance(projection, Mapping)
             else None
         ),
-        "render_mode": projection.get("render_mode") if isinstance(projection, Mapping) else None,
+        "render_mode": (
+            projection.get("render_mode") if isinstance(projection, Mapping) else None
+        ),
     }
     serialized_digest = hashlib.sha256(
         json.dumps(
@@ -303,8 +331,8 @@ def inspect_primary_context(
             model_budget.get("delta_tokens"),
             model_budget.get("tail_tokens"),
         )
-        if all(type(value) is int and value >= 0 for value in token_fields):
-            projected_tokens = sum(int(value) for value in token_fields)
+        if all(type(value) is int and cast(int, value) >= 0 for value in token_fields):
+            projected_tokens = sum(cast(int, value) for value in token_fields)
         candidate_max = model_budget.get("max_input_tokens")
         if type(candidate_max) is int and candidate_max >= 0:
             max_input_tokens = candidate_max
@@ -320,7 +348,9 @@ def inspect_primary_context(
         mismatches.append("components:assembly_digest")
     active_digest = hashlib.sha256(assembled_message.encode("utf-8")).hexdigest()
     cache_outcome = hypermid.get("cache")
-    applied = isinstance(cache_outcome, Mapping) and cache_outcome.get("kind") == "applied"
+    applied = (
+        isinstance(cache_outcome, Mapping) and cache_outcome.get("kind") == "applied"
+    )
     regions = []
     if isinstance(projection, Mapping):
         for name in ("baseline", "delta", "tail"):
@@ -351,7 +381,7 @@ def inspect_primary_context(
     cursor = hypermid.get("cursor")
     recall_state = recall_evidence.get("state") if recall_evidence else None
     recall_ready = recall_state in {"daemon", "fallback"}
-    summary_count = sum(int(region["summary_count"]) for region in regions)
+    summary_count = sum(int(cast(int, region["summary_count"])) for region in regions)
     summary = hypermid.get("summary")
     summary_evidence = dict(summary) if isinstance(summary, Mapping) else None
     if summary_evidence is None:
@@ -439,9 +469,11 @@ def inspect_primary_context(
         "cache": {
             "freshness": "fresh" if applied and cache_generation_matches else "stale",
             "generation": (
-                cache_outcome.get("generation") if isinstance(cache_outcome, Mapping) else None
+                cache_outcome.get("generation")
+                if isinstance(cache_outcome, Mapping)
+                else None
             ),
-            "bytes": sum(int(region["bytes"]) for region in regions),
+            "bytes": sum(int(cast(int, region["bytes"])) for region in regions),
             "bytes_known": len(regions) == 3,
             "reason": (
                 cache_outcome.get("reason_code")

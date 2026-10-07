@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from gideon.cognition.history import ConversationLog
+    from gideon.integrations.memory_providers.base import MemoryProvider
+
 import asyncio
 import copy
 import hashlib
@@ -10,19 +16,27 @@ import logging
 import os
 import shutil
 import stat
-import time
 import threading
+import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
+
+if TYPE_CHECKING:
+    from gideon.cognition.context_engine import ContextEngine
+    from .writer import WriterCoordinator
+    from .primary_engine import PrimaryContextEngine
+    from .context import ConversationContextBridge
+    from .config_store import ContextConfigStore
+    from .config import ContextConfig
 
 from .adapter import HypermidAdapter
 from .client import HypermidClient
-from .modules import HypermidModuleSupervisor
 from .foundation import Id
 from .models import MAX_SAFE_INTEGER, Scope
+from .modules import HypermidModuleSupervisor
 from .status import HypermidStatus
 
 log = logging.getLogger(__name__)
@@ -66,7 +80,9 @@ class LocalEnrollment:
         object.__setattr__(self, "capability_id", Id(self.capability_id))
         operations = tuple(dict.fromkeys(self.operations))
         resources = tuple(dict.fromkeys(Id(item) for item in self.resources))
-        if not operations or any(item not in _CAPABILITY_OPERATIONS for item in operations):
+        if not operations or any(
+            item not in _CAPABILITY_OPERATIONS for item in operations
+        ):
             raise ValueError("Hypermid enrollment operations are invalid")
         if not resources:
             raise ValueError("Hypermid enrollment requires at least one resource")
@@ -81,7 +97,9 @@ class LocalEnrollment:
 
     def require_live(self, scope: Scope) -> None:
         if self.scope != scope:
-            raise PermissionError("Hypermid enrollment scope does not match this runtime")
+            raise PermissionError(
+                "Hypermid enrollment scope does not match this runtime"
+            )
         if self.expires_ms <= time.time_ns() // 1_000_000:
             raise PermissionError("Hypermid enrollment has expired")
 
@@ -139,8 +157,8 @@ class HypermidLifecycle:
         connection_record: str | Path,
         module_supervisor: HypermidModuleSupervisor | None = None,
         enrollment: LocalEnrollment | None = None,
-        config_store: object | None = None,
-        initial_config: object | None = None,
+        config_store: ContextConfigStore | None = None,
+        initial_config: ContextConfig | None = None,
         runtime: Any | None = None,
     ) -> None:
         self.adapter = adapter
@@ -152,10 +170,10 @@ class HypermidLifecycle:
         self.initial_config = initial_config
         self.runtime = runtime
         self.process: asyncio.subprocess.Process | None = None
-        self.writer: object | None = None
-        self.primary_engine: object | None = None
-        self.context_bridge: object | None = None
-        self._host_engine: object | None = None
+        self.writer: WriterCoordinator | None = None
+        self.primary_engine: PrimaryContextEngine | None = None
+        self.context_bridge: ConversationContextBridge | None = None
+        self._host_engine: ContextEngine | None = None
         self._runtime_mode = "off"
         self._turn_hook = self._turn_boundary
         self._boundary_lock = asyncio.Lock()
@@ -171,7 +189,9 @@ class HypermidLifecycle:
         self._host_engine = get_engine()
         self.adapter.set_delegate(self._host_engine)
         if not set_turn_boundary_hook(self._turn_hook, expected=None):
-            raise RuntimeError("another context turn-boundary authority is already active")
+            raise RuntimeError(
+                "another context turn-boundary authority is already active"
+            )
         try:
             desired = self._configured_mode()
             return await self._apply_mode(desired, activate_primary=False)
@@ -180,18 +200,30 @@ class HypermidLifecycle:
             log.warning("Hypermid runtime start failed closed: %s", error)
             return self.adapter.status()
 
-    async def reviewed_enrollment_restart(self, enrollment: LocalEnrollment, *, verify_current, finalize):
+    async def reviewed_enrollment_restart(
+        self, enrollment: LocalEnrollment, *, verify_current, finalize
+    ):
         """Drain an owned daemon, verify its reviewed grant, then publish it."""
         async with self._boundary_lock:
             process = self.process
             previous = self.enrollment
             if process is None or process.returncode is not None or previous is None:
-                raise PermissionError("reviewed enrollment refresh requires an owned running daemon")
-            if (enrollment.scope, enrollment.credential_id, enrollment.capability_id) != (previous.scope, previous.credential_id, previous.capability_id):
-                raise PermissionError("reviewed enrollment refresh cannot change runtime identity")
+                raise PermissionError(
+                    "reviewed enrollment refresh requires an owned running daemon"
+                )
+            if (
+                enrollment.scope,
+                enrollment.credential_id,
+                enrollment.capability_id,
+            ) != (previous.scope, previous.credential_id, previous.capability_id):
+                raise PermissionError(
+                    "reviewed enrollment refresh cannot change runtime identity"
+                )
             desired = self._configured_mode()
             if _value(desired) == "off":
-                raise PermissionError("reviewed enrollment refresh requires an active runtime")
+                raise PermissionError(
+                    "reviewed enrollment refresh requires an active runtime"
+                )
             verify_current()
             await self._deactivate_writer()
             try:
@@ -199,7 +231,9 @@ class HypermidLifecycle:
                 self.enrollment = enrollment
                 status = await self._apply_mode(desired, activate_primary=False)
                 if not self._reviewed_restart_ready(status):
-                    raise RuntimeError("reviewed Hypermid enrollment did not become ready")
+                    raise RuntimeError(
+                        "reviewed Hypermid enrollment did not become ready"
+                    )
                 await self._validate_enrollment_grants()
                 return finalize()
             except BaseException as original:
@@ -209,23 +243,41 @@ class HypermidLifecycle:
                     self.enrollment = previous
                     status = await self._apply_mode(desired, activate_primary=False)
                     if not self._reviewed_restart_ready(status):
-                        raise RuntimeError("previous Hypermid enrollment did not become ready")
+                        raise RuntimeError(
+                            "previous Hypermid enrollment did not become ready"
+                        )
                 except BaseException as rollback:
                     self.enrollment = previous
-                    raise BaseExceptionGroup("reviewed enrollment failed and runtime rollback is unresolved", [original, rollback])
+                    raise BaseExceptionGroup(
+                        "reviewed enrollment failed and runtime rollback is unresolved",
+                        [original, rollback],
+                    )
                 raise
 
     def _reviewed_restart_ready(self, status: HypermidStatus) -> bool:
         # Primary activation remains a turn-boundary operation after restart.
-        return (status.available and status.scope_bound and status.digest_health == "healthy"
-                and (status.healthy or (status.mode == "primary" and self.writer is not None
-                     and status.writer == "gideon" and status.lease_state == "none")))
+        return (
+            status.available
+            and status.scope_bound
+            and status.digest_health == "healthy"
+            and (
+                status.healthy
+                or (
+                    status.mode == "primary"
+                    and self.writer is not None
+                    and status.writer == "gideon"
+                    and status.lease_state == "none"
+                )
+            )
+        )
 
     async def _validate_enrollment_grants(self) -> None:
+        import secrets
+
         from .contracts import AccessRequest, GrantOperation
         from .memory import _trace
         from .memory_client import MemoryClient
-        import secrets
+
         client = self.adapter.client
         enrollment = self.enrollment
         if client is None or enrollment is None or not client.connected:
@@ -234,18 +286,31 @@ class HypermidLifecycle:
         for resource in ("memory-records", "memory-embedding"):
             if Id(resource) not in enrollment.resources:
                 continue
-            request = AccessRequest(GrantOperation.READ, client.scope, client.scope, Id(resource), _trace())
+            request = AccessRequest(
+                GrantOperation.READ, client.scope, client.scope, Id(resource), _trace()
+            )
             if resource == "memory-embedding":
                 await memory.embedding_active(request)
             else:
                 try:
                     await memory.list(request, limit=1)
                 except Exception as error:
-                    if getattr(getattr(error, "error", None), "code", None) != "SCOPE_NOT_FOUND":
+                    if (
+                        getattr(getattr(error, "error", None), "code", None)
+                        != "SCOPE_NOT_FOUND"
+                    ):
                         raise
-        if "administer" in enrollment.operations and Id("memory-service") in enrollment.resources:
+        if (
+            "administer" in enrollment.operations
+            and Id("memory-service") in enrollment.resources
+        ):
             # A fresh origin has no derived scope; retirement checks administration without issuing one.
-            await memory._call("memory.private-scope.retire", {"origin_session_key": "enrollment-check:" + secrets.token_hex(24)}, trace=_trace(), durable=True)
+            await memory._call(
+                "memory.private-scope.retire",
+                {"origin_session_key": "enrollment-check:" + secrets.token_hex(24)},
+                trace=_trace(),
+                durable=True,
+            )
 
     async def stop(self) -> None:
         from gideon.cognition.context_engine import set_turn_boundary_hook
@@ -254,7 +319,9 @@ class HypermidLifecycle:
         try:
             await self._deactivate_writer()
         except Exception:
-            log.error("Hypermid writer handback is unresolved during shutdown", exc_info=True)
+            log.error(
+                "Hypermid writer handback is unresolved during shutdown", exc_info=True
+            )
         await self._disconnect()
         store, self.config_store = self.config_store, None
         if store is not None:
@@ -276,7 +343,9 @@ class HypermidLifecycle:
         self, session_id: str, inspection: Mapping[str, object]
     ) -> None:
         with self._inspection_lock:
-            self._primary_context_inspections[session_id] = copy.deepcopy(dict(inspection))
+            self._primary_context_inspections[session_id] = copy.deepcopy(
+                dict(inspection)
+            )
             self._primary_context_inspections.move_to_end(session_id)
             while len(self._primary_context_inspections) > 128:
                 self._primary_context_inspections.popitem(last=False)
@@ -297,7 +366,7 @@ class HypermidLifecycle:
             store = self.config_store
             if store is not None:
                 store.apply_at_turn_boundary()
-                desired = store.snapshot().config.mode
+                desired: object = store.snapshot().config.mode
             else:
                 desired = self.adapter.mode
             try:
@@ -372,7 +441,10 @@ class HypermidLifecycle:
         if enrollment is None or client is None:
             raise PermissionError("Hypermid primary enrollment is unavailable")
         enrollment.require_live(client.scope)
-        if "read" not in enrollment.operations or Id("memory-list") not in enrollment.resources:
+        if (
+            "read" not in enrollment.operations
+            or Id("memory-list") not in enrollment.resources
+        ):
             raise PermissionError(
                 "Hypermid primary enrollment lacks summary read authority"
             )
@@ -396,9 +468,7 @@ class HypermidLifecycle:
                 await self._wait_for_connection_record()
             except Exception as error:
                 await self._retire_process()
-                return self.adapter.mark_unavailable(
-                    error, code="DAEMON_START_FAILED"
-                )
+                return self.adapter.mark_unavailable(error, code="DAEMON_START_FAILED")
         status = await self.adapter.start()
         if not status.available:
             await self._retire_process()
@@ -423,10 +493,13 @@ class HypermidLifecycle:
                 )
             return
         context_builder = getattr(runtime, "ctx_builder", None)
-        conversation_log = getattr(runtime, "conv_log", None)
+        conversation_log = cast("ConversationLog", getattr(runtime, "conv_log", None))
         consolidator = getattr(runtime, "consolidator", None)
         memory = getattr(context_builder, "memory", None)
-        if any(item is None for item in (context_builder, conversation_log, consolidator, memory)):
+        if any(
+            item is None
+            for item in (context_builder, conversation_log, consolidator, memory)
+        ):
             raise RuntimeError("Gideon conversation services are incomplete")
 
         from gideon.cognition.memory_service import service_for
@@ -459,7 +532,7 @@ class HypermidLifecycle:
             log=conversation_log,
             context=context_bridge,
             consolidator=consolidator,
-            memory_flush=service_for(memory).flush_for_cutover,
+            memory_flush=service_for(cast("MemoryProvider", memory)).flush_for_cutover,
             summary_quiesce=partial(quiesce_summary_work, timeout=3.0),
             summary_resume=resume_summary_work,
             install_writer=self._install_primary_engine,
@@ -495,14 +568,20 @@ class HypermidLifecycle:
         if current is self.adapter or current is self.primary_engine:
             return
         expected = self._host_engine
-        if current is not expected or not compare_and_set_engine(current, self.adapter):
-            raise RuntimeError("active context engine changed before Hypermid installation")
+        if current is not expected or not compare_and_set_engine(
+            current, cast("ContextEngine", self.adapter)
+        ):
+            raise RuntimeError(
+                "active context engine changed before Hypermid installation"
+            )
 
     def _install_primary_engine(self, _lease: object) -> None:
         from gideon.cognition.context_engine import compare_and_set_engine
 
         primary = self.primary_engine
-        if primary is None or not compare_and_set_engine(self.adapter, primary):
+        if primary is None or not compare_and_set_engine(
+            cast("ContextEngine", self.adapter), cast("ContextEngine", primary)
+        ):
             raise RuntimeError("active context engine changed before primary cutover")
 
     def _uninstall_primary_engine(self) -> None:
@@ -511,7 +590,9 @@ class HypermidLifecycle:
         primary = self.primary_engine
         current = get_engine()
         if primary is not None and current is primary:
-            if not compare_and_set_engine(primary, self.adapter):
+            if not compare_and_set_engine(
+                cast("ContextEngine", primary), cast("ContextEngine", self.adapter)
+            ):
                 raise RuntimeError("primary context engine could not be withdrawn")
         elif current not in (self.adapter, self._host_engine):
             raise RuntimeError("active context engine changed before writer handback")
@@ -530,10 +611,14 @@ class HypermidLifecycle:
 
         current = get_engine()
         if current is self.primary_engine:
-            raise RuntimeError("primary engine cannot disconnect before writer handback")
+            raise RuntimeError(
+                "primary engine cannot disconnect before writer handback"
+            )
         if current is self.adapter:
             replacement = self._host_engine
-            if replacement is None or not compare_and_set_engine(self.adapter, replacement):
+            if replacement is None or not compare_and_set_engine(
+                cast("ContextEngine", self.adapter), replacement
+            ):
                 raise RuntimeError("Hypermid adapter could not restore the host engine")
         if self.module_supervisor is not None:
             await self.module_supervisor.disable()
@@ -600,7 +685,9 @@ class HypermidLifecycle:
                 raise ValueError("Hypermid MCP configuration path must be absolute")
             details = path.lstat()
             if stat.S_ISLNK(details.st_mode) or not stat.S_ISREG(details.st_mode):
-                raise PermissionError("Hypermid MCP configuration must be a regular file")
+                raise PermissionError(
+                    "Hypermid MCP configuration must be a regular file"
+                )
             if hasattr(os, "geteuid") and details.st_uid != os.geteuid():
                 raise PermissionError("Hypermid MCP configuration has the wrong owner")
             if stat.S_IMODE(details.st_mode) != 0o600:
@@ -714,7 +801,9 @@ def runtime_scope(runtime: Any) -> Scope:
 
     owner_source = str(getattr(runtime, "owner_id", "") or "")
     if not owner_source:
-        owner_source = f"local-uid:{os.getuid()}" if hasattr(os, "getuid") else "local-user"
+        owner_source = (
+            f"local-uid:{os.getuid()}" if hasattr(os, "getuid") else "local-user"
+        )
     project_source = str(
         os.environ.get("GIDEON_PROJECT_ID")
         or os.environ.get("GIDEON_PROJECT_DIR")
@@ -723,10 +812,10 @@ def runtime_scope(runtime: Any) -> Scope:
     )
     workspace_source = str(os.environ.get("GIDEON_WORKSPACE") or "").strip()
     return Scope(
-        owner_id=_scoped_id("owner", owner_source),
-        project_id=_scoped_id("project", project_source),
+        owner_id=Id(_scoped_id("owner", owner_source)),
+        project_id=Id(_scoped_id("project", project_source)),
         workspace_id=(
-            _scoped_id("workspace", workspace_source) if workspace_source else None
+            Id(_scoped_id("workspace", workspace_source)) if workspace_source else None
         ),
     )
 
@@ -742,8 +831,10 @@ def _daemon_executable() -> str:
     installed = shutil.which("hypermid-daemon")
     if installed:
         return installed
-    packaged = Path(__file__).resolve().parent / "bin" / (
-        "hypermid-daemon.exe" if os.name == "nt" else "hypermid-daemon"
+    packaged = (
+        Path(__file__).resolve().parent
+        / "bin"
+        / ("hypermid-daemon.exe" if os.name == "nt" else "hypermid-daemon")
     )
     if packaged.is_file() and os.access(packaged, os.X_OK):
         return str(packaged)
@@ -798,14 +889,10 @@ def build_runtime_lifecycle(runtime: Any) -> HypermidLifecycle:
         ),
     ).with_connection_record(str(record_path))
     lifecycle = HypermidLifecycle(
-        HypermidAdapter(
-            HypermidClient(record_path, scope=scope), mode=mode
-        ),
+        HypermidAdapter(HypermidClient(record_path, scope=scope), mode=mode),
         daemon,
         connection_record=record_path,
-        module_supervisor=HypermidModuleSupervisor(
-            state_dir / "modules", scope=scope
-        ),
+        module_supervisor=HypermidModuleSupervisor(state_dir / "modules", scope=scope),
         enrollment=enrollment,
         config_store=ContextConfigStore(hypermid_dir / "configuration.sqlite3"),
         initial_config=context_config,

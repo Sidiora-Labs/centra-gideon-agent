@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Sequence, cast
 
 from .foundation import Cursor, Digest, EffectState, Id, Scope, Trace
 from .model_budget import ModelBudget
@@ -202,7 +202,9 @@ def _probability(value: object, name: str) -> float:
 
 def _text(value: object, name: str, maximum: int) -> str:
     if not isinstance(value, str) or not value or len(value.encode("utf-8")) > maximum:
-        raise MemoryContractError(f"{name} must be non-empty and at most {maximum} bytes")
+        raise MemoryContractError(
+            f"{name} must be non-empty and at most {maximum} bytes"
+        )
     return value
 
 
@@ -341,10 +343,18 @@ class LineageEdge:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "parent_id", Id(self.parent_id))
-        object.__setattr__(self, "parent_revision_digest", Digest(self.parent_revision_digest))
+        object.__setattr__(
+            self, "parent_revision_digest", Digest(self.parent_revision_digest)
+        )
         if self.relation not in {
-            "derived_from", "cites", "supersedes", "contradicts",
-            "merged_from", "split_from", "imported_from", "verifies",
+            "derived_from",
+            "cites",
+            "supersedes",
+            "contradicts",
+            "merged_from",
+            "split_from",
+            "imported_from",
+            "verifies",
         }:
             raise MemoryContractError("lineage relation is invalid")
 
@@ -390,7 +400,9 @@ class SourceSnapshot:
             if len(encoded) > 4 * 1024 * 1024:
                 raise MemoryContractError("captured source content is too large")
             if Digest.sha256(encoded) != self.source_digest:
-                raise MemoryContractError("captured source content does not match its digest")
+                raise MemoryContractError(
+                    "captured source content does not match its digest"
+                )
 
     def to_wire(self) -> dict[str, JsonValue]:
         return {
@@ -436,7 +448,9 @@ class PredicateClause:
         value = self.value
         if comparison is PredicateComparison.IN:
             if not isinstance(value, (list, tuple)) or not 1 <= len(value) <= 64:
-                raise MemoryContractError("in predicate requires a bounded scalar array")
+                raise MemoryContractError(
+                    "in predicate requires a bounded scalar array"
+                )
             object.__setattr__(
                 self,
                 "value",
@@ -508,7 +522,9 @@ class SmartPredicate:
             operator=PredicateOperator(raw.get("operator")),
             clauses=tuple(
                 PredicateClause.from_wire(item)
-                for item in _sequence(raw.get("clauses"), "predicate clauses", maximum=32)
+                for item in _sequence(
+                    raw.get("clauses"), "predicate clauses", maximum=32
+                )
             ),
         )
 
@@ -597,8 +613,12 @@ class RecordDraft:
         object.__setattr__(self, "kind", RecordKind(self.kind))
         _text(self.category, "category", 128)
         _text(self.content, "content", 262_144)
-        object.__setattr__(self, "importance", _probability(self.importance, "importance"))
-        object.__setattr__(self, "confidence", _probability(self.confidence, "confidence"))
+        object.__setattr__(
+            self, "importance", _probability(self.importance, "importance")
+        )
+        object.__setattr__(
+            self, "confidence", _probability(self.confidence, "confidence")
+        )
         for name in ("expires_at_ms", "retention_until_ms"):
             value = getattr(self, name)
             if value is not None:
@@ -673,7 +693,7 @@ class MaintenanceJobSpec:
             "input_cursor": self.input_cursor.to_wire(),
             "input_digest": str(self.input_digest),
             "config_digest": str(self.config_digest),
-            "budget": self.budget.to_wire(),
+            "budget": cast(dict[str, JsonValue], self.budget.to_wire()),
             "available_at_ms": self.available_at_ms,
             "created_at_ms": self.created_at_ms,
         }
@@ -862,10 +882,14 @@ class KnowledgePublication:
                 "knowledge source digest must match the expected job input"
             )
         if self.source.captured_content is None:
-            raise MemoryContractError("knowledge publication requires captured source bytes")
+            raise MemoryContractError(
+                "knowledge publication requires captured source bytes"
+            )
         if self.source.kind is SourceKind.GIT_COMMIT:
             if self.repository_identity_digest is None or self.refs_digest is None:
-                raise MemoryContractError("Git knowledge publication requires guard digests")
+                raise MemoryContractError(
+                    "Git knowledge publication requires guard digests"
+                )
             expected_locator = f"git:{self.repository_identity_digest}"
             if (
                 self.source.capture_method != "gideon_guarded_local_git"
@@ -873,8 +897,13 @@ class KnowledgePublication:
             ):
                 raise MemoryContractError("Git knowledge source is not guard-captured")
         elif self.source.kind is SourceKind.FILE:
-            if self.repository_identity_digest is not None or self.refs_digest is not None:
-                raise MemoryContractError("file knowledge source cannot carry Git guards")
+            if (
+                self.repository_identity_digest is not None
+                or self.refs_digest is not None
+            ):
+                raise MemoryContractError(
+                    "file knowledge source cannot carry Git guards"
+                )
         else:
             raise MemoryContractError(
                 "knowledge publication accepts only note or Git sources"
@@ -931,7 +960,9 @@ class KnowledgePublication:
                 if self.repository_identity_digest is not None
                 else None
             ),
-            "refs_digest": str(self.refs_digest) if self.refs_digest is not None else None,
+            "refs_digest": (
+                str(self.refs_digest) if self.refs_digest is not None else None
+            ),
             "evaluated_cursor": self.evaluated_cursor.to_wire(),
             "next_evaluation_at_ms": self.next_evaluation_at_ms,
             "smart_notes": [item.to_wire() for item in self.smart_notes],
@@ -951,9 +982,7 @@ class KnowledgePublicationAuthority:
     def __post_init__(self) -> None:
         object.__setattr__(self, "capability_id", Id(self.capability_id))
         if self.authority_resource is not None:
-            object.__setattr__(
-                self, "authority_resource", Id(self.authority_resource)
-            )
+            object.__setattr__(self, "authority_resource", Id(self.authority_resource))
 
     def to_wire(self) -> dict[str, JsonValue]:
         value: dict[str, JsonValue] = {
@@ -996,9 +1025,7 @@ class KnowledgeVerificationReceipt:
         return cls(
             record_id=Id(raw.get("record_id")),
             state=VerificationState(raw.get("state")),
-            cursor=Cursor.from_wire(
-                _object(raw.get("cursor"), "verification cursor")
-            ),
+            cursor=Cursor.from_wire(_object(raw.get("cursor"), "verification cursor")),
         )
 
 
@@ -1106,9 +1133,7 @@ class KnowledgePublicationReceipt:
                 )
             ),
             recall=(
-                KnowledgeRecallReceipt.from_wire(recall)
-                if recall is not None
-                else None
+                KnowledgeRecallReceipt.from_wire(recall) if recall is not None else None
             ),
             invalidated_ids=tuple(
                 Id(item)
@@ -1132,14 +1157,20 @@ class ShareGrantDraft:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", Id(self.id))
-        operations = tuple(sorted({GrantOperation(item) for item in self.operations}, key=str))
+        operations = tuple(
+            sorted({GrantOperation(item) for item in self.operations}, key=str)
+        )
         if not operations:
             raise MemoryContractError("share grant requires at least one operation")
         object.__setattr__(self, "operations", operations)
         if self.owner_scope == self.grantee_scope:
-            raise MemoryContractError("share grant recipient must use a different scope")
+            raise MemoryContractError(
+                "share grant recipient must use a different scope"
+            )
         if self.categories is not None:
-            categories = tuple(sorted({_text(item, "grant category", 128) for item in self.categories}))
+            categories = tuple(
+                sorted({_text(item, "grant category", 128) for item in self.categories})
+            )
             if not categories:
                 raise MemoryContractError("share grant categories cannot be empty")
             object.__setattr__(self, "categories", categories)
@@ -1152,7 +1183,9 @@ class ShareGrantDraft:
             "owner_scope": self.owner_scope.to_wire(),
             "grantee_scope": self.grantee_scope.to_wire(),
             "operations": [operation.value for operation in self.operations],
-            "categories": list(self.categories) if self.categories is not None else None,
+            "categories": (
+                list(self.categories) if self.categories is not None else None
+            ),
             "expires_at_ms": self.expires_at_ms,
             "expected_revision": self.expected_revision,
         }
@@ -1177,10 +1210,14 @@ class ShareGrant:
         return cls(
             id=Id(raw.get("id")),
             owner_scope=Scope.from_wire(_object(raw.get("owner_scope"), "owner scope")),
-            grantee_scope=Scope.from_wire(_object(raw.get("grantee_scope"), "grantee scope")),
+            grantee_scope=Scope.from_wire(
+                _object(raw.get("grantee_scope"), "grantee scope")
+            ),
             operations=tuple(
                 GrantOperation(item)
-                for item in _sequence(raw.get("operations"), "grant operations", maximum=16)
+                for item in _sequence(
+                    raw.get("operations"), "grant operations", maximum=16
+                )
             ),
             categories=(
                 tuple(
@@ -1265,7 +1302,9 @@ class GideonLegacySnapshot:
         object.__setattr__(self, "source_digest", Digest(self.source_digest))
         identities = {(item.source_digest, item.item_key) for item in self.items}
         if len(identities) != len(self.items):
-            raise MemoryContractError("legacy snapshot contains a duplicate source item")
+            raise MemoryContractError(
+                "legacy snapshot contains a duplicate source item"
+            )
 
     def to_wire(self) -> dict[str, JsonValue]:
         return {
@@ -1287,7 +1326,7 @@ class MaintenanceClaimProof:
         _text(self.holder_id, "maintenance holder_id", 160)
         object.__setattr__(self, "fencing_token", Digest(self.fencing_token))
 
-    def to_wire(self) -> dict[str, str]:
+    def to_wire(self) -> dict[str, JsonValue]:
         return {
             "job_id": str(self.job_id),
             "holder_id": self.holder_id,
@@ -1323,12 +1362,18 @@ class MaintenanceClaimReceipt:
             job_id=Id(raw.get("job_id")),
             kind=MaintenanceKind(raw.get("kind")),
             actor_scope=Scope.from_wire(_object(raw.get("actor_scope"), "actor scope")),
-            target_scope=Scope.from_wire(_object(raw.get("target_scope"), "target scope")),
+            target_scope=Scope.from_wire(
+                _object(raw.get("target_scope"), "target scope")
+            ),
             required_operation=MemoryOperation(raw.get("required_operation")),
-            input_cursor=Cursor.from_wire(_object(raw.get("input_cursor"), "input cursor")),
+            input_cursor=Cursor.from_wire(
+                _object(raw.get("input_cursor"), "input cursor")
+            ),
             input_digest=Digest(raw.get("input_digest")),
             config_digest=Digest(raw.get("config_digest")),
-            budget=ModelBudget.from_wire(_object(raw.get("budget"), "maintenance budget")),
+            budget=ModelBudget.from_wire(
+                _object(raw.get("budget"), "maintenance budget")
+            ),
             available_at_ms=_uint(raw.get("available_at_ms"), "available_at_ms"),
             trace=Trace.from_wire(_object(raw.get("trace"), "maintenance trace")),
             holder_id=_text(raw.get("holder_id"), "maintenance holder_id", 160),
@@ -1446,9 +1491,17 @@ class MutationReceipt:
         result_digest = raw.get("result_digest")
         return cls(
             record=MemoryRecord.from_wire(record) if record is not None else None,
-            records=tuple(MemoryRecord.from_wire(item) for item in _sequence(records, "records", maximum=256)),
+            records=tuple(
+                MemoryRecord.from_wire(item)
+                for item in _sequence(records, "records", maximum=256)
+            ),
             cursor=Cursor.from_wire(_object(raw.get("cursor"), "cursor")),
-            invalidated_ids=tuple(Id(item) for item in _sequence(raw.get("invalidated_ids", []), "invalidated_ids", maximum=4096)),
+            invalidated_ids=tuple(
+                Id(item)
+                for item in _sequence(
+                    raw.get("invalidated_ids", []), "invalidated_ids", maximum=4096
+                )
+            ),
             effect_state=state,
             result_digest=Digest(result_digest) if result_digest is not None else None,
         )
@@ -1468,7 +1521,9 @@ class SplitReceipt:
             source=MemoryRecord.from_wire(raw.get("source")),
             replacements=tuple(
                 MutationReceipt.from_wire(item)
-                for item in _sequence(raw.get("replacements"), "replacements", maximum=256)
+                for item in _sequence(
+                    raw.get("replacements"), "replacements", maximum=256
+                )
             ),
             cursor=Cursor.from_wire(_object(raw.get("cursor"), "cursor")),
             invalidated_ids=tuple(
@@ -1510,7 +1565,7 @@ class RecordPage:
         raw = _object(value, "record page")
         if "record" in raw:
             record = raw.get("record")
-            records = [] if record is None else [record]
+            records: Sequence[Any] = [] if record is None else [record]
         else:
             records = _sequence(raw.get("records"), "records")
         return cls(
@@ -1553,7 +1608,9 @@ class SearchRequest:
             for component in self.query_vector:
                 _number(component, "query vector component")
         if (self.query_vector is None) != (self.vector_fingerprint is None):
-            raise MemoryContractError("query vector and fingerprint must be supplied together")
+            raise MemoryContractError(
+                "query vector and fingerprint must be supplied together"
+            )
         for name in ("from_ms", "to_ms"):
             value = getattr(self, name)
             if value is not None:
@@ -1569,9 +1626,13 @@ class SearchRequest:
             "candidate_limit_per_source": self.candidate_limit_per_source,
             "include_archived": self.include_archived,
             "visible_digests": [str(item) for item in self.visible_digests],
-            "query_vector": list(self.query_vector) if self.query_vector is not None else None,
+            "query_vector": (
+                list(self.query_vector) if self.query_vector is not None else None
+            ),
             "vector_fingerprint": (
-                str(self.vector_fingerprint) if self.vector_fingerprint is not None else None
+                str(self.vector_fingerprint)
+                if self.vector_fingerprint is not None
+                else None
             ),
             "now_ms": self.now_ms,
             "from_ms": self.from_ms,
@@ -1656,7 +1717,9 @@ class SearchHit:
             scope=Scope.from_wire(_object(candidate.get("scope"), "hit scope")),
             readable_scopes=tuple(
                 Scope.from_wire(_object(item, "readable scope"))
-                for item in _sequence(candidate.get("readable_scopes"), "readable scopes")
+                for item in _sequence(
+                    candidate.get("readable_scopes"), "readable scopes"
+                )
             ),
             content=_text(candidate.get("content"), "hit content", 4 * 1024 * 1024),
             content_digest=Digest(candidate.get("content_digest")),
@@ -1692,22 +1755,30 @@ class SearchResponse:
     trace: Trace
 
     @classmethod
-    def from_wire(cls, value: object, expected_trace: Trace | None = None) -> SearchResponse:
+    def from_wire(
+        cls, value: object, expected_trace: Trace | None = None
+    ) -> SearchResponse:
         raw = _object(value, "search response")
         suppressed = _object(raw.get("suppressed"), "suppression counts")
-        counts = {
+        counts: dict[str, int] = {
             name: _uint(suppressed.get(name), f"suppressed.{name}")
             for name in ("unauthorized", "state", "stale", "visible", "duplicate")
         }
         degraded = raw.get("degraded")
         reason = raw.get("degradation_reason")
-        if not isinstance(degraded, bool) or (reason is not None and not isinstance(reason, str)):
+        if not isinstance(degraded, bool) or (
+            reason is not None and not isinstance(reason, str)
+        ):
             raise MemoryContractError("search degradation state is invalid")
         trace = Trace.from_wire(_object(raw.get("trace"), "search trace"))
         if expected_trace is not None and trace != expected_trace:
-            raise MemoryContractError("search response trace does not match the request")
+            raise MemoryContractError(
+                "search response trace does not match the request"
+            )
         return cls(
-            hits=tuple(SearchHit.from_wire(item) for item in _sequence(raw.get("hits"), "hits")),
+            hits=tuple(
+                SearchHit.from_wire(item) for item in _sequence(raw.get("hits"), "hits")
+            ),
             cursor=Cursor.from_wire(_object(raw.get("cursor"), "cursor")),
             suppressed=MappingProxyType(counts),
             degraded=degraded,
@@ -1719,18 +1790,34 @@ class SearchResponse:
 @dataclass(frozen=True, slots=True)
 class ScopedSearchResponse:
     """Presentation union retaining each independently authorized native result."""
+
     sources: tuple[tuple[Scope, SearchResponse], ...]
     limit: int
 
     def __post_init__(self) -> None:
-        if not 1 <= len(self.sources) <= 2 or len({scope for scope, _ in self.sources}) != len(self.sources):
-            raise MemoryContractError("search sources must be distinct authorized scopes")
-        if any(hit.scope != scope for scope, response in self.sources for hit in response.hits):
-            raise MemoryContractError("search hit does not match its authorized source scope")
+        if not 1 <= len(self.sources) <= 2 or len(
+            {scope for scope, _ in self.sources}
+        ) != len(self.sources):
+            raise MemoryContractError(
+                "search sources must be distinct authorized scopes"
+            )
+        if any(
+            hit.scope != scope
+            for scope, response in self.sources
+            for hit in response.hits
+        ):
+            raise MemoryContractError(
+                "search hit does not match its authorized source scope"
+            )
 
     @property
     def hits(self) -> tuple[SearchHit, ...]:
-        return tuple(sorted((hit for _, response in self.sources for hit in response.hits), key=lambda hit: (-hit.total_score, str(hit.id))))[:self.limit]
+        return tuple(
+            sorted(
+                (hit for _, response in self.sources for hit in response.hits),
+                key=lambda hit: (-hit.total_score, str(hit.id)),
+            )
+        )[: self.limit]
 
     @property
     def cursor(self) -> Cursor:
@@ -1738,7 +1825,14 @@ class ScopedSearchResponse:
 
     @property
     def scope_cursors(self) -> tuple[dict[str, object], ...]:
-        return tuple({"scope": scope.to_wire(), "cursor": response.cursor.to_wire(), "trace": response.trace.to_wire()} for scope, response in self.sources)
+        return tuple(
+            {
+                "scope": scope.to_wire(),
+                "cursor": response.cursor.to_wire(),
+                "trace": response.trace.to_wire(),
+            }
+            for scope, response in self.sources
+        )
 
     @property
     def trace(self) -> Trace:
@@ -1746,7 +1840,16 @@ class ScopedSearchResponse:
 
     @property
     def suppressed(self) -> Mapping[str, int]:
-        return MappingProxyType({name: sum(response.suppressed.get(name, 0) for _, response in self.sources) for name in {name for _, response in self.sources for name in response.suppressed}})
+        return MappingProxyType(
+            {
+                name: sum(
+                    response.suppressed.get(name, 0) for _, response in self.sources
+                )
+                for name in {
+                    name for _, response in self.sources for name in response.suppressed
+                }
+            }
+        )
 
     @property
     def degraded(self) -> bool:
@@ -1754,7 +1857,13 @@ class ScopedSearchResponse:
 
     @property
     def degradation_reason(self) -> str | None:
-        reasons = sorted({response.degradation_reason for _, response in self.sources if response.degradation_reason})
+        reasons = sorted(
+            {
+                response.degradation_reason
+                for _, response in self.sources
+                if response.degradation_reason
+            }
+        )
         return "; ".join(reasons) or None
 
 
@@ -1768,7 +1877,9 @@ class ServiceResult:
         raw = _object(value, "memory service response")
         trace = Trace.from_wire(_object(raw.get("trace"), "trace"))
         if trace != expected_trace:
-            raise MemoryContractError("memory response trace does not match the request")
+            raise MemoryContractError(
+                "memory response trace does not match the request"
+            )
         result = _json(raw.get("result"), "memory result")
         if not isinstance(result, dict):
             raise MemoryContractError("memory result must be an object")
@@ -1795,7 +1906,9 @@ class MemoryHealth:
             raise MemoryContractError("memory health availability flags are invalid")
         return cls(
             state=state,
-            schema_version=_uint(raw.get("schema_version"), "schema_version", minimum=1),
+            schema_version=_uint(
+                raw.get("schema_version"), "schema_version", minimum=1
+            ),
             durable=durable,
             lexical_available=lexical,
             schema_digest=Digest(raw.get("schema_digest")),
@@ -1849,7 +1962,7 @@ class MemoryDiagnostics:
         missing = required_counts - set(raw)
         if missing:
             raise MemoryContractError("memory diagnostics are incomplete")
-        counts = {
+        counts: dict[str, int | None] = {
             name: _uint(
                 raw.get(name),
                 name,
@@ -1864,7 +1977,17 @@ class MemoryDiagnostics:
             }
         )
         return cls(
-            **counts,
+            schema_version=cast(int, counts["schema_version"]),
+            record_count=cast(int, counts["record_count"]),
+            stale_record_count=cast(int, counts["stale_record_count"]),
+            embedding_count=cast(int, counts["embedding_count"]),
+            queued_job_count=cast(int, counts["queued_job_count"]),
+            active_lease_count=cast(int, counts["active_lease_count"]),
+            memory_fts_count=counts["memory_fts_count"],
+            source_fts_count=counts["source_fts_count"],
+            budget_job_count=counts["budget_job_count"],
+            budget_reservation_count=counts["budget_reservation_count"],
+            budget_unknown_usage_count=counts["budget_unknown_usage_count"],
             budget_state=str(raw.get("budget_state", "disabled")),
             recovery_state=str(raw.get("recovery_state", "degraded")),
         )
@@ -1886,21 +2009,54 @@ class PrivateScopeReceipt:
 
     @classmethod
     def from_wire(cls, value: object) -> PrivateScopeReceipt:
-        fields = {"scope_id", "actor_scope", "scope", "capability_id", "origin_session_key", "original_actor", "memory_mode", "expires_at_ms", "retired"}
+        fields = {
+            "scope_id",
+            "actor_scope",
+            "scope",
+            "capability_id",
+            "origin_session_key",
+            "original_actor",
+            "memory_mode",
+            "expires_at_ms",
+            "retired",
+        }
         if not isinstance(value, Mapping) or set(value) != fields:
             raise MemoryContractError("private scope receipt fields are invalid")
-        actor, scope = Scope.from_wire(value["actor_scope"]), Scope.from_wire(value["scope"])
+        actor, scope = Scope.from_wire(value["actor_scope"]), Scope.from_wire(
+            value["scope"]
+        )
         expiry = value["expires_at_ms"]
-        if actor.owner_id != scope.owner_id or actor.project_id != scope.project_id or scope.workspace_id != value["scope_id"] or actor == scope:
+        if (
+            actor.owner_id != scope.owner_id
+            or actor.project_id != scope.project_id
+            or scope.workspace_id != value["scope_id"]
+            or actor == scope
+        ):
             raise MemoryContractError("private scope does not belong to its issuer")
-        if value["memory_mode"] not in {"temporary", "incognito"} or type(expiry) is not int or not 0 < expiry <= 9_007_199_254_740_991 or type(value["retired"]) is not bool:
+        if (
+            value["memory_mode"] not in {"temporary", "incognito"}
+            or type(expiry) is not int
+            or not 0 < expiry <= 9_007_199_254_740_991
+            or type(value["retired"]) is not bool
+        ):
             raise MemoryContractError("private scope lifetime is invalid")
-        return cls(Id(value["scope_id"]), actor, scope, Id(value["capability_id"]), Id(value["origin_session_key"]), Id(value["original_actor"]), value["memory_mode"], expiry, value["retired"])
+        return cls(
+            Id(value["scope_id"]),
+            actor,
+            scope,
+            Id(value["capability_id"]),
+            Id(value["origin_session_key"]),
+            Id(value["original_actor"]),
+            value["memory_mode"],
+            expiry,
+            value["retired"],
+        )
 
 
 @dataclass(frozen=True, slots=True)
 class AppScopeReceipt:
     """A native app namespace and its current activation grant."""
+
     scope_id: Id
     actor_scope: Scope
     scope: Scope
@@ -1913,18 +2069,54 @@ class AppScopeReceipt:
 
     @classmethod
     def from_wire(cls, value: object) -> AppScopeReceipt:
-        fields = {'scope_id','actor_scope','scope','capability_id','app_name','manifest_digest','epoch','expires_at_ms','revoked'}
+        fields = {
+            "scope_id",
+            "actor_scope",
+            "scope",
+            "capability_id",
+            "app_name",
+            "manifest_digest",
+            "epoch",
+            "expires_at_ms",
+            "revoked",
+        }
         if not isinstance(value, Mapping) or set(value) != fields:
-            raise MemoryContractError('app namespace receipt fields are invalid')
-        actor, scope = Scope.from_wire(value['actor_scope']), Scope.from_wire(value['scope'])
-        if actor.owner_id != scope.owner_id or actor.project_id != scope.project_id or actor == scope or scope.workspace_id != value['scope_id']:
-            raise MemoryContractError('app namespace owner is invalid')
-        if type(value['epoch']) is not int or not 0 < value['epoch'] <= 9_007_199_254_740_991 or type(value['expires_at_ms']) is not int or not 0 < value['expires_at_ms'] <= 9_007_199_254_740_991 or type(value['revoked']) is not bool:
-            raise MemoryContractError('app namespace activation is invalid')
+            raise MemoryContractError("app namespace receipt fields are invalid")
+        actor, scope = Scope.from_wire(value["actor_scope"]), Scope.from_wire(
+            value["scope"]
+        )
+        if (
+            actor.owner_id != scope.owner_id
+            or actor.project_id != scope.project_id
+            or actor == scope
+            or scope.workspace_id != value["scope_id"]
+        ):
+            raise MemoryContractError("app namespace owner is invalid")
+        if (
+            type(value["epoch"]) is not int
+            or not 0 < value["epoch"] <= 9_007_199_254_740_991
+            or type(value["expires_at_ms"]) is not int
+            or not 0 < value["expires_at_ms"] <= 9_007_199_254_740_991
+            or type(value["revoked"]) is not bool
+        ):
+            raise MemoryContractError("app namespace activation is invalid")
         from gideon.extensions.apps.manifest import KEBAB_RE
-        if not isinstance(value['app_name'], str) or not KEBAB_RE.fullmatch(value['app_name']):
-            raise MemoryContractError('app namespace name is invalid')
-        return cls(Id(value['scope_id']),actor,scope,Id(value['capability_id']),value['app_name'],Digest(value['manifest_digest']),value['epoch'],value['expires_at_ms'],value['revoked'])
+
+        if not isinstance(value["app_name"], str) or not KEBAB_RE.fullmatch(
+            value["app_name"]
+        ):
+            raise MemoryContractError("app namespace name is invalid")
+        return cls(
+            Id(value["scope_id"]),
+            actor,
+            scope,
+            Id(value["capability_id"]),
+            value["app_name"],
+            Digest(value["manifest_digest"]),
+            value["epoch"],
+            value["expires_at_ms"],
+            value["revoked"],
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1941,22 +2133,35 @@ class OwnerWordCapture:
 
     @classmethod
     def from_verified(cls, capture) -> OwnerWordCapture:
-        from gideon.security.capture_origin import validate_capture
         from gideon.security.approval_answer import principal_record
+        from gideon.security.capture_origin import validate_capture
+
         verified = validate_capture(capture)
         if verified is None:
             raise PermissionError("owner-word capture is no longer verified")
-        return cls(verified.history_session_id, verified.native_source_event_id,
-                   verified.native_source_digest, principal_record(verified.original_actor),
-                   principal_record(verified.effective_work_actor), verified.ingress_event_id,
-                   Digest(verified.ingress_own_digest), verified.own_text)
+        return cls(
+            verified.history_session_id,
+            verified.native_source_event_id,
+            verified.native_source_digest,
+            principal_record(verified.original_actor),
+            principal_record(verified.effective_work_actor),
+            verified.ingress_event_id,
+            Digest(verified.ingress_own_digest),
+            verified.own_text,
+        )
 
     def to_wire(self) -> dict[str, JsonValue]:
-        return {"history_session_id": str(self.history_session_id),
-                "source_event_id": str(self.source_event_id), "source_digest": str(self.source_digest),
-                "original_actor": dict(self.original_actor), "effective_actor": dict(self.effective_actor),
-                "ingress_event_id": self.ingress_event_id, "ingress_own_digest": str(self.ingress_own_digest),
-                "own_text": self.own_text, "capture_kind": self.capture_kind}
+        return {
+            "history_session_id": str(self.history_session_id),
+            "source_event_id": str(self.source_event_id),
+            "source_digest": str(self.source_digest),
+            "original_actor": dict(self.original_actor),
+            "effective_actor": dict(self.effective_actor),
+            "ingress_event_id": self.ingress_event_id,
+            "ingress_own_digest": str(self.ingress_own_digest),
+            "own_text": self.own_text,
+            "capture_kind": self.capture_kind,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -1969,7 +2174,9 @@ class ChatRetraction:
     @classmethod
     def from_wire(cls, value: object) -> ChatRetraction:
         body = _object(value, "chat retraction")
-        return cls(tuple(Id(item) for item in body["deleted_ids"]),
-                   _uint(body["retained_unproven"], "retained_unproven"),
-                   _uint(body["retained_independent"], "retained_independent"),
-                   Cursor.from_wire(body["cursor"]))
+        return cls(
+            tuple(Id(item) for item in body["deleted_ids"]),
+            _uint(body["retained_unproven"], "retained_unproven"),
+            _uint(body["retained_independent"], "retained_independent"),
+            Cursor.from_wire(body["cursor"]),
+        )

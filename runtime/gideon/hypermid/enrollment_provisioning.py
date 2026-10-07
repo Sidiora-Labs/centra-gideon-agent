@@ -10,6 +10,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from gideon.core.config.loader import config_dir
 
@@ -59,8 +60,13 @@ class StagedEnrollment:
 
     def verify_current(self) -> None:
         """Refuse a replacement when its reviewed file snapshot has changed."""
-        if self._previous_content is not None and self._destination.read_bytes() != self._previous_content:
-            raise EnrollmentProvisioningError("local enrollment changed before publication")
+        if (
+            self._previous_content is not None
+            and self._destination.read_bytes() != self._previous_content
+        ):
+            raise EnrollmentProvisioningError(
+                "local enrollment changed before publication"
+            )
 
     def commit(self, *, lifecycle_receipt: ActionReceipt) -> EnrollmentReceipt:
         if self._complete:
@@ -82,7 +88,9 @@ class StagedEnrollment:
                 )
         elif self._previous_content is not None:
             if self._destination.read_bytes() != self._previous_content:
-                raise EnrollmentProvisioningError("local enrollment changed before publication")
+                raise EnrollmentProvisioningError(
+                    "local enrollment changed before publication"
+                )
             previous = _write_stage(self._destination.parent, self._previous_content)
             try:
                 os.replace(self._staged_path, self._destination)
@@ -143,8 +151,15 @@ def current_enrollment_review(scope: Scope) -> dict[str, JsonValue] | None:
         return None
     content = destination.read_bytes()
     if content != _encode(existing):
-        raise EnrollmentProvisioningError("existing local enrollment is not canonically encoded")
-    return {"digest": str(Digest.sha256(content)), "operations": list(existing.operations), "resources": [str(value) for value in existing.resources], "expires_ms": existing.expires_ms}
+        raise EnrollmentProvisioningError(
+            "existing local enrollment is not canonically encoded"
+        )
+    return {
+        "digest": str(Digest.sha256(content)),
+        "operations": list(existing.operations),
+        "resources": [str(value) for value in existing.resources],
+        "expires_ms": existing.expires_ms,
+    }
 
 
 def stage_enrollment(
@@ -173,14 +188,37 @@ def stage_enrollment(
 
     existing = _load_existing(destination, scope)
     if expected_current_digest is not None:
-        if existing is None or str(Digest.sha256(destination.read_bytes())) != expected_current_digest:
-            raise EnrollmentProvisioningError("reviewed local enrollment changed before staging")
+        if (
+            existing is None
+            or str(Digest.sha256(destination.read_bytes())) != expected_current_digest
+        ):
+            raise EnrollmentProvisioningError(
+                "reviewed local enrollment changed before staging"
+            )
         previous = _encode(existing)
         if destination.read_bytes() != previous:
-            raise EnrollmentProvisioningError("existing local enrollment is not canonically encoded")
-        enrollment = LocalEnrollment(scope, existing.credential_id, existing.capability_id, operations, resources, expires_ms)
+            raise EnrollmentProvisioningError(
+                "existing local enrollment is not canonically encoded"
+            )
+        enrollment = LocalEnrollment(
+            scope,
+            existing.credential_id,
+            existing.capability_id,
+            operations,
+            resources,
+            expires_ms,
+        )
         content = _encode(enrollment)
-        return StagedEnrollment(scope, digest, target_version.strip(), enrollment, content, destination, _write_stage(destination.parent, content), previous)
+        return StagedEnrollment(
+            scope,
+            digest,
+            target_version.strip(),
+            enrollment,
+            content,
+            destination,
+            _write_stage(destination.parent, content),
+            previous,
+        )
     if existing is not None:
         if (
             existing.operations != operations
@@ -258,7 +296,7 @@ def _reviewed_grant(
         or not all(isinstance(item, str) for item in raw_resources)
         or len(set(raw_resources)) != len(raw_resources)
         or any(
-            item.casefold() in {"all", "any", "*"} or "*" in item
+            cast(str, item).casefold() in {"all", "any", "*"} or "*" in cast(str, item)
             for item in raw_resources
         )
     ):
@@ -275,10 +313,10 @@ def _reviewed_grant(
         )
     try:
         enrollment = LocalEnrollment(
-            scope=Scope("validation-owner", "validation-project"),
+            scope=Scope(Id("validation-owner"), Id("validation-project")),
             credential_id=Id("validation-credential"),
             capability_id=Id("validation-capability"),
-            operations=tuple(raw_operations),
+            operations=tuple(cast(list[str], raw_operations)),
             resources=tuple(Id(item) for item in raw_resources),
             expires_ms=expires_ms,
         )
@@ -295,7 +333,9 @@ def _load_existing(path: Path, scope: Scope) -> LocalEnrollment | None:
     except FileNotFoundError:
         return None
     except OSError as error:
-        raise EnrollmentProvisioningError("local enrollment path is unreadable") from error
+        raise EnrollmentProvisioningError(
+            "local enrollment path is unreadable"
+        ) from error
     try:
         return LocalEnrollment.load(path, scope=scope)
     except (OSError, ValueError, PermissionError) as error:
@@ -327,7 +367,9 @@ def _encode(enrollment: LocalEnrollment) -> bytes:
         "resources": [str(item) for item in enrollment.resources],
         "expires_ms": enrollment.expires_ms,
     }
-    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+    return (
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+    )
 
 
 def _write_stage(directory: Path, content: bytes) -> Path:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
 from .foundation import Cursor, Digest, Id, Scope
 
@@ -56,10 +56,14 @@ class SourceIdentity:
 
     def __post_init__(self) -> None:
         object.__setattr__(
-            self, "source_event_id", _canonical_id(self.source_event_id, "source_event_id")
+            self,
+            "source_event_id",
+            _canonical_id(self.source_event_id, "source_event_id"),
         )
         object.__setattr__(
-            self, "source_digest", _canonical_digest(self.source_digest, "source_digest")
+            self,
+            "source_digest",
+            _canonical_digest(self.source_digest, "source_digest"),
         )
 
     def to_mapping(self) -> dict[str, str]:
@@ -71,8 +75,8 @@ class SourceIdentity:
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> SourceIdentity:
         return cls(
-            source_event_id=value.get("source_event_id"),
-            source_digest=value.get("source_digest"),
+            source_event_id=cast(Id, value.get("source_event_id")),
+            source_digest=cast(Digest, value.get("source_digest")),
         )
 
 
@@ -101,8 +105,8 @@ class IdentityRelation:
     def from_mapping(cls, value: Mapping[str, Any]) -> IdentityRelation:
         return cls(
             kind=RelationKind(value.get("kind")),
-            item_id=value.get("item_id"),
-            source_digest=value.get("source_digest"),
+            item_id=cast(Id, value.get("item_id")),
+            source_digest=cast(Digest, value.get("source_digest")),
         )
 
 
@@ -150,12 +154,12 @@ class ContextIdentity:
                 "source_event_id and source_digest must be supplied together",
             )
         return cls(
-            identity_id=value.get("identity_id"),
+            identity_id=cast(Id, value.get("identity_id")),
             kind=IdentityKind(value.get("kind")),
             scope=Scope.from_wire(value.get("scope", {})),
-            session_id=value.get("session_id"),
+            session_id=cast(Id, value.get("session_id")),
             source=(
-                SourceIdentity(source_event_id, source_digest)
+                SourceIdentity(source_event_id, cast(Digest, source_digest))
                 if source_event_id is not None
                 else None
             ),
@@ -176,12 +180,16 @@ class RebindRecord:
     reason: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "rebind_id", _canonical_id(self.rebind_id, "rebind_id"))
+        object.__setattr__(
+            self, "rebind_id", _canonical_id(self.rebind_id, "rebind_id")
+        )
         object.__setattr__(
             self, "session_id", _canonical_id(self.session_id, "session_id")
         )
         if not isinstance(self.reason, str) or not (1 <= len(self.reason) <= 1024):
-            raise IdentityError("INVALID_REBIND", "reason must contain 1 to 1024 characters")
+            raise IdentityError(
+                "INVALID_REBIND", "reason must contain 1 to 1024 characters"
+            )
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -196,12 +204,12 @@ class RebindRecord:
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> RebindRecord:
         return cls(
-            rebind_id=value.get("rebind_id"),
-            session_id=value.get("session_id"),
+            rebind_id=cast(Id, value.get("rebind_id")),
+            session_id=cast(Id, value.get("session_id")),
             previous_scope=Scope.from_wire(value.get("previous_scope", {})),
             next_scope=Scope.from_wire(value.get("next_scope", {})),
             cursor=Cursor.from_wire(value.get("cursor", {})),
-            reason=value.get("reason"),
+            reason=cast(str, value.get("reason")),
         )
 
 
@@ -226,11 +234,10 @@ class IdentityBinding:
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> IdentityBinding:
         return cls(
-            session_id=value.get("session_id"),
+            session_id=cast(Id, value.get("session_id")),
             scope=Scope.from_wire(value.get("scope", {})),
             rebinds=tuple(
-                RebindRecord.from_mapping(rebind)
-                for rebind in value.get("rebinds", ())
+                RebindRecord.from_mapping(rebind) for rebind in value.get("rebinds", ())
             ),
         )
 
@@ -261,9 +268,13 @@ class IdentityStore:
         with self._lock:
             binding = self._bindings.get(session_id)
             if binding is None:
-                raise IdentityError("SESSION_NOT_BOUND", "session has no identity binding")
+                raise IdentityError(
+                    "SESSION_NOT_BOUND", "session has no identity binding"
+                )
             if binding.scope != scope:
-                raise IdentityError("SCOPE_MISMATCH", "scope does not match session binding")
+                raise IdentityError(
+                    "SCOPE_MISMATCH", "scope does not match session binding"
+                )
             return binding
 
     def identity(self, identity_id: str, scope: Scope) -> ContextIdentity:
@@ -325,7 +336,9 @@ class IdentityStore:
         with self._lock:
             current = self._bindings.get(session_id)
             if current is None:
-                raise IdentityError("SESSION_NOT_BOUND", "session has no identity binding")
+                raise IdentityError(
+                    "SESSION_NOT_BOUND", "session has no identity binding"
+                )
             for existing in current.rebinds:
                 if existing.rebind_id == rebind_id:
                     if (
@@ -335,7 +348,8 @@ class IdentityStore:
                         or existing.reason != reason
                     ):
                         raise IdentityError(
-                            "IDENTITY_CONFLICT", "rebind id is already bound differently"
+                            "IDENTITY_CONFLICT",
+                            "rebind id is already bound differently",
                         )
                     return existing
             binding = self.binding(session_id, previous_scope)
@@ -348,7 +362,9 @@ class IdentityStore:
                     "owner or project changes require a distinct context identity",
                 )
             if previous_scope.workspace_id == next_scope.workspace_id:
-                raise IdentityError("INVALID_REBIND", "workspace binding did not change")
+                raise IdentityError(
+                    "INVALID_REBIND", "workspace binding did not change"
+                )
             record = RebindRecord(
                 rebind_id=rebind_id,
                 session_id=session_id,
@@ -383,14 +399,20 @@ class IdentityStore:
     @classmethod
     def from_mapping(cls, value: Mapping[str, Any]) -> IdentityStore:
         if value.get("schema_version") != 1:
-            raise IdentityError("UNSUPPORTED_VERSION", "identity state version is unsupported")
+            raise IdentityError(
+                "UNSUPPORTED_VERSION", "identity state version is unsupported"
+            )
         store = cls()
         for raw_binding in value.get("bindings", ()):
             binding = IdentityBinding.from_mapping(raw_binding)
             if binding.session_id in store._bindings:
                 raise IdentityError("IDENTITY_CONFLICT", "duplicate session binding")
-            if any(rebind.session_id != binding.session_id for rebind in binding.rebinds):
-                raise IdentityError("IDENTITY_CONFLICT", "foreign rebind in session binding")
+            if any(
+                rebind.session_id != binding.session_id for rebind in binding.rebinds
+            ):
+                raise IdentityError(
+                    "IDENTITY_CONFLICT", "foreign rebind in session binding"
+                )
             store._bindings[binding.session_id] = binding
         for raw_identity in value.get("identities", ()):
             identity = ContextIdentity.from_mapping(raw_identity)
@@ -399,6 +421,8 @@ class IdentityStore:
                 key = (identity.session_id, identity.source.source_event_id)
                 existing = store._source_items.get(key)
                 if existing is not None and existing != identity.identity_id:
-                    raise IdentityError("IDENTITY_CONFLICT", "duplicate source event identity")
+                    raise IdentityError(
+                        "IDENTITY_CONFLICT", "duplicate source event identity"
+                    )
                 store._source_items[key] = identity.identity_id
         return store

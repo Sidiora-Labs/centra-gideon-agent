@@ -12,6 +12,7 @@ import struct
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Iterable, Mapping
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -19,6 +20,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from .foundation import Cursor, Digest, EffectState, Scope
 from .portability import ContextPortabilityError, MemoryExportBundle
 
+fcntl: ModuleType | None
 try:
     import fcntl
 except ImportError:  # pragma: no cover - SQLite locking remains the non-Unix guard
@@ -162,7 +164,9 @@ class LifecycleSecurity:
             snapshot.close()
         payload = _canonical_bytes(bundle)
         if len(payload) > _MAX_BACKUP_BYTES:
-            raise LifecycleSecurityError("BACKUP_TOO_LARGE", "backup exceeds size limit")
+            raise LifecycleSecurityError(
+                "BACKUP_TOO_LARGE", "backup exceeds size limit"
+            )
         artifact = _encrypt_bundle(bundle, payload, key)
         destination_path = Path(destination)
         _atomic_private_write(destination_path, artifact)
@@ -221,7 +225,8 @@ class LifecycleSecurity:
                 active_effective_digest = _file_digest(staging_path)
                 if _sqlite_authority_fingerprint(active) != active_fingerprint:
                     raise LifecycleSecurityError(
-                        "ACTIVE_STORE_CHANGED", "active SQLite authority changed during staging"
+                        "ACTIVE_STORE_CHANGED",
+                        "active SQLite authority changed during staging",
                     )
                 staged = sqlite3.connect(staging_path)
                 try:
@@ -267,10 +272,13 @@ class LifecycleSecurity:
         _require_no_unknown_effects(effect_states)
         staged = self._staged.get(staging_id)
         if staged is None:
-            raise LifecycleSecurityError("STAGING_NOT_FOUND", "restore staging is absent")
+            raise LifecycleSecurityError(
+                "STAGING_NOT_FOUND", "restore staging is absent"
+            )
         if staged.receipt.active_digest != expected_active_digest:
             raise LifecycleSecurityError(
-                "ACTIVE_DIGEST_MISMATCH", "reviewed active digest does not match staging"
+                "ACTIVE_DIGEST_MISMATCH",
+                "reviewed active digest does not match staging",
             )
         lease = _acquire_activation_lease(staged.active_path)
         try:
@@ -363,7 +371,9 @@ def decrypt_memory_bundle(
         raise LifecycleSecurityError(error.code, str(error)) from error
     manifest = bundle.manifest
     if manifest.scope != expected_scope:
-        raise LifecycleSecurityError("SCOPE_MISMATCH", "backup belongs to another scope")
+        raise LifecycleSecurityError(
+            "SCOPE_MISMATCH", "backup belongs to another scope"
+        )
     if not hmac.compare_digest(
         hashlib.sha256(_canonical_bytes(manifest.to_mapping())).hexdigest(),
         manifest_digest,
@@ -395,9 +405,13 @@ def tombstone_record(
     retention_until_ms: int,
 ) -> None:
     if actor_scope != target_scope:
-        raise LifecycleSecurityError("AUTHORIZATION_DENIED", "owner authority is required")
+        raise LifecycleSecurityError(
+            "AUTHORIZATION_DENIED", "owner authority is required"
+        )
     if retention_until_ms <= now_ms:
-        raise LifecycleSecurityError("INVALID_RETENTION", "recovery window must be positive")
+        raise LifecycleSecurityError(
+            "INVALID_RETENTION", "recovery window must be positive"
+        )
     scope_digest = _scope_digest(target_scope)
     _ensure_tombstone_table(connection)
     connection.execute("BEGIN IMMEDIATE")
@@ -407,7 +421,9 @@ def tombstone_record(
             (record_id,),
         ).fetchone()
         if row != (scope_digest, str(expected_revision_digest)):
-            raise LifecycleSecurityError("STALE_RECORD", "record revision or scope changed")
+            raise LifecycleSecurityError(
+                "STALE_RECORD", "record revision or scope changed"
+            )
         connection.execute(
             "UPDATE memory_records SET status='tombstoned', deleted_at_ms=?, retention_until_ms=?, updated_at_ms=? WHERE record_id=?",
             (now_ms, retention_until_ms, now_ms, record_id),
@@ -452,7 +468,8 @@ def accept_worker_output(
     ).fetchone()
     if row != (_scope_digest(target_scope), "active", str(expected_revision_digest)):
         raise LifecycleSecurityError(
-            "STALE_WORKER_OUTPUT", "record is no longer eligible for background publication"
+            "STALE_WORKER_OUTPUT",
+            "record is no longer eligible for background publication",
         )
 
 
@@ -465,7 +482,9 @@ def purge_record(
     now_ms: int,
 ) -> None:
     if actor_scope != target_scope:
-        raise LifecycleSecurityError("AUTHORIZATION_DENIED", "owner authority is required")
+        raise LifecycleSecurityError(
+            "AUTHORIZATION_DENIED", "owner authority is required"
+        )
     scope_digest = _scope_digest(target_scope)
     _ensure_tombstone_table(connection)
     connection.execute("BEGIN IMMEDIATE")
@@ -485,7 +504,9 @@ def purge_record(
             "SELECT EXISTS(SELECT 1 FROM memory_lineage WHERE parent_record_id=?)",
             (record_id,),
         ).fetchone() == (1,):
-            raise LifecycleSecurityError("PURGE_REFERENCED", "record remains referenced")
+            raise LifecycleSecurityError(
+                "PURGE_REFERENCED", "record remains referenced"
+            )
         source_ids = [
             value
             for (value,) in connection.execute(
@@ -536,7 +557,9 @@ def _export_bundle(
         "SELECT current_version, compatibility_floor, schema_digest FROM hypermid_schema_version WHERE singleton=1"
     ).fetchone()
     if schema is None:
-        raise LifecycleSecurityError("SCHEMA_INVALID", "memory schema metadata is absent")
+        raise LifecycleSecurityError(
+            "SCHEMA_INVALID", "memory schema metadata is absent"
+        )
     entries: list[dict[str, Any]] = []
     for table, query, parameters in _export_queries(digest, include_grants):
         for index, row in enumerate(_query_dicts(connection, query, parameters)):
@@ -571,9 +594,7 @@ def _export_bundle(
         "cursor": cursor.to_wire(),
         "previous_digest": _ZERO_DIGEST,
         "stream_digest": previous,
-        "record_count": sum(
-            entry["category"] == "memory_records" for entry in entries
-        ),
+        "record_count": sum(entry["category"] == "memory_records" for entry in entries),
         "entries": entries,
         "unknown": {},
     }
@@ -593,10 +614,17 @@ def _encrypt_payload(
     aes = AESGCM(key._material)
     chunk_records: list[dict[str, Any]] = []
     ciphertext = bytearray()
-    chunks = [payload[index : index + _CHUNK_BYTES] for index in range(0, len(payload), _CHUNK_BYTES)]
+    chunks = [
+        payload[index : index + _CHUNK_BYTES]
+        for index in range(0, len(payload), _CHUNK_BYTES)
+    ]
     for index, chunk in enumerate(chunks):
         nonce = secrets.token_bytes(8) + index.to_bytes(4, "big")
-        aad = bytes.fromhex(manifest_digest) + index.to_bytes(4, "big") + len(chunks).to_bytes(4, "big")
+        aad = (
+            bytes.fromhex(manifest_digest)
+            + index.to_bytes(4, "big")
+            + len(chunks).to_bytes(4, "big")
+        )
         encrypted = aes.encrypt(nonce, chunk, aad)
         chunk_records.append(
             {
@@ -614,7 +642,9 @@ def _encrypt_payload(
         "chunks": chunk_records,
     }
     header_bytes = _canonical_bytes(header)
-    return _MAGIC + struct.pack(">I", len(header_bytes)) + header_bytes + bytes(ciphertext)
+    return (
+        _MAGIC + struct.pack(">I", len(header_bytes)) + header_bytes + bytes(ciphertext)
+    )
 
 
 def _decrypt_bundle(artifact: bytes, key: BackupKey) -> Mapping[str, Any]:
@@ -688,13 +718,20 @@ def _validate_bundle(
     bundle: Mapping[str, Any], expected_scope: Scope, supported_schema: int
 ) -> Mapping[str, Any]:
     try:
-        if set(bundle) != {"format_version", "manifest", "unknown"} or bundle["format_version"] != 1:
+        if (
+            set(bundle) != {"format_version", "manifest", "unknown"}
+            or bundle["format_version"] != 1
+        ):
             raise ValueError
         manifest = bundle["manifest"]
         if Scope.from_wire(manifest["scope"]) != expected_scope:
-            raise LifecycleSecurityError("SCOPE_MISMATCH", "backup belongs to another scope")
+            raise LifecycleSecurityError(
+                "SCOPE_MISMATCH", "backup belongs to another scope"
+            )
         if int(manifest["schema_version"]) > supported_schema:
-            raise LifecycleSecurityError("STORE_AHEAD", "backup schema is newer than this binary")
+            raise LifecycleSecurityError(
+                "STORE_AHEAD", "backup schema is newer than this binary"
+            )
         Cursor.from_wire(manifest["cursor"])
         previous = manifest["previous_digest"]
         if previous != _ZERO_DIGEST:
@@ -715,7 +752,10 @@ def _validate_bundle(
             payload = entry["payload"]
             _reject_forbidden(payload)
             digest = hashlib.sha256(_canonical_bytes(payload)).hexdigest()
-            if digest != entry["source_digest"] or digest != entry["destination_digest"]:
+            if (
+                digest != entry["source_digest"]
+                or digest != entry["destination_digest"]
+            ):
                 raise ValueError
             previous = hashlib.sha256(
                 bytes.fromhex(previous)
@@ -758,12 +798,19 @@ def _validate_memory_invariants(manifest: Mapping[str, Any], scope: Scope) -> No
     if Cursor.from_wire(manifest["cursor"]) != Cursor(
         int(scopes[0]["epoch"]), int(scopes[0]["sequence"])
     ):
-        raise LifecycleSecurityError("CURSOR_INVALID", "manifest cursor differs from scope")
+        raise LifecycleSecurityError(
+            "CURSOR_INVALID", "manifest cursor differs from scope"
+        )
     records = {row["record_id"]: row for row in rows.get("memory_records", [])}
     revisions: dict[str, list[Mapping[str, Any]]] = {}
     for revision in rows.get("memory_revisions", []):
-        if hashlib.sha256(revision["content"].encode()).hexdigest() != revision["content_digest"]:
-            raise LifecycleSecurityError("DIGEST_MISMATCH", "revision content digest differs")
+        if (
+            hashlib.sha256(revision["content"].encode()).hexdigest()
+            != revision["content_digest"]
+        ):
+            raise LifecycleSecurityError(
+                "DIGEST_MISMATCH", "revision content digest differs"
+            )
         if _revision_digest(revision) != revision["revision_digest"]:
             raise LifecycleSecurityError("DIGEST_MISMATCH", "revision digest differs")
         revisions.setdefault(revision["record_id"], []).append(revision)
@@ -772,32 +819,59 @@ def _validate_memory_invariants(manifest: Mapping[str, Any], scope: Scope) -> No
             raise LifecycleSecurityError("SCOPE_MISMATCH", "record scope differs")
         chain = sorted(revisions.get(record_id, []), key=lambda row: row["revision"])
         if [row["revision"] for row in chain] != list(range(1, len(chain) + 1)):
-            raise LifecycleSecurityError("REVISION_CHAIN_INVALID", "revision chain is not contiguous")
-        if not chain or chain[-1]["revision"] != record["current_revision"] or chain[-1]["revision_digest"] != record["current_revision_digest"]:
-            raise LifecycleSecurityError("REVISION_CHAIN_INVALID", "current revision is absent")
+            raise LifecycleSecurityError(
+                "REVISION_CHAIN_INVALID", "revision chain is not contiguous"
+            )
+        if (
+            not chain
+            or chain[-1]["revision"] != record["current_revision"]
+            or chain[-1]["revision_digest"] != record["current_revision_digest"]
+        ):
+            raise LifecycleSecurityError(
+                "REVISION_CHAIN_INVALID", "current revision is absent"
+            )
         for index, revision in enumerate(chain):
-            expected_parent = None if index == 0 else chain[index - 1]["revision_digest"]
+            expected_parent = (
+                None if index == 0 else chain[index - 1]["revision_digest"]
+            )
             if revision["parent_revision_digest"] != expected_parent:
-                raise LifecycleSecurityError("REVISION_CHAIN_INVALID", "revision parent differs")
+                raise LifecycleSecurityError(
+                    "REVISION_CHAIN_INVALID", "revision parent differs"
+                )
         if record["kind"] == "anchor" and len(chain) != 1:
-            raise LifecycleSecurityError("ANCHOR_INVALID", "anchor has multiple revisions")
+            raise LifecycleSecurityError(
+                "ANCHOR_INVALID", "anchor has multiple revisions"
+            )
         normalized = " ".join(chain[-1]["content"].split()).lower()
-        if hashlib.sha256(normalized.encode()).hexdigest() != record["normalized_content_digest"]:
-            raise LifecycleSecurityError("DIGEST_MISMATCH", "normalized content digest differs")
+        if (
+            hashlib.sha256(normalized.encode()).hexdigest()
+            != record["normalized_content_digest"]
+        ):
+            raise LifecycleSecurityError(
+                "DIGEST_MISMATCH", "normalized content digest differs"
+            )
         tombstoned = record["status"] == "tombstoned"
         if tombstoned != (record["deleted_at_ms"] is not None):
-            raise LifecycleSecurityError("TOMBSTONE_INVALID", "tombstone timestamps differ")
+            raise LifecycleSecurityError(
+                "TOMBSTONE_INVALID", "tombstone timestamps differ"
+            )
         if tombstoned and (
             record["retention_until_ms"] is None
             or record["retention_until_ms"] <= record["deleted_at_ms"]
         ):
-            raise LifecycleSecurityError("TOMBSTONE_INVALID", "recovery retention is invalid")
+            raise LifecycleSecurityError(
+                "TOMBSTONE_INVALID", "recovery retention is invalid"
+            )
     sources = {row["source_id"]: row for row in rows.get("memory_sources", [])}
-    for source in sources.values():
-        if source["owner_scope_digest"] != digest:
+    for captured_source in sources.values():
+        if captured_source["owner_scope_digest"] != digest:
             raise LifecycleSecurityError("SCOPE_MISMATCH", "source scope differs")
-        content = source["captured_content"]
-        if content is not None and hashlib.sha256(content.encode()).hexdigest() != source["source_digest"]:
+        content = captured_source["captured_content"]
+        if (
+            content is not None
+            and hashlib.sha256(content.encode()).hexdigest()
+            != captured_source["source_digest"]
+        ):
             raise LifecycleSecurityError("PROVENANCE_INVALID", "source digest differs")
     for provenance in rows.get("memory_provenance", []):
         source = sources.get(provenance["source_id"])
@@ -805,7 +879,9 @@ def _validate_memory_invariants(manifest: Mapping[str, Any], scope: Scope) -> No
         if source is None or not any(
             row["revision"] == provenance["revision"] for row in chain
         ):
-            raise LifecycleSecurityError("PROVENANCE_INVALID", "provenance target is absent")
+            raise LifecycleSecurityError(
+                "PROVENANCE_INVALID", "provenance target is absent"
+            )
         start, end = provenance["span_start"], provenance["span_end"]
         if (start is None) != (end is None) or (
             start is not None and (start < 0 or end < start)
@@ -814,7 +890,9 @@ def _validate_memory_invariants(manifest: Mapping[str, Any], scope: Scope) -> No
         if provenance["quoted_digest"] is not None:
             content = source["captured_content"]
             if content is None:
-                raise LifecycleSecurityError("PROVENANCE_INVALID", "quoted source is absent")
+                raise LifecycleSecurityError(
+                    "PROVENANCE_INVALID", "quoted source is absent"
+                )
             encoded = content.encode()
             selected = encoded if start is None else encoded[start:end]
             try:
@@ -824,13 +902,22 @@ def _validate_memory_invariants(manifest: Mapping[str, Any], scope: Scope) -> No
                     "PROVENANCE_INVALID", "source span splits UTF-8"
                 ) from error
             if hashlib.sha256(selected).hexdigest() != provenance["quoted_digest"]:
-                raise LifecycleSecurityError("PROVENANCE_INVALID", "quoted digest differs")
+                raise LifecycleSecurityError(
+                    "PROVENANCE_INVALID", "quoted digest differs"
+                )
     _validate_lineage(rows.get("memory_lineage", []), records, revisions)
     previous_cursor: tuple[int, int] | None = None
-    for event in sorted(rows.get("memory_mutation_events", []), key=lambda row: (row["epoch"], row["sequence"])):
+    for event in sorted(
+        rows.get("memory_mutation_events", []),
+        key=lambda row: (row["epoch"], row["sequence"]),
+    ):
         cursor = (event["epoch"], event["sequence"])
-        if event["owner_scope_digest"] != digest or (previous_cursor is not None and cursor <= previous_cursor):
-            raise LifecycleSecurityError("CURSOR_INVALID", "mutation cursor is not monotonic")
+        if event["owner_scope_digest"] != digest or (
+            previous_cursor is not None and cursor <= previous_cursor
+        ):
+            raise LifecycleSecurityError(
+                "CURSOR_INVALID", "mutation cursor is not monotonic"
+            )
         previous_cursor = cursor
 
 
@@ -870,12 +957,15 @@ def _validate_lineage(
         if child not in records or parent not in records:
             raise LifecycleSecurityError("LINEAGE_INVALID", "lineage record is absent")
         if not any(
-            row["revision"] == edge["child_revision"] for row in revisions.get(child, [])
+            row["revision"] == edge["child_revision"]
+            for row in revisions.get(child, [])
         ) or not any(
             row["revision_digest"] == edge["parent_revision_digest"]
             for row in revisions.get(parent, [])
         ):
-            raise LifecycleSecurityError("LINEAGE_INVALID", "lineage revision is absent")
+            raise LifecycleSecurityError(
+                "LINEAGE_INVALID", "lineage revision is absent"
+            )
         if edge["relation"] in acyclic:
             edges.setdefault(child, set()).add(parent)
     visiting: set[str] = set()
@@ -912,13 +1002,15 @@ def _replace_scope(
         record_ids = [
             value
             for (value,) in connection.execute(
-                "SELECT record_id FROM memory_records WHERE owner_scope_digest=?", (digest,)
+                "SELECT record_id FROM memory_records WHERE owner_scope_digest=?",
+                (digest,),
             )
         ]
         source_ids = [
             value
             for (value,) in connection.execute(
-                "SELECT source_id FROM memory_sources WHERE owner_scope_digest=?", (digest,)
+                "SELECT source_id FROM memory_sources WHERE owner_scope_digest=?",
+                (digest,),
             )
         ]
         _remove_scope_derivatives(connection, digest, record_ids)
@@ -926,17 +1018,29 @@ def _replace_scope(
         _delete_in(connection, "memory_provenance", "record_id", record_ids)
         _delete_in(connection, "memory_lineage", "child_record_id", record_ids)
         _delete_in(connection, "memory_lineage", "parent_record_id", record_ids)
-        for table in ("episode_details", "smart_note_details", "summary_details", "memory_revisions"):
+        for table in (
+            "episode_details",
+            "smart_note_details",
+            "summary_details",
+            "memory_revisions",
+        ):
             _delete_in(connection, table, "record_id", record_ids)
-        connection.execute("DELETE FROM memory_mutation_events WHERE owner_scope_digest=?", (digest,))
+        connection.execute(
+            "DELETE FROM memory_mutation_events WHERE owner_scope_digest=?", (digest,)
+        )
         if "memory_share_grants" in rows_by_table:
             connection.execute(
                 "DELETE FROM memory_share_grants WHERE owner_scope_digest=?", (digest,)
             )
-        connection.execute("DELETE FROM memory_records WHERE owner_scope_digest=?", (digest,))
+        connection.execute(
+            "DELETE FROM memory_records WHERE owner_scope_digest=?", (digest,)
+        )
         _delete_in(connection, "memory_sources", "source_id", source_ids)
         connection.execute("DELETE FROM memory_scopes WHERE scope_digest=?", (digest,))
-        connection.execute("DELETE FROM hypermid_lifecycle_tombstones WHERE owner_scope_digest=?", (digest,))
+        connection.execute(
+            "DELETE FROM hypermid_lifecycle_tombstones WHERE owner_scope_digest=?",
+            (digest,),
+        )
         order = (
             "memory_scopes",
             "memory_share_grants",
@@ -968,7 +1072,9 @@ def _replace_scope(
         connection.execute("PRAGMA foreign_keys=ON")
     violations = connection.execute("PRAGMA foreign_key_check").fetchall()
     if violations:
-        raise LifecycleSecurityError("RESTORE_FOREIGN_KEY_INVALID", "restored scope breaks references")
+        raise LifecycleSecurityError(
+            "RESTORE_FOREIGN_KEY_INVALID", "restored scope breaks references"
+        )
 
 
 def _validate_target_schema(
@@ -986,7 +1092,9 @@ def _validate_target_schema(
         manifest["schema_digest"],
     )
     if row is None or int(row[0]) > supported_schema or int(row[1]) > supported_schema:
-        raise LifecycleSecurityError("STORE_AHEAD", "active store schema is unsupported")
+        raise LifecycleSecurityError(
+            "STORE_AHEAD", "active store schema is unsupported"
+        )
     if tuple(row) != expected:
         raise LifecycleSecurityError(
             "SCHEMA_MISMATCH", "backup and active store schema identities differ"
@@ -1005,10 +1113,14 @@ def _validate_database_scope(
         ),
     )
     if restored["manifest"]["stream_digest"] != bundle["manifest"]["stream_digest"]:
-        raise LifecycleSecurityError("RESTORE_VALIDATION_FAILED", "restored rows differ from backup")
+        raise LifecycleSecurityError(
+            "RESTORE_VALIDATION_FAILED", "restored rows differ from backup"
+        )
 
 
-def _reject_purged_restore(active: Path, bundle: Mapping[str, Any], scope: Scope) -> None:
+def _reject_purged_restore(
+    active: Path, bundle: Mapping[str, Any], scope: Scope
+) -> None:
     connection = sqlite3.connect(f"file:{active}?mode=ro", uri=True)
     try:
         exists = connection.execute(
@@ -1030,7 +1142,8 @@ def _reject_purged_restore(active: Path, bundle: Mapping[str, Any], scope: Scope
         }
         if purged & backed_up:
             raise LifecycleSecurityError(
-                "STALE_BACKUP_TOMBSTONE", "backup would resurrect a physically purged record"
+                "STALE_BACKUP_TOMBSTONE",
+                "backup would resurrect a physically purged record",
             )
     finally:
         connection.close()
@@ -1040,21 +1153,76 @@ def _export_queries(
     digest: str, include_grants: bool
 ) -> list[tuple[str, str, tuple[Any, ...]]]:
     queries = [
-        ("memory_scopes", "SELECT * FROM memory_scopes WHERE scope_digest=? ORDER BY scope_digest", (digest,)),
-        ("memory_records", "SELECT * FROM memory_records WHERE owner_scope_digest=? ORDER BY record_id", (digest,)),
-        ("memory_revisions", "SELECT v.* FROM memory_revisions v JOIN memory_records r ON r.record_id=v.record_id WHERE r.owner_scope_digest=? ORDER BY v.record_id,v.revision", (digest,)),
-        ("episode_details", "SELECT d.* FROM episode_details d JOIN memory_records r ON r.record_id=d.record_id WHERE r.owner_scope_digest=? ORDER BY d.record_id", (digest,)),
-        ("smart_note_details", "SELECT d.* FROM smart_note_details d JOIN memory_records r ON r.record_id=d.record_id WHERE r.owner_scope_digest=? ORDER BY d.record_id", (digest,)),
-        ("summary_details", "SELECT d.* FROM summary_details d JOIN memory_records r ON r.record_id=d.record_id WHERE r.owner_scope_digest=? ORDER BY d.record_id", (digest,)),
-        ("memory_sources", "SELECT * FROM memory_sources WHERE owner_scope_digest=? ORDER BY source_id", (digest,)),
-        ("memory_provenance", "SELECT p.* FROM memory_provenance p JOIN memory_records r ON r.record_id=p.record_id WHERE r.owner_scope_digest=? ORDER BY p.record_id,p.revision,p.source_id,p.span_start", (digest,)),
-        ("memory_lineage", "SELECT l.* FROM memory_lineage l JOIN memory_records r ON r.record_id=l.child_record_id WHERE r.owner_scope_digest=? AND EXISTS(SELECT 1 FROM memory_records p WHERE p.record_id=l.parent_record_id AND p.owner_scope_digest=?) ORDER BY l.child_record_id,l.child_revision,l.parent_record_id,l.relation", (digest, digest)),
-        ("memory_verification_events", "SELECT e.* FROM memory_verification_events e JOIN memory_records r ON r.record_id=e.record_id WHERE r.owner_scope_digest=? ORDER BY e.event_id", (digest,)),
-        ("memory_mutation_events", "SELECT * FROM memory_mutation_events WHERE owner_scope_digest=? ORDER BY epoch,sequence", (digest,)),
-        ("hypermid_lifecycle_tombstones", "SELECT * FROM hypermid_lifecycle_tombstones WHERE owner_scope_digest=? ORDER BY record_id", (digest,)),
+        (
+            "memory_scopes",
+            "SELECT * FROM memory_scopes WHERE scope_digest=? ORDER BY scope_digest",
+            (digest,),
+        ),
+        (
+            "memory_records",
+            "SELECT * FROM memory_records WHERE owner_scope_digest=? ORDER BY record_id",
+            (digest,),
+        ),
+        (
+            "memory_revisions",
+            "SELECT v.* FROM memory_revisions v JOIN memory_records r ON r.record_id=v.record_id WHERE r.owner_scope_digest=? ORDER BY v.record_id,v.revision",
+            (digest,),
+        ),
+        (
+            "episode_details",
+            "SELECT d.* FROM episode_details d JOIN memory_records r ON r.record_id=d.record_id WHERE r.owner_scope_digest=? ORDER BY d.record_id",
+            (digest,),
+        ),
+        (
+            "smart_note_details",
+            "SELECT d.* FROM smart_note_details d JOIN memory_records r ON r.record_id=d.record_id WHERE r.owner_scope_digest=? ORDER BY d.record_id",
+            (digest,),
+        ),
+        (
+            "summary_details",
+            "SELECT d.* FROM summary_details d JOIN memory_records r ON r.record_id=d.record_id WHERE r.owner_scope_digest=? ORDER BY d.record_id",
+            (digest,),
+        ),
+        (
+            "memory_sources",
+            "SELECT * FROM memory_sources WHERE owner_scope_digest=? ORDER BY source_id",
+            (digest,),
+        ),
+        (
+            "memory_provenance",
+            "SELECT p.* FROM memory_provenance p JOIN memory_records r ON r.record_id=p.record_id WHERE r.owner_scope_digest=? ORDER BY p.record_id,p.revision,p.source_id,p.span_start",
+            (digest,),
+        ),
+        (
+            "memory_lineage",
+            "SELECT l.* FROM memory_lineage l JOIN memory_records r ON r.record_id=l.child_record_id WHERE r.owner_scope_digest=? AND EXISTS(SELECT 1 FROM memory_records p WHERE p.record_id=l.parent_record_id AND p.owner_scope_digest=?) ORDER BY l.child_record_id,l.child_revision,l.parent_record_id,l.relation",
+            (digest, digest),
+        ),
+        (
+            "memory_verification_events",
+            "SELECT e.* FROM memory_verification_events e JOIN memory_records r ON r.record_id=e.record_id WHERE r.owner_scope_digest=? ORDER BY e.event_id",
+            (digest,),
+        ),
+        (
+            "memory_mutation_events",
+            "SELECT * FROM memory_mutation_events WHERE owner_scope_digest=? ORDER BY epoch,sequence",
+            (digest,),
+        ),
+        (
+            "hypermid_lifecycle_tombstones",
+            "SELECT * FROM hypermid_lifecycle_tombstones WHERE owner_scope_digest=? ORDER BY record_id",
+            (digest,),
+        ),
     ]
     if include_grants:
-        queries.insert(1, ("memory_share_grants", "SELECT * FROM memory_share_grants WHERE owner_scope_digest=? ORDER BY grant_id", (digest,)))
+        queries.insert(
+            1,
+            (
+                "memory_share_grants",
+                "SELECT * FROM memory_share_grants WHERE owner_scope_digest=? ORDER BY grant_id",
+                (digest,),
+            ),
+        )
     return queries
 
 
@@ -1067,8 +1235,7 @@ def _query_dicts(
 
 
 def _ensure_tombstone_table(connection: sqlite3.Connection) -> None:
-    connection.execute(
-        """
+    connection.execute("""
         CREATE TABLE IF NOT EXISTS hypermid_lifecycle_tombstones (
             record_id TEXT PRIMARY KEY,
             owner_scope_digest TEXT NOT NULL,
@@ -1077,8 +1244,7 @@ def _ensure_tombstone_table(connection: sqlite3.Connection) -> None:
             retention_until_ms INTEGER NOT NULL,
             purged_at_ms INTEGER
         ) STRICT
-        """
-    )
+        """)
 
 
 def _remove_derivatives(connection: sqlite3.Connection, record_id: str) -> None:
@@ -1098,7 +1264,9 @@ def _remove_derivatives(connection: sqlite3.Connection, record_id: str) -> None:
                 "VALUES('delete',?,?,?,?,?)",
                 (rowid, record_id, scope_digest, category, content),
             )
-        connection.execute("DELETE FROM memory_fts_rows WHERE record_id=?", (record_id,))
+        connection.execute(
+            "DELETE FROM memory_fts_rows WHERE record_id=?", (record_id,)
+        )
     for table in ("memory_embeddings", "memory_retrieval_stats"):
         if _table_exists(connection, table):
             connection.execute(f"DELETE FROM {table} WHERE record_id=?", (record_id,))
@@ -1129,7 +1297,8 @@ def _remove_scope_derivatives(
             (scope_digest,),
         )
         connection.execute(
-            "DELETE FROM source_index_documents WHERE owner_scope_digest=?", (scope_digest,)
+            "DELETE FROM source_index_documents WHERE owner_scope_digest=?",
+            (scope_digest,),
         )
     for table in (
         "source_index_state",
@@ -1167,7 +1336,8 @@ def _remove_scope_derivatives(
         )
     if _table_exists(connection, "embedding_registrations"):
         connection.execute(
-            "DELETE FROM embedding_registrations WHERE owner_scope_digest=?", (scope_digest,)
+            "DELETE FROM embedding_registrations WHERE owner_scope_digest=?",
+            (scope_digest,),
         )
     if _table_exists(connection, "recovery_snapshots"):
         connection.execute("DELETE FROM recovery_snapshots")
@@ -1179,7 +1349,9 @@ def _delete_in(
     if not values or not _table_exists(connection, table):
         return
     placeholders = ",".join("?" for _ in values)
-    connection.execute(f"DELETE FROM {table} WHERE {column} IN ({placeholders})", values)
+    connection.execute(
+        f"DELETE FROM {table} WHERE {column} IN ({placeholders})", values
+    )
 
 
 def _table_exists(connection: sqlite3.Connection, table: str) -> bool:
@@ -1221,7 +1393,8 @@ def _reject_forbidden(value: object) -> None:
         for key, child in value.items():
             if str(key).lower() in _FORBIDDEN_FIELDS:
                 raise LifecycleSecurityError(
-                    "FORBIDDEN_BACKUP_FIELD", "backup contains secret or transient state"
+                    "FORBIDDEN_BACKUP_FIELD",
+                    "backup contains secret or transient state",
                 )
             _reject_forbidden(child)
     elif isinstance(value, (list, tuple)):
@@ -1241,7 +1414,9 @@ def _require_regular(path: Path, code: str) -> None:
     try:
         mode = path.lstat().st_mode
     except OSError as error:
-        raise LifecycleSecurityError(code, "required lifecycle file is absent") from error
+        raise LifecycleSecurityError(
+            code, "required lifecycle file is absent"
+        ) from error
     if not stat.S_ISREG(mode):
         raise LifecycleSecurityError(code, "lifecycle path is not a regular file")
 
@@ -1381,7 +1556,9 @@ def _file_digest(path: Path) -> Digest:
 
 def _atomic_private_write(path: Path, content: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    descriptor, temporary = tempfile.mkstemp(prefix=".hypermid-backup-", dir=path.parent)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=".hypermid-backup-", dir=path.parent
+    )
     temporary_path = Path(temporary)
     try:
         os.fchmod(descriptor, 0o600)

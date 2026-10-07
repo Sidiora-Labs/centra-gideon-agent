@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .contracts import (
+        SmartNoteEvaluation,
+        KnowledgeVerification,
+        KnowledgeSharingJudgment,
+    )
+
 from collections.abc import Mapping, Sequence
 
 from .client import HypermidClient, HypermidProtocolError
@@ -11,22 +20,22 @@ from .contracts import (
     KnowledgePublication,
     KnowledgePublicationAuthority,
     KnowledgePublicationReceipt,
-    MemoryContractError,
-    MemoryDiagnostics,
-    MemoryHealth,
     MaintenanceClaimProof,
     MaintenanceClaimReceipt,
     MaintenanceJobSpec,
     MaintenanceTerminalState,
+    MemoryContractError,
+    MemoryDiagnostics,
+    MemoryHealth,
     MemoryOperation,
     MemoryRecord,
     MutationReceipt,
     MutationRequest,
-    RelocationReceipt,
     RecordDraft,
     RecordPage,
     RecordStatus,
     RecordView,
+    RelocationReceipt,
     SearchRequest,
     SearchResponse,
     ServiceResult,
@@ -90,17 +99,24 @@ class MemoryClient:
         if request.operation is not expected:
             raise ValueError(f"mutation request must use {expected.value}")
         if request.actor_scope != self.scope:
-            raise NativeMemoryAuthorityDenied("mutation actor scope does not match the authenticated scope")
+            raise NativeMemoryAuthorityDenied(
+                "mutation actor scope does not match the authenticated scope"
+            )
 
     def _access(self, request: AccessRequest) -> None:
         if request.actor_scope != self.scope:
-            raise NativeMemoryAuthorityDenied("access actor scope does not match the authenticated scope")
+            raise NativeMemoryAuthorityDenied(
+                "access actor scope does not match the authenticated scope"
+            )
 
     def _job_spec(self, request: MutationRequest, spec: MaintenanceJobSpec) -> None:
         self._mutation(request, spec.required_operation)
         if request.record_id != spec.id:
             raise ValueError("maintenance request does not identify its job")
-        if request.actor_scope != spec.actor_scope or request.target_scope != spec.target_scope:
+        if (
+            request.actor_scope != spec.actor_scope
+            or request.target_scope != spec.target_scope
+        ):
             raise ValueError("maintenance job scopes do not match its request")
 
     def _claim(self, request: MutationRequest, proof: MaintenanceClaimProof) -> None:
@@ -115,7 +131,9 @@ class MemoryClient:
     ) -> None:
         self._mutation(request, operation)
         if request.record_id is not None:
-            raise ValueError("portability requests must use the memory-portability resource")
+            raise ValueError(
+                "portability requests must use the memory-portability resource"
+            )
 
     async def health(self, *, trace: Trace) -> MemoryHealth:
         return MemoryHealth.from_wire(
@@ -183,34 +201,69 @@ class MemoryClient:
         self._access(request)
         if request.operation.value != "read":
             raise ValueError("capture origin inspection requires read authority")
-        return await self._call("memory.record.origins", {"request": request.to_wire(),
-            "authority_resource": "memory-records"}, trace=request.trace)
+        return await self._call(
+            "memory.record.origins",
+            {"request": request.to_wire(), "authority_resource": "memory-records"},
+            trace=request.trace,
+        )
 
-    async def write_captured(self, request: MutationRequest, draft: RecordDraft, *,
-                             sources: Sequence[SourceSnapshot], capture, writer_lease: Mapping,
-                             now_ms: int) -> MutationReceipt:
+    async def write_captured(
+        self,
+        request: MutationRequest,
+        draft: RecordDraft,
+        *,
+        sources: Sequence[SourceSnapshot],
+        capture,
+        writer_lease: Mapping,
+        now_ms: int,
+    ) -> MutationReceipt:
         from .contracts import OwnerWordCapture
+
         if request.operation not in {MemoryOperation.CREATE, MemoryOperation.UPDATE}:
             raise ValueError("captured writes require create or update")
         self._mutation(request, request.operation)
         if not isinstance(capture, OwnerWordCapture):
             raise TypeError("captured write requires typed owner-word evidence")
-        value = await self._call("memory.record." + request.operation.value,
-            {"request": request.to_wire(), "draft": draft.to_wire(),
-             "sources": [source.to_wire() for source in sources], "capture": capture.to_wire(),
-             "writer_lease": dict(writer_lease), "now_ms": now_ms,
-             "authority_resource": "memory-records"}, trace=request.trace, durable=True)
+        value = await self._call(
+            "memory.record." + request.operation.value,
+            {
+                "request": request.to_wire(),
+                "draft": draft.to_wire(),
+                "sources": [source.to_wire() for source in sources],
+                "capture": capture.to_wire(),
+                "writer_lease": dict(writer_lease),
+                "now_ms": now_ms,
+                "authority_resource": "memory-records",
+            },
+            trace=request.trace,
+            durable=True,
+        )
         return MutationReceipt.from_wire(value)
 
-    async def retract_chat(self, request: MutationRequest, *, history_session_id: Id,
-                           expected_cursor: Cursor, writer_lease: Mapping):
+    async def retract_chat(
+        self,
+        request: MutationRequest,
+        *,
+        history_session_id: Id,
+        expected_cursor: Cursor,
+        writer_lease: Mapping,
+    ):
         from .contracts import ChatRetraction
+
         self._mutation(request, MemoryOperation.DELETE)
         if request.record_id != Id("memory-records") or request.category is not None:
             raise ValueError("chat retraction requires exact record collection")
-        value = await self._call("memory.chat.retract", {"request": request.to_wire(),
-            "history_session_id": str(history_session_id), "expected_cursor": expected_cursor.to_wire(),
-            "writer_lease": dict(writer_lease)}, trace=request.trace, durable=True)
+        value = await self._call(
+            "memory.chat.retract",
+            {
+                "request": request.to_wire(),
+                "history_session_id": str(history_session_id),
+                "expected_cursor": expected_cursor.to_wire(),
+                "writer_lease": dict(writer_lease),
+            },
+            trace=request.trace,
+            durable=True,
+        )
         return ChatRetraction.from_wire(value)
 
     async def _record_state(
@@ -236,28 +289,44 @@ class MemoryClient:
         return MutationReceipt.from_wire(value)
 
     async def archive(
-        self, request: MutationRequest, *, now_ms: int, authority_resource: Id | None = None
+        self,
+        request: MutationRequest,
+        *,
+        now_ms: int,
+        authority_resource: Id | None = None,
     ) -> MutationReceipt:
         return await self._record_state(
             MemoryOperation.ARCHIVE, request, now_ms, authority_resource
         )
 
     async def restore(
-        self, request: MutationRequest, *, now_ms: int, authority_resource: Id | None = None
+        self,
+        request: MutationRequest,
+        *,
+        now_ms: int,
+        authority_resource: Id | None = None,
     ) -> MutationReceipt:
         return await self._record_state(
             MemoryOperation.RESTORE, request, now_ms, authority_resource
         )
 
     async def delete(
-        self, request: MutationRequest, *, now_ms: int, authority_resource: Id | None = None
+        self,
+        request: MutationRequest,
+        *,
+        now_ms: int,
+        authority_resource: Id | None = None,
     ) -> MutationReceipt:
         return await self._record_state(
             MemoryOperation.DELETE, request, now_ms, authority_resource
         )
 
     async def purge(
-        self, request: MutationRequest, *, now_ms: int, authority_resource: Id | None = None
+        self,
+        request: MutationRequest,
+        *,
+        now_ms: int,
+        authority_resource: Id | None = None,
     ) -> Cursor:
         self._mutation(request, MemoryOperation.PURGE)
         payload: dict[str, JsonValue] = {
@@ -292,7 +361,9 @@ class MemoryClient:
             "request": request.to_wire(),
             "state": VerificationState(state).value,
             "confidence": confidence,
-            "evidence_source_id": str(evidence_source_id) if evidence_source_id else None,
+            "evidence_source_id": (
+                str(evidence_source_id) if evidence_source_id else None
+            ),
             "now_ms": now_ms,
         }
         if authority_resource is not None:
@@ -639,7 +710,10 @@ class MemoryClient:
         self._claim(request, proof)
         if request.operation is not MemoryOperation.INDEX:
             raise ValueError("knowledge publication requires an index job")
-        if publication.job_id != request.record_id or publication.job_id != proof.job_id:
+        if (
+            publication.job_id != request.record_id
+            or publication.job_id != proof.job_id
+        ):
             raise ValueError("knowledge publication does not match its claimed job")
         self._knowledge_authorities(
             request,
@@ -684,7 +758,19 @@ class MemoryClient:
         sharing_judgments: Sequence[KnowledgePublicationAuthority],
         recall: KnowledgePublicationAuthority | None,
     ) -> None:
-        arms = (
+        arms: tuple[
+            tuple[
+                Sequence[
+                    SmartNoteEvaluation
+                    | KnowledgeVerification
+                    | KnowledgeSharingJudgment
+                ],
+                Sequence[KnowledgePublicationAuthority],
+                MemoryOperation,
+                str,
+            ],
+            ...,
+        ] = (
             (
                 publication.smart_notes,
                 smart_notes,
@@ -711,7 +797,9 @@ class MemoryClient:
                 mutation = authority.request
                 self._mutation(mutation, operation)
                 if mutation.target_scope != job_request.target_scope:
-                    raise ValueError(f"knowledge {name} target scope differs from the job")
+                    raise ValueError(
+                        f"knowledge {name} target scope differs from the job"
+                    )
                 if mutation.record_id is None or mutation.category is None:
                     raise ValueError(
                         f"knowledge {name} authority requires a categorized record"
@@ -840,8 +928,12 @@ class MemoryClient:
         self._mutation(request, MemoryOperation.EMBED)
         result = await self._call(
             "memory.embedding.publish",
-            {"request": request.to_wire(), "guard": dict(guard),
-             "response": dict(response), "now_ms": now_ms},
+            {
+                "request": request.to_wire(),
+                "guard": dict(guard),
+                "response": dict(response),
+                "now_ms": now_ms,
+            },
             trace=request.trace,
             durable=True,
         )
@@ -908,7 +1000,10 @@ class MemoryClient:
         self, request: MutationRequest, spec: MaintenanceJobSpec
     ) -> ServiceResult:
         self._portability(request, MemoryOperation.IMPORT)
-        if request.actor_scope != spec.actor_scope or request.target_scope != spec.target_scope:
+        if (
+            request.actor_scope != spec.actor_scope
+            or request.target_scope != spec.target_scope
+        ):
             raise ValueError("import preparation job scopes do not match its request")
         if spec.required_operation is not MemoryOperation.IMPORT:
             raise ValueError("import preparation job must require import authority")
@@ -924,7 +1019,10 @@ class MemoryClient:
         self, request: MutationRequest, spec: MaintenanceJobSpec
     ) -> ServiceResult:
         self._portability(request, MemoryOperation.EXPORT)
-        if request.actor_scope != spec.actor_scope or request.target_scope != spec.target_scope:
+        if (
+            request.actor_scope != spec.actor_scope
+            or request.target_scope != spec.target_scope
+        ):
             raise ValueError("export preparation job scopes do not match its request")
         if spec.required_operation is not MemoryOperation.EXPORT:
             raise ValueError("export preparation job must require export authority")

@@ -1,17 +1,39 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .operator_lifecycle import LifecycleOperation
+
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from .operations import PlanStep
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .security_operations import SecurityOperations
+    from .local_install import LocalInstallAuthority
+    from .lifecycle import HypermidLifecycle
+    from .status import HypermidStatus
+
 from dataclasses import asdict, dataclass
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from .foundation import Cursor
+from .operations import (
+    ActionPlan,
+    ActionReceipt,
+    DiagnosticsSnapshot,
+    HypermidOperations,
+)
 from .operator_lifecycle import (
     HypermidOperatorLifecycle,
     LifecyclePlan,
     LifecycleReceipt,
     RecoveredLifecycle,
 )
-from .operations import ActionPlan, ActionReceipt, DiagnosticsSnapshot, HypermidOperations
-
 
 _LOCAL_BACKUP_CREDENTIAL_REF = "local-backup"
 
@@ -31,7 +53,7 @@ def _safe_error(error: BaseException) -> HypermidHandlerError:
     return HypermidHandlerError(code, message)
 
 
-def _step(step: object) -> dict[str, Any]:
+def _step(step: PlanStep) -> dict[str, Any]:
     value = asdict(step)
     return {key: child for key, child in value.items() if child is not None}
 
@@ -97,10 +119,10 @@ class HypermidHandlers:
         operations: HypermidOperations,
         lifecycle: HypermidOperatorLifecycle,
         *,
-        local_status: object | None = None,
-        security_operations: object | None = None,
-        security_owner: object | None = None,
-        local_install_authority: object | None = None,
+        local_status: Callable[[], HypermidStatus] | None = None,
+        security_operations: SecurityOperations | None = None,
+        security_owner: HypermidLifecycle | None = None,
+        local_install_authority: LocalInstallAuthority | None = None,
     ) -> None:
         self.operations = operations
         self.lifecycle = lifecycle
@@ -108,20 +130,29 @@ class HypermidHandlers:
         self.security_operations = security_operations
         self.security_owner = security_owner
         self.local_install_authority = local_install_authority
-        self._plans: dict[str, tuple[object, LifecyclePlan]] = {}
+        self._plans: dict[
+            str, tuple[LocalInstallAuthority | HypermidOperatorLifecycle, LifecyclePlan]
+        ] = {}
         self._maintenance_plans: dict[str, ActionPlan] = {}
 
     async def status(self) -> Mapping[str, Any]:
         local: dict[str, Any] = {}
         if self.local_status is not None:
             snapshot = self.local_status()
-            local = snapshot.to_dict() if hasattr(snapshot, "to_dict") else dict(snapshot)
+            local = (
+                snapshot.to_dict()
+                if hasattr(snapshot, "to_dict")
+                else dict(cast(Mapping[str, object], snapshot))
+            )
         try:
             remote = dict(await self.operations.status())
         except Exception as error:
             if local:
                 local["recovery_state"] = "daemon_unavailable"
-                local["error"] = {"code": getattr(error, "code", "DAEMON_UNAVAILABLE"), "message": str(error)[:240]}
+                local["error"] = {
+                    "code": getattr(error, "code", "DAEMON_UNAVAILABLE"),
+                    "message": str(error)[:240],
+                }
                 return local
             raise _safe_error(error) from error
         result = dict(local)
@@ -221,7 +252,7 @@ class HypermidHandlers:
         except Exception as error:
             raise _safe_error(error) from error
 
-    def _security(self) -> object:
+    def _security(self) -> SecurityOperations:
         if self.security_operations is None and self.security_owner is not None:
             from .credential_authority import attach_security_operations
 
@@ -268,7 +299,7 @@ class HypermidHandlers:
             from .network_policy import SecretHandle
 
             for action in ("backup", "restore"):
-                handle = handles.get(action)
+                handle = cast(Mapping[str, object], handles).get(action)
                 if not isinstance(handle, str):
                     configured = False
                     break
@@ -325,9 +356,7 @@ class HypermidHandlers:
 
     async def security_status(self, job_id: str) -> Mapping[str, Any]:
         try:
-            return await self._security().status(
-                job_id, self.lifecycle.client.scope
-            )
+            return await self._security().status(job_id, self.lifecycle.client.scope)
         except HypermidHandlerError:
             raise
         except Exception as error:
@@ -335,9 +364,7 @@ class HypermidHandlers:
 
     async def security_recover(self, job_id: str) -> Mapping[str, Any]:
         try:
-            return await self._security().recover(
-                job_id, self.lifecycle.client.scope
-            )
+            return await self._security().recover(job_id, self.lifecycle.client.scope)
         except HypermidHandlerError:
             raise
         except Exception as error:
@@ -348,7 +375,7 @@ class HypermidHandlers:
             after = payload.get("resume_after")
             authority = self._lifecycle_authority(action)
             plan = await authority.plan(
-                action,
+                cast("LifecycleOperation", action),
                 target_version=payload.get("target_version"),
                 data_disposition=payload.get("data_disposition"),
                 source=payload.get("source"),
@@ -359,7 +386,9 @@ class HypermidHandlers:
             self._plans[plan.plan.plan_id] = (authority, plan)
             raw = plan.plan.raw
             if not isinstance(raw, Mapping):
-                raise HypermidHandlerError("INVALID_PLAN", "daemon returned no reviewable plan")
+                raise HypermidHandlerError(
+                    "INVALID_PLAN", "daemon returned no reviewable plan"
+                )
             return raw
         except HypermidHandlerError:
             raise
@@ -370,10 +399,14 @@ class HypermidHandlers:
         plan_id = payload.get("plan_id")
         plan_digest = payload.get("plan_digest")
         if not isinstance(plan_id, str) or not isinstance(plan_digest, str):
-            raise HypermidHandlerError("INVALID_REQUEST", "plan_id and plan_digest are required")
+            raise HypermidHandlerError(
+                "INVALID_REQUEST", "plan_id and plan_digest are required"
+            )
         selected = self._plans.get(plan_id)
         if selected is None or selected[1].action != action:
-            raise HypermidHandlerError("PLAN_NOT_FOUND", "reviewed lifecycle plan is not available")
+            raise HypermidHandlerError(
+                "PLAN_NOT_FOUND", "reviewed lifecycle plan is not available"
+            )
         authority, plan = selected
         try:
             receipt = await authority.apply(
@@ -388,11 +421,16 @@ class HypermidHandlers:
         except Exception as error:
             raise _safe_error(error) from error
 
-    def _lifecycle_authority(self, action: str) -> object:
+    def _lifecycle_authority(
+        self, action: str
+    ) -> LocalInstallAuthority | HypermidOperatorLifecycle:
         if (
             action == "install"
             and self.local_install_authority is not None
-            and (not self.lifecycle.client.connected or getattr(self.security_owner, "process", None) is not None)
+            and (
+                not self.lifecycle.client.connected
+                or getattr(self.security_owner, "process", None) is not None
+            )
         ):
             return self.local_install_authority
         return self.lifecycle
@@ -406,18 +444,25 @@ class HypermidHandlers:
     async def recover(self, job_id: str) -> Mapping[str, Any]:
         try:
             recovered: RecoveredLifecycle = await self.lifecycle.recover(job_id)
-            return {"receipt": _receipt(recovered.receipt), "recovery_state": recovered.recovery_state}
+            return {
+                "receipt": _receipt(recovered.receipt),
+                "recovery_state": recovered.recovery_state,
+            }
         except Exception as error:
             raise _safe_error(error) from error
 
-    async def resume(self, job_id: str, after: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
+    async def resume(
+        self, job_id: str, after: Mapping[str, Any] | None = None
+    ) -> Mapping[str, Any]:
         try:
             cursor = Cursor.from_wire(after) if after is not None else None
             return _receipt(await self.lifecycle.resume(job_id, after=cursor))
         except Exception as error:
             raise _safe_error(error) from error
 
-    async def dispatch(self, operation: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    async def dispatch(
+        self, operation: str, payload: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
         if operation == "status":
             return await self.status()
         if operation == "doctor":
@@ -466,11 +511,16 @@ class HypermidHandlers:
                 return await self.recover(str(payload.get("job_id", "")))
             if operation == "lifecycle.resume":
                 after = payload.get("after")
-                return await self.resume(str(payload.get("job_id", "")), after if isinstance(after, Mapping) else None)
-        raise HypermidHandlerError("UNSUPPORTED_OPERATION", "Hypermid operation is unsupported")
+                return await self.resume(
+                    str(payload.get("job_id", "")),
+                    after if isinstance(after, Mapping) else None,
+                )
+        raise HypermidHandlerError(
+            "UNSUPPORTED_OPERATION", "Hypermid operation is unsupported"
+        )
 
 
-def service_for(owner: object) -> HypermidHandlers:
+def service_for(owner: HypermidLifecycle) -> HypermidHandlers:
     existing = getattr(owner, "handlers", None)
     if isinstance(existing, HypermidHandlers):
         existing.security_owner = owner
@@ -481,7 +531,9 @@ def service_for(owner: object) -> HypermidHandlers:
     adapter = getattr(owner, "adapter", None)
     client = getattr(adapter, "client", None)
     if client is None:
-        raise HypermidHandlerError("NOT_CONFIGURED", "Hypermid client is not configured")
+        raise HypermidHandlerError(
+            "NOT_CONFIGURED", "Hypermid client is not configured"
+        )
     local_install = getattr(owner, "local_install_authority", None)
     if local_install is None:
         daemon_config = getattr(owner, "daemon_config", None)

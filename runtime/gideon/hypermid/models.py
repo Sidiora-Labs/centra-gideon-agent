@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import re
 from dataclasses import dataclass
@@ -19,7 +20,9 @@ from .foundation import (
     Trace,
 )
 
-JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
+JsonValue: TypeAlias = (
+    None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
+)
 EnvelopeKind = Literal[
     "request", "response", "event", "credit", "cancel", "ping", "pong", "close"
 ]
@@ -40,7 +43,9 @@ def _mapping(value: object, name: str) -> Mapping[str, Any]:
 
 def _string(value: object, name: str, *, maximum: int) -> str:
     if not isinstance(value, str) or not value or len(value) > maximum:
-        raise ValueError(f"{name} must be a non-empty string at most {maximum} characters")
+        raise ValueError(
+            f"{name} must be a non-empty string at most {maximum} characters"
+        )
     return value
 
 
@@ -76,7 +81,9 @@ class Principal:
         scopes = raw.get("scopes")
         if not isinstance(scopes, list) or len(scopes) > 256:
             raise ValueError("principal.scopes must be a bounded array")
-        parsed_scopes = tuple(_string(item, "principal scope", maximum=160) for item in scopes)
+        parsed_scopes = tuple(
+            _string(item, "principal scope", maximum=160) for item in scopes
+        )
         if len(set(parsed_scopes)) != len(parsed_scopes):
             raise ValueError("principal.scopes must be unique")
         module_id = raw.get("module_id")
@@ -204,7 +211,9 @@ class Envelope:
     error: Error | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "message_id", _identifier(self.message_id, "message_id"))
+        object.__setattr__(
+            self, "message_id", _identifier(self.message_id, "message_id")
+        )
         _integer(
             self.sequence,
             "sequence",
@@ -241,7 +250,10 @@ class Envelope:
                 maximum=MAX_SAFE_INTEGER,
             )
         if self.operation is not None:
-            if len(self.operation) > 160 or _OPERATION_RE.fullmatch(self.operation) is None:
+            if (
+                len(self.operation) > 160
+                or _OPERATION_RE.fullmatch(self.operation) is None
+            ):
                 raise ValueError("operation is invalid")
         if self.deadline_ms is not None:
             _integer(
@@ -394,7 +406,9 @@ class SubscriptionSnapshot:
                 raw.get("subscription_id", "events"), "subscription_id"
             ),
             cursor=Cursor.from_wire(cursor_value),
-            recovery_cursor=(Cursor.from_wire(recovery) if recovery is not None else None),
+            recovery_cursor=(
+                Cursor.from_wire(recovery) if recovery is not None else None
+            ),
         )
 
 
@@ -440,7 +454,7 @@ class EventChunk:
             raise ValueError("event chunk data must be base64")
         try:
             data = base64.b64decode(encoded, validate=True)
-        except (ValueError, base64.binascii.Error) as exc:
+        except (ValueError, binascii.Error) as exc:
             raise ValueError("event chunk data must be canonical base64") from exc
         return cls(
             event_id=_identifier(raw.get("event_id"), "event_id"),
@@ -456,7 +470,7 @@ class EventChunk:
                 minimum=1,
                 maximum=131_072,
             ),
-            digest=_string(raw.get("digest"), "digest", maximum=64),
+            digest=Digest(_string(raw.get("digest"), "digest", maximum=64)),
             data=data,
         )
 
@@ -490,7 +504,7 @@ class EventReassembler:
         body = b"".join(self._chunks)
         if hashlib.sha256(body).hexdigest() != self._digest:
             raise ValueError("event chunk digest mismatch")
-        self.__init__()
+        EventReassembler.__init__(self)
         return body
 
 

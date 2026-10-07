@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Protocol, Sequence
+from typing import Any, Iterable, Mapping, Protocol, Sequence, cast
 
 from .foundation import Cursor, Digest, Error, Id, Scope
 from .identity import IdentityRelation, RelationKind
@@ -107,7 +107,9 @@ class ContextPart:
             ):
                 raise HistoryError("INVALID_PART", "media part is incomplete")
             for value in (self.width, self.height):
-                if value is not None and (isinstance(value, bool) or not 1 <= value <= 100_000):
+                if value is not None and (
+                    isinstance(value, bool) or not 1 <= value <= 100_000
+                ):
                     raise HistoryError("INVALID_PART", "media dimensions are invalid")
             actual = _structured_digest(
                 (
@@ -118,7 +120,9 @@ class ContextPart:
                 )
             )
         if actual != self.content_digest:
-            raise HistoryError("PART_DIGEST_MISMATCH", "part digest does not match content")
+            raise HistoryError(
+                "PART_DIGEST_MISMATCH", "part digest does not match content"
+            )
 
     def to_mapping(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -202,7 +206,9 @@ class PendingContextItem:
         ):
             raise HistoryError("INVALID_ITEM", "context item is structurally invalid")
         if self.tombstone and not self.relations:
-            raise HistoryError("UNRELATED_TOMBSTONE", "tombstone must identify a prior item")
+            raise HistoryError(
+                "UNRELATED_TOMBSTONE", "tombstone must identify a prior item"
+            )
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -292,18 +298,17 @@ class RecoveredItem:
 
 
 class SourceAdapter(Protocol):
-    def resolve(
-        self, scope: Scope, session_id: Id, source_event_id: Id
-    ) -> bytes: ...
+    def resolve(self, scope: Scope, session_id: Id, source_event_id: Id) -> bytes: ...
 
 
 class RawSourceJournal:
     def __init__(self, path: str | Path) -> None:
-        self._connection = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+        self._connection = sqlite3.connect(
+            path, isolation_level=None, check_same_thread=False
+        )
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA synchronous=FULL")
-        self._connection.executescript(
-            """
+        self._connection.executescript("""
             CREATE TABLE IF NOT EXISTS raw_source_events (
                 owner_id TEXT NOT NULL,
                 project_id TEXT NOT NULL,
@@ -318,8 +323,7 @@ class RawSourceJournal:
             BEFORE UPDATE ON raw_source_events BEGIN SELECT RAISE(ABORT, 'raw source journal is immutable'); END;
             CREATE TRIGGER IF NOT EXISTS raw_source_events_no_delete
             BEFORE DELETE ON raw_source_events BEGIN SELECT RAISE(ABORT, 'raw source journal is immutable'); END;
-            """
-        )
+            """)
         self._lock = threading.RLock()
 
     def append(
@@ -359,10 +363,14 @@ class RawSourceJournal:
                 key,
             ).fetchone()
         if row is None:
-            raise HistoryError("SOURCE_UNAVAILABLE", "authoritative source event was not found")
+            raise HistoryError(
+                "SOURCE_UNAVAILABLE", "authoritative source event was not found"
+            )
         source_bytes = bytes(row[1])
         if Digest.sha256(source_bytes) != row[0]:
-            raise HistoryError("SOURCE_DIGEST_MISMATCH", "authoritative source content is corrupt")
+            raise HistoryError(
+                "SOURCE_DIGEST_MISMATCH", "authoritative source content is corrupt"
+            )
         return source_bytes
 
 
@@ -378,7 +386,9 @@ class HistoryJournal:
         self.scope = scope
         self.session_id = Id(session_id)
         self.epoch = Cursor(epoch, 0).epoch
-        self._connection = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+        self._connection = sqlite3.connect(
+            path, isolation_level=None, check_same_thread=False
+        )
         self._connection.row_factory = sqlite3.Row
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA synchronous=FULL")
@@ -387,8 +397,7 @@ class HistoryJournal:
         self._initialize()
 
     def _initialize(self) -> None:
-        self._connection.executescript(
-            """
+        self._connection.executescript("""
             CREATE TABLE IF NOT EXISTS history_binding (
                 singleton INTEGER PRIMARY KEY CHECK (singleton=1),
                 owner_id TEXT NOT NULL,
@@ -412,8 +421,7 @@ class HistoryJournal:
             BEFORE UPDATE ON history_entries BEGIN SELECT RAISE(ABORT, 'history journal is immutable'); END;
             CREATE TRIGGER IF NOT EXISTS history_entries_no_delete
             BEFORE DELETE ON history_entries BEGIN SELECT RAISE(ABORT, 'history journal is immutable'); END;
-            """
-        )
+            """)
         expected = _scope_key(self.scope) + (str(self.session_id), self.epoch)
         row = self._connection.execute(
             "SELECT owner_id, project_id, workspace_id, session_id, epoch FROM history_binding WHERE singleton=1"
@@ -449,7 +457,9 @@ class HistoryJournal:
             "expected_cursor": expected_cursor.to_wire(),
             "idempotency_key": str(idempotency_key),
             "item": item.to_mapping(),
-            "source_snapshot": source_snapshot.hex() if source_snapshot is not None else None,
+            "source_snapshot": (
+                source_snapshot.hex() if source_snapshot is not None else None
+            ),
         }
         request_digest = Digest.sha256(_canonical_json(request_payload))
         source_fingerprint = Digest.sha256(
@@ -462,8 +472,13 @@ class HistoryJournal:
                 }
             )
         )
-        if source_snapshot is not None and Digest.sha256(source_snapshot) != item.source_digest:
-            raise HistoryError("SOURCE_DIGEST_MISMATCH", "source snapshot digest does not match")
+        if (
+            source_snapshot is not None
+            and Digest.sha256(source_snapshot) != item.source_digest
+        ):
+            raise HistoryError(
+                "SOURCE_DIGEST_MISMATCH", "source snapshot digest does not match"
+            )
 
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
@@ -496,13 +511,20 @@ class HistoryJournal:
 
                 current = self._cursor_locked()
                 if expected_cursor != current:
-                    raise HistoryError("STALE_CURSOR", "expected cursor is stale", retryable=True)
+                    raise HistoryError(
+                        "STALE_CURSOR", "expected cursor is stale", retryable=True
+                    )
                 if item.scope != self.scope or item.session_id != self.session_id:
-                    raise HistoryError("SCOPE_MISMATCH", "item does not match journal binding")
+                    raise HistoryError(
+                        "SCOPE_MISMATCH", "item does not match journal binding"
+                    )
                 if self._connection.execute(
-                    "SELECT 1 FROM history_entries WHERE item_id=?", (str(item.item_id),)
+                    "SELECT 1 FROM history_entries WHERE item_id=?",
+                    (str(item.item_id),),
                 ).fetchone():
-                    raise HistoryError("ITEM_IDENTITY_CONFLICT", "item id is already committed")
+                    raise HistoryError(
+                        "ITEM_IDENTITY_CONFLICT", "item id is already committed"
+                    )
                 self._validate_relations(item)
                 self._validate_tool_linkage(item)
                 cursor = current.next()
@@ -588,9 +610,13 @@ class HistoryJournal:
         tags: Sequence[int] | None = None,
         cursor_range: JournalRange | None = None,
     ) -> tuple[RecoveredItem, ...]:
-        selector_count = sum(value is not None for value in (item_ids, tags, cursor_range))
+        selector_count = sum(
+            value is not None for value in (item_ids, tags, cursor_range)
+        )
         if selector_count != 1:
-            raise HistoryError("INVALID_RECOVERY", "exactly one recovery selector is required")
+            raise HistoryError(
+                "INVALID_RECOVERY", "exactly one recovery selector is required"
+            )
         if item_ids is not None:
             unique = tuple(dict.fromkeys(str(Id(item_id)) for item_id in item_ids))
             if not unique:
@@ -618,11 +644,13 @@ class HistoryJournal:
                 raise HistoryError("NOT_FOUND", "requested reclaim tag was not found")
             items = tuple(ContextItem.from_mapping(json.loads(row[0])) for row in rows)
         else:
-            items = self.items_in_range(cursor_range)
+            items = self.items_in_range(cast(JournalRange, cursor_range))
 
         recovered = []
         for item in items:
-            source_bytes = adapter.resolve(self.scope, self.session_id, item.source_event_id)
+            source_bytes = adapter.resolve(
+                self.scope, self.session_id, item.source_event_id
+            )
             if Digest.sha256(source_bytes) != item.source_digest:
                 raise HistoryError(
                     "SOURCE_DIGEST_MISMATCH",
@@ -638,8 +666,13 @@ class HistoryJournal:
         return Cursor(self.epoch, sequence)
 
     def _validate_range(self, journal_range: JournalRange) -> None:
-        if journal_range.start.epoch != self.epoch or journal_range.end.sequence > self.cursor.sequence:
-            raise HistoryError("INVALID_RANGE", "journal range is outside committed history")
+        if (
+            journal_range.start.epoch != self.epoch
+            or journal_range.end.sequence > self.cursor.sequence
+        ):
+            raise HistoryError(
+                "INVALID_RANGE", "journal range is outside committed history"
+            )
 
     def _validate_relations(self, item: PendingContextItem) -> None:
         for relation in item.relations:
@@ -650,7 +683,9 @@ class HistoryJournal:
             if row is None or (
                 relation.source_digest is not None and row[0] != relation.source_digest
             ):
-                raise HistoryError("INVALID_RELATION", "relation target is not committed")
+                raise HistoryError(
+                    "INVALID_RELATION", "relation target is not committed"
+                )
 
     def _validate_tool_linkage(self, item: PendingContextItem) -> None:
         states: dict[str, bool] = {}
@@ -670,12 +705,18 @@ class HistoryJournal:
         items: dict[str, ContextItem] = {}
         for expected, row in enumerate(rows, start=1):
             if row[0] != expected:
-                raise HistoryError("CORRUPT_JOURNAL", "journal ordinals are not contiguous")
+                raise HistoryError(
+                    "CORRUPT_JOURNAL", "journal ordinals are not contiguous"
+                )
             item = ContextItem.from_mapping(json.loads(row[2]))
             if item.cursor != Cursor(self.epoch, expected) or item.scope != self.scope:
-                raise HistoryError("CORRUPT_JOURNAL", "journal binding or cursor is corrupt")
+                raise HistoryError(
+                    "CORRUPT_JOURNAL", "journal binding or cursor is corrupt"
+                )
             if row[3] is not None and Digest.sha256(bytes(row[3])) != row[1]:
-                raise HistoryError("CORRUPT_JOURNAL", "stored source snapshot is corrupt")
+                raise HistoryError(
+                    "CORRUPT_JOURNAL", "stored source snapshot is corrupt"
+                )
             for relation in item.relations:
                 target = items.get(str(relation.item_id))
                 if target is None or (
@@ -692,14 +733,20 @@ def _apply_tool_parts(states: dict[str, bool], parts: Sequence[ContextPart]) -> 
         if part.kind is PartKind.TOOL_CALL:
             call_id = str(part.call_id)
             if call_id in states:
-                raise HistoryError("DUPLICATE_TOOL_CALL", "tool call id is already committed")
+                raise HistoryError(
+                    "DUPLICATE_TOOL_CALL", "tool call id is already committed"
+                )
             states[call_id] = False
         elif part.kind is PartKind.TOOL_RESULT:
             call_id = str(part.call_id)
             if call_id not in states:
-                raise HistoryError("ORPHAN_TOOL_RESULT", "tool result has no prior call")
+                raise HistoryError(
+                    "ORPHAN_TOOL_RESULT", "tool result has no prior call"
+                )
             if states[call_id]:
-                raise HistoryError("DUPLICATE_TOOL_RESULT", "tool call already has a result")
+                raise HistoryError(
+                    "DUPLICATE_TOOL_RESULT", "tool call already has a result"
+                )
             states[call_id] = True
 
 

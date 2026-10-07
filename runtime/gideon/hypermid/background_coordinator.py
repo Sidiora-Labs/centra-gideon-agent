@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from gideon.cognition.history import HistoryConsolidator
+
 import asyncio
 import hashlib
 import inspect
@@ -31,10 +36,10 @@ from .contracts import (
     RecordDraft,
     RecordKind,
     RevisionPrecondition,
-    SourceKind,
-    SourceSnapshot,
     SmartNoteCandidatePage,
     SmartNoteEvaluation,
+    SourceKind,
+    SourceSnapshot,
 )
 from .foundation import Digest, Id
 from .history import HistoryJournal, JournalRange
@@ -46,14 +51,14 @@ from .maintenance import (
     MaintenanceScheduler,
     SummaryMaintenancePublication,
 )
-from .models import Cursor, Scope, Trace
+from .models import Cursor, JsonValue, Scope, Trace
+from .sources import GitSourceCapture, scope_digest
 from .summarizer import (
     SummaryCandidate,
     SummaryJob,
     SummaryModelAuthority,
     summarize_journal_job,
 )
-from .sources import GitSourceCapture, scope_digest
 from .usage import UsageAccountingConsumer, UsageReconciliationEvent
 
 PrivacyMode = Literal["persistent", "temporary", "incognito"]
@@ -123,10 +128,12 @@ class SummaryWork:
     summary_capability_id: Id
     locale: str = "en"
     timeout_seconds: float = 90.0
-    consolidator: object | None = None
+    consolidator: HistoryConsolidator | None = None
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "summary_capability_id", Id(self.summary_capability_id))
+        object.__setattr__(
+            self, "summary_capability_id", Id(self.summary_capability_id)
+        )
         if isinstance(self.source_token_count, bool) or self.source_token_count <= 0:
             raise ValueError("summary source token count must be positive")
         if not 0.0 < self.timeout_seconds <= 300.0:
@@ -153,9 +160,7 @@ class KnowledgeAuthoritySelector:
     def __post_init__(self) -> None:
         object.__setattr__(self, "capability_id", Id(self.capability_id))
         if self.authority_resource is not None:
-            object.__setattr__(
-                self, "authority_resource", Id(self.authority_resource)
-            )
+            object.__setattr__(self, "authority_resource", Id(self.authority_resource))
         if self.category is not None and (
             not self.category or len(self.category.encode("utf-8")) > 128
         ):
@@ -202,7 +207,9 @@ class KnowledgeWork:
         object.__setattr__(self, "verifications", tuple(self.verifications))
         object.__setattr__(self, "sharing_judgments", tuple(self.sharing_judgments))
         if (self.recall is None) != (self.recall_authority is None):
-            raise ValueError("knowledge recall and its authority must be supplied together")
+            raise ValueError(
+                "knowledge recall and its authority must be supplied together"
+            )
         if self.next_evaluation_at_ms is not None and self.next_evaluation_at_ms < 0:
             raise ValueError("knowledge next evaluation timestamp is invalid")
 
@@ -335,9 +342,9 @@ class BackgroundCoordinator:
         if privacy_mode != "persistent":
             return BackgroundRunResult(False, "no_call")
 
-        completed: tuple[
-            ClaimedMaintenanceJob, UsageReconciliationEvent | None
-        ] | None = None
+        completed: (
+            tuple[ClaimedMaintenanceJob, UsageReconciliationEvent | None] | None
+        ) = None
 
         async def execute(claimed: ClaimedMaintenanceJob) -> MaintenanceCompletion:
             nonlocal completed
@@ -349,8 +356,13 @@ class BackgroundCoordinator:
             _validate_summary_work(claimed, work)
             session_id = str(work.journal.session_id)
             source_range = JournalRange(work.source_start, claimed.job.input_cursor)
-            if str(work.journal.source_digest(source_range)) != claimed.job.input_digest:
-                raise ValueError("claimed summary input digest does not match the journal")
+            if (
+                str(work.journal.source_digest(source_range))
+                != claimed.job.input_digest
+            ):
+                raise ValueError(
+                    "claimed summary input digest does not match the journal"
+                )
             source_content = _summary_source_content(
                 work.journal, source_range, claimed.job.input_digest
             )
@@ -363,7 +375,9 @@ class BackgroundCoordinator:
             usage_event = None
             dispatched = False
 
-            async def authority(messages, max_output_tokens, timeout_seconds, model_session_id):
+            async def authority(
+                messages, max_output_tokens, timeout_seconds, model_session_id
+            ):
                 nonlocal dispatched
                 dispatched = True
                 return await work.authority(
@@ -422,7 +436,10 @@ class BackgroundCoordinator:
                 config_digest = current_config_digest()
                 if config_digest != claimed.job.config_digest:
                     raise ValueError("summary configuration changed before publication")
-                if str(work.journal.source_digest(source_range)) != claimed.job.input_digest:
+                if (
+                    str(work.journal.source_digest(source_range))
+                    != claimed.job.input_digest
+                ):
                     raise ValueError("summary input changed before publication")
                 if (
                     _summary_source_content(
@@ -430,7 +447,9 @@ class BackgroundCoordinator:
                     )
                     != source_content
                 ):
-                    raise ValueError("summary source content changed before publication")
+                    raise ValueError(
+                        "summary source content changed before publication"
+                    )
                 completed = (claimed, usage_event)
                 return MaintenanceCompletion(
                     claimed.job.input_digest,
@@ -446,7 +465,7 @@ class BackgroundCoordinator:
                 raise
             finally:
                 if consolidator_quiesced:
-                    work.consolidator.resume()
+                    cast("HistoryConsolidator", work.consolidator).resume()
                 resume_background_compression([session_id])
 
         try:
@@ -571,9 +590,7 @@ def _knowledge_completion(
             ).category,
             item.expected_revision_digest,
             MemoryOperation.VERIFY,
-            _selector(
-                work.verification_authorities, item.record_id, "verification"
-            ),
+            _selector(work.verification_authorities, item.record_id, "verification"),
         )
         for item in work.verifications
     )
@@ -645,7 +662,9 @@ def _selector(
     try:
         return selectors[record_id]
     except KeyError as exc:
-        raise ValueError(f"knowledge {name} authority is missing for {record_id}") from exc
+        raise ValueError(
+            f"knowledge {name} authority is missing for {record_id}"
+        ) from exc
 
 
 def _knowledge_authority(
@@ -693,7 +712,9 @@ def _summary_publication(
         "source-"
         + hashlib.sha256(
             f"{work.journal.session_id}:{work.source_start.epoch}:{work.source_start.sequence}:"
-            f"{claimed.job.input_cursor.sequence}:{candidate.source_digest}".encode("utf-8")
+            f"{claimed.job.input_cursor.sequence}:{candidate.source_digest}".encode(
+                "utf-8"
+            )
         ).hexdigest()[:32]
     )
     source = SourceSnapshot(
@@ -724,7 +745,7 @@ def _summary_publication(
             "source_digest": candidate.source_digest,
             "source_start": work.source_start.to_wire(),
             "source_end": claimed.job.input_cursor.to_wire(),
-            "tiers": tiers,
+            "tiers": cast(list[JsonValue], tiers),
             "usage": candidate.usage.to_wire(),
         },
         provenance=(
@@ -763,7 +784,9 @@ def _summary_source_content(
 ) -> str:
     content = json.dumps(
         {
-            "items": [item.to_mapping() for item in journal.items_in_range(source_range)],
+            "items": [
+                item.to_mapping() for item in journal.items_in_range(source_range)
+            ],
             "range": {
                 "end": source_range.end.to_wire(),
                 "start": source_range.start.to_wire(),

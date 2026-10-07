@@ -14,13 +14,25 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Sequence
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Iterator,
+    Literal,
+    Mapping,
+    Sequence,
+    cast,
+)
 
 from gideon.cognition.memory_record import (
     MemoryCapabilities,
-    MemoryKind as GideonKind,
-    MemoryRecord as GideonRecord,
-    MemoryScope as GideonScope,
+)
+from gideon.cognition.memory_record import MemoryKind as GideonKind
+from gideon.cognition.memory_record import MemoryRecord as GideonRecord
+from gideon.cognition.memory_record import MemoryScope as GideonScope
+from gideon.cognition.memory_record import (
     MemoryTier,
 )
 from gideon.integrations.memory_providers.base import MemoryProvider
@@ -32,10 +44,12 @@ from .contracts import (
     LineageEdge,
     MemoryOperation,
     MemoryRecord,
+    MutationReceipt,
     MutationRequest,
     ProvenanceSpan,
     RecordDraft,
     RecordKind,
+    RecordPage,
     RecordStatus,
     RevisionPrecondition,
     SearchMode,
@@ -44,9 +58,10 @@ from .contracts import (
     SourceKind,
     SourceSnapshot,
 )
-from .foundation import Cursor, Digest, Id, Scope, Trace
 from .embeddings import EmbeddingRegistration
+from .foundation import Cursor, Digest, Id, Scope, Trace
 from .memory_client import MemoryClient
+from .models import JsonValue
 from .sources import scope_digest
 
 if TYPE_CHECKING:
@@ -112,7 +127,9 @@ class _MemoryClientLoop:
         self.loop.run_until_complete(client.close())
         self.loop.close()
 
-    def call(self, operation: Callable[[MemoryClient], Any], timeout: float = 30.0) -> Any:
+    def call(
+        self, operation: Callable[[MemoryClient], Any], timeout: float = 30.0
+    ) -> Any:
         async def invoke() -> Any:
             if not self.client.client.connected:
                 await self.client.client.connect()
@@ -151,16 +168,22 @@ class HypermidMemoryProvider(MemoryProvider):
         self.graph = _RemoteGraph(self)
 
     def _app_receipt(self):
-        from gideon.security.session_credentials import current_work
         from gideon.extensions.apps.app_work import from_bound
         from gideon.extensions.apps.permissions import checker_for
+        from gideon.security.session_credentials import current_work
+
         from .app_scopes import NativeAppScopes
+
         work = current_work()
         app = from_bound(work)
-        if app is None:
+        if app is None or work is None:
             return None
         checker = checker_for(app.app)
-        if checker is None or app.current_tier() not in {"read", "tools"} or work.memory_mode == "temporary":
+        if (
+            checker is None
+            or app.current_tier() not in {"read", "tools"}
+            or work.memory_mode == "temporary"
+        ):
             return None
         if not checker.can_use_memory("app-scoped"):
             return None
@@ -171,26 +194,41 @@ class HypermidMemoryProvider(MemoryProvider):
             if receipt is None and work.memory_mode == "persistent":
                 receipt = await namespaces.issue(trace=_trace())
             return receipt
+
         return self._loop.call(resolve)
 
     def _reach(self):
         from gideon.security.session_credentials import memory_reach
+
         receipt = self._app_receipt()
-        return memory_reach(receipt.scope if receipt is not None else self.scope, require_bound=False, app_receipt=receipt)
+        return memory_reach(
+            receipt.scope if receipt is not None else self.scope,
+            require_bound=False,
+            app_receipt=receipt,
+        )
 
     def _shared_reads(self) -> bool:
-        from gideon.security.session_credentials import current_work
         from gideon.extensions.apps.app_work import from_bound
         from gideon.extensions.apps.permissions import checker_for
+        from gideon.security.session_credentials import current_work
+
         work = current_work()
         app = from_bound(work)
         checker = checker_for(app.app) if app is not None else None
-        return bool(app is not None and app.current_tier() in {"read", "tools"}
-                    and checker is not None and checker.can_use_memory("shared"))
+        return bool(
+            app is not None
+            and app.current_tier() in {"read", "tools"}
+            and checker is not None
+            and checker.can_use_memory("shared")
+        )
 
     def _target_scope(self) -> Scope:
         receipt = self._app_receipt()
-        return receipt.scope if receipt is not None and not self._shared_reads() else self.scope
+        return (
+            receipt.scope
+            if receipt is not None and not self._shared_reads()
+            else self.scope
+        )
 
     def _read_scopes(self) -> tuple[Scope, ...]:
         receipt = self._app_receipt()
@@ -202,24 +240,46 @@ class HypermidMemoryProvider(MemoryProvider):
         target = target_scope if target_scope is not None else self._target_scope()
         if isinstance(value, Id):
             return value
-        if target == self.scope or value in {"memory-records", "memory-list", "memory-embedding"}:
+        if target == self.scope or value in {
+            "memory-records",
+            "memory-list",
+            "memory-embedding",
+        }:
             return _record_id(value)
-        return Id("app-memory:" + hashlib.sha256(str(scope_digest(target)).encode() + b"\0" + value.encode()).hexdigest())
+        return Id(
+            "app-memory:"
+            + hashlib.sha256(
+                str(scope_digest(target)).encode() + b"\0" + value.encode()
+            ).hexdigest()
+        )
 
-    def _call(self, operation: Callable[[MemoryClient], Any], timeout: float = 30.0, *, target_scope: Scope | None = None) -> Any:
+    def _call(
+        self,
+        operation: Callable[[MemoryClient], Any],
+        timeout: float = 30.0,
+        *,
+        target_scope: Scope | None = None,
+    ) -> Any:
         receipt = self._app_receipt()
         target = target_scope if target_scope is not None else self._target_scope()
         if target != self.scope and (receipt is None or target != receipt.scope):
             raise PermissionError("memory target is not a verified native namespace")
         if receipt is not None and target == self.scope and not self._shared_reads():
-            raise PermissionError("shared memory consent is required for the owner target")
+            raise PermissionError(
+                "shared memory consent is required for the owner target"
+            )
+
         async def invoke(client):
             if receipt is not None:
                 from .app_scopes import NativeAppScopes
+
                 await NativeAppScopes(client).resolve(receipt, trace=_trace())
                 if target == receipt.scope:
-                    client = MemoryClient(client.client, capability_id=receipt.capability_id)
+                    client = MemoryClient(
+                        client.client, capability_id=receipt.capability_id
+                    )
             return await operation(client)
+
         return self._loop.call(invoke, timeout=timeout)
 
     @contextlib.contextmanager
@@ -234,10 +294,12 @@ class HypermidMemoryProvider(MemoryProvider):
 
     def _reads_allowed(self) -> bool:
         from gideon.security.session_credentials import memory_reach
+
         return _privacy_mode.get() != "temporary" and self._reach().read_allowed
 
     def _writes_allowed(self) -> bool:
         from gideon.security.session_credentials import memory_reach
+
         writer = self._writer
         snapshot = writer.snapshot() if writer is not None else None
         return (
@@ -271,12 +333,19 @@ class HypermidMemoryProvider(MemoryProvider):
         )
 
     def _access(
-        self, operation: GrantOperation, resource_id: str, *, category: str | None = None, target_scope: Scope | None = None
+        self,
+        operation: GrantOperation,
+        resource_id: str,
+        *,
+        category: str | None = None,
+        target_scope: Scope | None = None,
     ) -> AccessRequest:
         return AccessRequest(
             operation=operation,
             actor_scope=self.scope,
-            target_scope=target_scope if target_scope is not None else self._target_scope(),
+            target_scope=(
+                target_scope if target_scope is not None else self._target_scope()
+            ),
             resource_id=self._native_record_id(resource_id, target_scope=target_scope),
             trace=_trace(),
             category=category,
@@ -297,7 +366,9 @@ class HypermidMemoryProvider(MemoryProvider):
             target_scope=self._target_scope(),
             revision=revision,
             trace=_trace(),
-            record_id=Id(record_id) if native_record_id else self._native_record_id(record_id),
+            record_id=(
+                Id(record_id) if native_record_id else self._native_record_id(record_id)
+            ),
             category=category,
         )
 
@@ -368,13 +439,17 @@ class HypermidMemoryProvider(MemoryProvider):
         )
 
     @staticmethod
-    def _gideon(record: MemoryRecord, *, native_scope: Scope | None = None) -> GideonRecord:
+    def _gideon(
+        record: MemoryRecord, *, native_scope: Scope | None = None
+    ) -> GideonRecord:
         metadata = dict(record.current.metadata)
         metadata["native_record_id"] = str(record.id)
         metadata["native_scope_digest"] = str(record.owner_scope_digest)
         if native_scope is not None:
             if scope_digest(native_scope) != record.owner_scope_digest:
-                raise PermissionError("native record scope does not match its authorized source")
+                raise PermissionError(
+                    "native record scope does not match its authorized source"
+                )
             metadata["native_scope"] = native_scope.to_wire()
         kind_value = str(metadata.pop("gideon_kind", ""))
         try:
@@ -383,9 +458,11 @@ class HypermidMemoryProvider(MemoryProvider):
             kind = (
                 GideonKind.EPISODIC
                 if record.kind is RecordKind.EPISODE
-                else GideonKind.NOTE
-                if record.kind in {RecordKind.NOTE, RecordKind.SMART_NOTE}
-                else GideonKind.SEMANTIC
+                else (
+                    GideonKind.NOTE
+                    if record.kind in {RecordKind.NOTE, RecordKind.SMART_NOTE}
+                    else GideonKind.SEMANTIC
+                )
             )
         scope_value = str(metadata.pop("scope", GideonScope.GLOBAL.value))
         tier_value = metadata.pop("tier", None)
@@ -397,30 +474,37 @@ class HypermidMemoryProvider(MemoryProvider):
             importance=record.importance,
             confidence=record.confidence,
             source=str(metadata.pop("source", "hypermid")),
-            recall_count=int(metadata.pop("recall_count", 0) or 0),
-            visit_count=int(metadata.pop("visit_count", 0) or 0),
+            recall_count=int(cast(int | str, metadata.pop("recall_count", 0) or 0)),
+            visit_count=int(cast(int | str, metadata.pop("visit_count", 0) or 0)),
             tier=MemoryTier(tier_value) if tier_value else None,
             scope=GideonScope(scope_value),
-            scope_ref=metadata.pop("scope_ref", None),
+            scope_ref=cast(str | None, metadata.pop("scope_ref", None)),
             category=record.category,
             conversation_id=str(metadata.pop("conversation_id", "") or ""),
-            tags=list(metadata.pop("tags", ()) or ()),
+            tags=list(cast(Sequence[str], metadata.pop("tags", ()) or ())),
             is_deleted=record.status.value == "tombstoned",
             created_at=_iso(record.created_at_ms),
             updated_at=_iso(record.updated_at_ms),
-            safe_to_act=metadata.pop("safe_to_act", None),
-            due_window=metadata.pop("due_window", None),
-            channel=metadata.pop("channel", None),
-            source_ref=metadata.pop("source_ref", None),
+            safe_to_act=cast(
+                dict[str, JsonValue] | None, metadata.pop("safe_to_act", None)
+            ),
+            due_window=cast(str | None, metadata.pop("due_window", None)),
+            channel=cast(str | None, metadata.pop("channel", None)),
+            source_ref=cast(
+                dict[str, JsonValue] | None, metadata.pop("source_ref", None)
+            ),
             extra=metadata,
         )
 
-    def _remote_get(self, record_id: str, *, target_scope: Scope | None = None) -> tuple[MemoryRecord | None, object]:
-        request = self._access(GrantOperation.READ, record_id, target_scope=target_scope)
+    def _remote_get(
+        self, record_id: str, *, target_scope: Scope | None = None
+    ) -> tuple[MemoryRecord | None, Cursor]:
+        request = self._access(
+            GrantOperation.READ, record_id, target_scope=target_scope
+        )
         return self._call(
-            lambda client: client.get(
-                request, authority_resource=_RECORD_COLLECTION
-            ), target_scope=target_scope
+            lambda client: client.get(request, authority_resource=_RECORD_COLLECTION),
+            target_scope=target_scope,
         )
 
     def _remote_get_for_upsert(
@@ -435,31 +519,64 @@ class HypermidMemoryProvider(MemoryProvider):
 
     def _capture_writer_lease(self) -> dict[str, Any]:
         snapshot = self._writer.snapshot() if self._writer is not None else None
-        lease = snapshot.lease if snapshot is not None and snapshot.owns_writes else None
+        lease = (
+            snapshot.lease if snapshot is not None and snapshot.owns_writes else None
+        )
         if lease is None or lease.scope != self.scope:
-            raise PermissionError("captured memory requires the active native primary writer")
-        return {"lease_id": str(lease.lease_id), "scope": lease.scope.to_wire(),
-                "fence_epoch": lease.fence_epoch, "fence_token": str(lease.fence_token),
-                "cursor": lease.cursor.to_wire()}
+            raise PermissionError(
+                "captured memory requires the active native primary writer"
+            )
+        return {
+            "lease_id": str(lease.lease_id),
+            "scope": lease.scope.to_wire(),
+            "fence_epoch": lease.fence_epoch,
+            "fence_token": str(lease.fence_token),
+            "cursor": lease.cursor.to_wire(),
+        }
 
     def put_captured(self, records: list[GideonRecord], capture) -> None:
         from dataclasses import replace
+
         from gideon.security.capture_origin import validate_capture
+
         from .contracts import OwnerWordCapture
+
         verified = validate_capture(capture)
         if verified is None or not self._writes_allowed():
             raise PermissionError("owner-word capture is not currently authorized")
         origin = OwnerWordCapture.from_verified(verified)
         lease = self._capture_writer_lease()
         target = self._target_scope()
-        source_id = Id("chat-source:" + str(Digest.sha256(json.dumps(
-            [target.to_wire(), str(origin.history_session_id), str(origin.source_event_id), str(origin.source_digest)],
-            sort_keys=True, separators=(",", ":")).encode())))
-        source = SourceSnapshot(source_id=source_id, owner_scope_digest=scope_digest(target),
-            kind=SourceKind.MESSAGE, source_digest=origin.source_digest,
-            locator="chat:" + str(origin.history_session_id) + ":" + str(origin.source_event_id),
-            captured_content=verified.source_bytes.decode("utf-8"), capture_method="accepted_owner_words",
-            observed_at_ms=time.time_ns() // 1_000_000)
+        source_id = Id(
+            "chat-source:"
+            + str(
+                Digest.sha256(
+                    json.dumps(
+                        [
+                            target.to_wire(),
+                            str(origin.history_session_id),
+                            str(origin.source_event_id),
+                            str(origin.source_digest),
+                        ],
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                )
+            )
+        )
+        source = SourceSnapshot(
+            source_id=source_id,
+            owner_scope_digest=scope_digest(target),
+            kind=SourceKind.MESSAGE,
+            source_digest=origin.source_digest,
+            locator="chat:"
+            + str(origin.history_session_id)
+            + ":"
+            + str(origin.source_event_id),
+            captured_content=verified.source_bytes.decode("utf-8"),
+            capture_method="accepted_owner_words",
+            observed_at_ms=time.time_ns() // 1_000_000,
+        )
         for record in records:
             if validate_capture(verified) is None:
                 raise PermissionError("owner-word capture expired during publication")
@@ -467,13 +584,39 @@ class HypermidMemoryProvider(MemoryProvider):
             draft = self._draft(record)
             metadata = dict(draft.metadata)
             metadata["conversation_id"] = verified.origin_session_key
-            draft = replace(draft, metadata=metadata, provenance=(ProvenanceSpan(source_id=source_id,
-                span_start=0, span_end=len(verified.source_bytes), quoted_digest=origin.source_digest),))
-            operation = MemoryOperation.CREATE if existing is None else MemoryOperation.UPDATE
-            revision = RevisionPrecondition.must_not_exist() if existing is None else RevisionPrecondition.match(str(existing.current.digest))
-            request = self._mutation(operation, record.id, revision, category=draft.category)
-            receipt = self._call(lambda client: client.write_captured(request, draft, sources=(source,),
-                capture=origin, writer_lease=lease, now_ms=time.time_ns() // 1_000_000))
+            draft = replace(
+                draft,
+                metadata=metadata,
+                provenance=(
+                    ProvenanceSpan(
+                        source_id=source_id,
+                        span_start=0,
+                        span_end=len(verified.source_bytes),
+                        quoted_digest=origin.source_digest,
+                    ),
+                ),
+            )
+            operation = (
+                MemoryOperation.CREATE if existing is None else MemoryOperation.UPDATE
+            )
+            revision = (
+                RevisionPrecondition.must_not_exist()
+                if existing is None
+                else RevisionPrecondition.match(str(existing.current.digest))
+            )
+            request = self._mutation(
+                operation, record.id, revision, category=draft.category
+            )
+            receipt = self._call(
+                lambda client: client.write_captured(
+                    request,
+                    draft,
+                    sources=(source,),
+                    capture=origin,
+                    writer_lease=lease,
+                    now_ms=time.time_ns() // 1_000_000,
+                )
+            )
             self._last_cursor = receipt.cursor.sequence
 
     def record_capture_origins(self, record_id: str) -> Mapping[str, Any]:
@@ -481,23 +624,41 @@ class HypermidMemoryProvider(MemoryProvider):
             raise PermissionError("capture origin inspection is not authorized")
         target = self._target_scope()
         request = self._access(GrantOperation.READ, record_id, target_scope=target)
-        return self._call(lambda client: client.capture_origins(request), target_scope=target)
+        return self._call(
+            lambda client: client.capture_origins(request), target_scope=target
+        )
 
     def retract_chat_sources(self, history_session_id: Id):
         if not self._writes_allowed():
             raise PermissionError("chat forgetting is not currently authorized")
         lease = self._capture_writer_lease()
-        page = self.record_page(limit=1)
-        request = self._mutation(MemoryOperation.DELETE, "memory-records",
-            RevisionPrecondition.match(str(Digest.sha256(json.dumps(page.cursor.to_wire(),sort_keys=True).encode()))),
-            native_record_id=True)
-        receipt = self._call(lambda client: client.retract_chat(request,
-            history_session_id=history_session_id, expected_cursor=page.cursor, writer_lease=lease))
+        page = cast(RecordPage, self.record_page(limit=1))
+        request = self._mutation(
+            MemoryOperation.DELETE,
+            "memory-records",
+            RevisionPrecondition.match(
+                str(
+                    Digest.sha256(
+                        json.dumps(page.cursor.to_wire(), sort_keys=True).encode()
+                    )
+                )
+            ),
+            native_record_id=True,
+        )
+        receipt = self._call(
+            lambda client: client.retract_chat(
+                request,
+                history_session_id=history_session_id,
+                expected_cursor=page.cursor,
+                writer_lease=lease,
+            )
+        )
         self._last_cursor = receipt.cursor.sequence
         return receipt
 
     def put(self, records: list[GideonRecord]) -> None:
         from gideon.security.capture_origin import current_capture
+
         capture = current_capture()
         if capture is not None:
             self.put_captured(records, capture)
@@ -512,7 +673,9 @@ class HypermidMemoryProvider(MemoryProvider):
             if supersedes:
                 parent, _ = self._remote_get(str(supersedes))
                 if parent is None:
-                    raise RuntimeError("supersession parent is absent from durable memory")
+                    raise RuntimeError(
+                        "supersession parent is absent from durable memory"
+                    )
                 draft = RecordDraft(
                     id=draft.id,
                     scope=draft.scope,
@@ -543,12 +706,15 @@ class HypermidMemoryProvider(MemoryProvider):
                     category=draft.category,
                 )
                 receipt = self._call(
-                    lambda client, request=request, draft=draft, sources=sources: client.create(
-                        request,
-                        draft,
-                        sources=sources,
-                        now_ms=now_ms,
-                        authority_resource=_RECORD_COLLECTION,
+                    cast(
+                        Callable[[MemoryClient], Awaitable[MutationReceipt]],
+                        lambda client, request=request, draft=draft, sources=sources: client.create(
+                            request,
+                            draft,
+                            sources=sources,
+                            now_ms=now_ms,
+                            authority_resource=_RECORD_COLLECTION,
+                        ),
                     )
                 )
             else:
@@ -559,12 +725,15 @@ class HypermidMemoryProvider(MemoryProvider):
                     category=draft.category,
                 )
                 receipt = self._call(
-                    lambda client, request=request, draft=draft, sources=sources: client.update(
-                        request,
-                        draft,
-                        sources=sources,
-                        now_ms=now_ms,
-                        authority_resource=_RECORD_COLLECTION,
+                    cast(
+                        Callable[[MemoryClient], Awaitable[MutationReceipt]],
+                        lambda client, request=request, draft=draft, sources=sources: client.update(
+                            request,
+                            draft,
+                            sources=sources,
+                            now_ms=now_ms,
+                            authority_resource=_RECORD_COLLECTION,
+                        ),
                     )
                 )
             self._last_cursor = receipt.cursor.sequence
@@ -647,18 +816,26 @@ class HypermidMemoryProvider(MemoryProvider):
     ) -> list[GideonRecord]:
         if not self._reads_allowed():
             return []
-        native_records = []
+        native_records: list[tuple[Scope, MemoryRecord]] = []
         for target in self._read_scopes():
-            request = self._access(GrantOperation.READ, str(_RECORD_COLLECTION), target_scope=target)
+            request = self._access(
+                GrantOperation.READ, str(_RECORD_COLLECTION), target_scope=target
+            )
             try:
-                page = self._call(lambda client: client.list(request, limit=min(limit or 1000, 1000)), target_scope=target)
+                page = self._call(
+                    lambda client: client.list(request, limit=min(limit or 1000, 1000)),
+                    target_scope=target,
+                )
             except HypermidRemoteError as error:
                 if error.error.code == "SCOPE_NOT_FOUND":
                     continue
                 raise
             self._last_cursor = page.cursor.sequence
             native_records.extend((target, record) for record in page.records)
-        records = [self._gideon(record, native_scope=target) for target, record in native_records]
+        records = [
+            self._gideon(record, native_scope=target)
+            for target, record in native_records
+        ]
         if kinds is not None:
             records = [record for record in records if record.kind.value in kinds]
         if scope is not None:
@@ -675,10 +852,10 @@ class HypermidMemoryProvider(MemoryProvider):
         cursor: Cursor | None = None,
         limit: int = 100,
         category: str | None = None,
-        status: str | None = None,
+        status: RecordStatus | None = None,
         ordered_by_id: bool = False,
         after_id: str | None = None,
-    ) -> object:
+    ) -> RecordPage | None:
         if not self._reads_allowed():
             return None
         request = self._access(
@@ -698,10 +875,13 @@ class HypermidMemoryProvider(MemoryProvider):
         self._last_cursor = page.cursor.sequence
         return page
 
-    def search_with_evidence(self, text: str, *, k: int = 8, mode: SearchMode = SearchMode.HYBRID):
+    def search_with_evidence(
+        self, text: str, *, k: int = 8, mode: SearchMode = SearchMode.HYBRID
+    ):
         if not self._reads_allowed() or not text.strip():
             return None
         from .contracts import ScopedSearchResponse
+
         scopes = self._read_scopes()
         sources = []
         for target in scopes:
@@ -715,11 +895,18 @@ class HypermidMemoryProvider(MemoryProvider):
         return ScopedSearchResponse(tuple(sources), max(1, min(k, 200)))
 
     def _search_scope(
-        self, text: str, *, target_scope: Scope, k: int = 8, mode: SearchMode = SearchMode.HYBRID
+        self,
+        text: str,
+        *,
+        target_scope: Scope,
+        k: int = 8,
+        mode: SearchMode = SearchMode.HYBRID,
     ) -> SearchResponse | None:
         if not self._reads_allowed() or not text.strip():
             return None
-        access = self._access(GrantOperation.SEARCH, str(_RECORD_COLLECTION), target_scope=target_scope)
+        access = self._access(
+            GrantOperation.SEARCH, str(_RECORD_COLLECTION), target_scope=target_scope
+        )
         request = SearchRequest(
             query=text,
             mode=mode,
@@ -727,30 +914,54 @@ class HypermidMemoryProvider(MemoryProvider):
             trace=access.trace,
             now_ms=time.time_ns() // 1_000_000,
         )
-        registration_access = (self._access(GrantOperation.READ, "memory-embedding", target_scope=target_scope)
-                               if mode is not SearchMode.LEXICAL else None)
+        registration_access = (
+            self._access(
+                GrantOperation.READ, "memory-embedding", target_scope=target_scope
+            )
+            if mode is not SearchMode.LEXICAL
+            else None
+        )
+
         async def search(client):
             if mode is not SearchMode.LEXICAL:
                 from dataclasses import replace
-                from .providers import (EmbeddingProviderFailure,
-                    GideonEmbeddingProviderAuthority, ProviderBinding)
+
+                from .providers import (
+                    EmbeddingProviderFailure,
+                    GideonEmbeddingProviderAuthority,
+                    ProviderBinding,
+                )
+
                 try:
-                    active = (await client.embedding_active(registration_access)).result.get("registration")
+                    active = (
+                        await client.embedding_active(registration_access)
+                    ).result.get("registration")
                 except HypermidRemoteError as exc:
                     if exc.error.code != "AUTHORIZATION_DENIED":
                         raise
                     active = None
                 if active and active["mode"] != "off":
                     authority = GideonEmbeddingProviderAuthority()
-                    expected = ProviderBinding(active["provider_identity"], active["model_id"], active["dimensions"])
+                    expected = ProviderBinding(
+                        active["provider_identity"],
+                        active["model_id"],
+                        active["dimensions"],
+                    )
                     try:
                         output = await authority.embed(text, expected, access.trace)
                     except EmbeddingProviderFailure:
                         pass
                     else:
-                        return await client.search(access, replace(request,
-                            query_vector=output.vector, vector_fingerprint=Digest(active["fingerprint"])))
+                        return await client.search(
+                            access,
+                            replace(
+                                request,
+                                query_vector=output.vector,
+                                vector_fingerprint=Digest(active["fingerprint"]),
+                            ),
+                        )
             return await client.search(access, request)
+
         response = self._call(search, target_scope=target_scope)
         self._last_cursor = response.cursor.sequence
         return response
@@ -968,9 +1179,7 @@ class HypermidMemoryProvider(MemoryProvider):
         cap: int = 3000,
         citations_out: list[dict] | None = None,
     ) -> str:
-        rows = self.search_episodic(
-            query_text, limit=8, citations_out=citations_out
-        )
+        rows = self.search_episodic(query_text, limit=8, citations_out=citations_out)
         return "\n".join(f"- {row['text']}" for row in rows)[:cap]
 
     def get_semantic_context(self, query_text: str = "", *, cap: int = 1500) -> str:
@@ -1098,9 +1307,7 @@ class HypermidMemoryProvider(MemoryProvider):
         del prefs_cap, projects_cap
         semantic = self.get_semantic_context(cap=history_cap // 2)
         episodes = self.get_episodic_list(limit=20)
-        episodic = "\n".join(f"- {row['text']}" for row in episodes)[
-            : history_cap // 2
-        ]
+        episodic = "\n".join(f"- {row['text']}" for row in episodes)[: history_cap // 2]
         blocks = []
         if semantic:
             blocks.append("## Persistent memory\n" + semantic)
@@ -1110,7 +1317,9 @@ class HypermidMemoryProvider(MemoryProvider):
 
     def context_preview(self, query: str = "", *, cap: int = 4000) -> dict:
         semantic = self.get_semantic_context(query, cap=cap // 2)
-        episodic = self.get_episodic_context(query_text=query, cap=cap // 2) if query else ""
+        episodic = (
+            self.get_episodic_context(query_text=query, cap=cap // 2) if query else ""
+        )
         text = "\n".join(value for value in (semantic, episodic) if value)[:cap]
         return {"text": text, "cursor": self._last_cursor, "chars": len(text)}
 
@@ -1119,11 +1328,16 @@ class HypermidMemoryProvider(MemoryProvider):
         result = self._call(lambda client: client.embedding_active(request))
         return result.result
 
-    def embedding_register(self, registration: Mapping[str, Any], *, rebind: bool = False) -> Mapping[str, Any]:
+    def embedding_register(
+        self, registration: Mapping[str, Any], *, rebind: bool = False
+    ) -> Mapping[str, Any]:
         candidate = EmbeddingRegistration.create(
             registration_id=str(registration.get("registration_id") or ""),
             scope=self._target_scope(),
-            mode=str(registration.get("mode") or "off"),
+            mode=cast(
+                Literal["off", "local", "remote-compatible", "managed-service"],
+                str(registration.get("mode") or "off"),
+            ),
             provider_identity=str(registration.get("provider_identity") or ""),
             model_id=str(registration.get("model_id") or ""),
             dimensions=int(registration.get("dimensions") or 0),
@@ -1131,7 +1345,9 @@ class HypermidMemoryProvider(MemoryProvider):
         )
         supplied_fingerprint = registration.get("fingerprint")
         if supplied_fingerprint not in (None, candidate.fingerprint):
-            raise ValueError("embedding registration fingerprint does not match its fields")
+            raise ValueError(
+                "embedding registration fingerprint does not match its fields"
+            )
         request = self._mutation(
             MemoryOperation.EMBED,
             candidate.registration_id,
@@ -1164,48 +1380,87 @@ class HypermidMemoryProvider(MemoryProvider):
         )
         return result.result
 
-    def embedding_publish(self, record: MemoryRecord, registration: Mapping[str, Any], response) -> Mapping[str, Any]:
-        request = self._mutation(MemoryOperation.EMBED, str(record.id),
-            RevisionPrecondition.match(str(record.current.digest)), category=record.category, native_record_id=True)
-        guard = {"record_id": str(record.id), "revision_digest": str(record.current.digest),
-                 "content_digest": str(record.current.content_digest),
-                 "registration_id": registration["registration_id"],
-                 "registration_fingerprint": registration["fingerprint"]}
-        output = {"provider_identity": response.provider_identity, "model_id": response.model_id,
-                  "vector": list(response.vector), "input_tokens": response.input_tokens,
-                  "cost_units": response.cost_units}
-        result = self._call(lambda client: client.embedding_publish(request, guard=guard,
-            response=output, now_ms=time.time_ns() // 1_000_000))
+    def embedding_publish(
+        self, record: MemoryRecord, registration: Mapping[str, Any], response
+    ) -> Mapping[str, Any]:
+        request = self._mutation(
+            MemoryOperation.EMBED,
+            str(record.id),
+            RevisionPrecondition.match(str(record.current.digest)),
+            category=record.category,
+            native_record_id=True,
+        )
+        guard = {
+            "record_id": str(record.id),
+            "revision_digest": str(record.current.digest),
+            "content_digest": str(record.current.content_digest),
+            "registration_id": registration["registration_id"],
+            "registration_fingerprint": registration["fingerprint"],
+        }
+        output = {
+            "provider_identity": response.provider_identity,
+            "model_id": response.model_id,
+            "vector": list(response.vector),
+            "input_tokens": response.input_tokens,
+            "cost_units": response.cost_units,
+        }
+        result = self._call(
+            lambda client: client.embedding_publish(
+                request,
+                guard=guard,
+                response=output,
+                now_ms=time.time_ns() // 1_000_000,
+            )
+        )
         return result.result
 
     async def embedding_reembed_all(self, *, on_progress=None) -> dict[str, int]:
         """Publish compatible vectors without deleting prior records or vectors."""
         from .providers import GideonEmbeddingProviderAuthority
+
         authority = GideonEmbeddingProviderAuthority()
         trace = _trace()
         binding = await authority.active_binding(trace)
         view = await asyncio.to_thread(self.embedding_active)
         previous = view.get("registration")
         if not previous or previous.get("mode") == "off":
-            raise RuntimeError("Native embedding backfill requires an enabled scoped registration.")
-        candidate = EmbeddingRegistration.create(registration_id=f"embedding:{secrets.token_hex(16)}",
-            scope=self._target_scope(), mode=previous["mode"],
-            provider_identity=binding.provider_identity, model_id=binding.model_id,
-            dimensions=binding.dimensions, normalized=bool(previous["normalized"]))
+            raise RuntimeError(
+                "Native embedding backfill requires an enabled scoped registration."
+            )
+        candidate = EmbeddingRegistration.create(
+            registration_id=f"embedding:{secrets.token_hex(16)}",
+            scope=self._target_scope(),
+            mode=previous["mode"],
+            provider_identity=binding.provider_identity,
+            model_id=binding.model_id,
+            dimensions=binding.dimensions,
+            normalized=bool(previous["normalized"]),
+        )
         if candidate.fingerprint != previous["fingerprint"]:
-            await asyncio.to_thread(self.embedding_register, {
-                "registration_id": candidate.registration_id, "mode": candidate.mode,
-                "provider_identity": candidate.provider_identity, "model_id": candidate.model_id,
-                "dimensions": candidate.dimensions, "normalized": candidate.normalized}, rebind=True)
-            registration = (await asyncio.to_thread(self.embedding_active))["registration"]
+            await asyncio.to_thread(
+                self.embedding_register,
+                {
+                    "registration_id": candidate.registration_id,
+                    "mode": candidate.mode,
+                    "provider_identity": candidate.provider_identity,
+                    "model_id": candidate.model_id,
+                    "dimensions": candidate.dimensions,
+                    "normalized": candidate.normalized,
+                },
+                rebind=True,
+            )
+            registration = (await asyncio.to_thread(self.embedding_active))[
+                "registration"
+            ]
         else:
             registration = previous
         done = skipped = total = 0
         seen = {}
         after_id = None
         while True:
-            page = await asyncio.to_thread(self.record_page, limit=100,
-                after_id=after_id, ordered_by_id=True)
+            page = await asyncio.to_thread(
+                self.record_page, limit=100, after_id=after_id, ordered_by_id=True
+            )
             if page is None or not page.records:
                 break
             for record in page.records:
@@ -1216,9 +1471,14 @@ class HypermidMemoryProvider(MemoryProvider):
                 total += 1
                 output = await authority.embed(record.current.content, binding, trace)
                 try:
-                    await asyncio.to_thread(self.embedding_publish, record, registration, output)
+                    await asyncio.to_thread(
+                        self.embedding_publish, record, registration, output
+                    )
                 except HypermidRemoteError as exc:
-                    if exc.error.code not in {"EMBEDDING_TARGET_UNAVAILABLE", "EMBEDDING_STALE_RESULT"}:
+                    if exc.error.code not in {
+                        "EMBEDDING_TARGET_UNAVAILABLE",
+                        "EMBEDDING_STALE_RESULT",
+                    }:
                         raise
                     skipped += 1
                 else:
@@ -1230,8 +1490,9 @@ class HypermidMemoryProvider(MemoryProvider):
         current = {}
         after_id = None
         while True:
-            page = await asyncio.to_thread(self.record_page, limit=100,
-                after_id=after_id, ordered_by_id=True)
+            page = await asyncio.to_thread(
+                self.record_page, limit=100, after_id=after_id, ordered_by_id=True
+            )
             if page is None or not page.records:
                 break
             for record in page.records:
@@ -1240,10 +1501,16 @@ class HypermidMemoryProvider(MemoryProvider):
                     current[str(record.id)] = str(record.current.digest)
             if len(page.records) < 100:
                 break
-        changed = {key for key in seen.keys() | current.keys() if seen.get(key) != current.get(key)}
+        changed = {
+            key
+            for key in seen.keys() | current.keys()
+            if seen.get(key) != current.get(key)
+        }
         skipped = max(skipped, len(changed))
         if await authority.active_binding(trace) != binding:
-            raise RuntimeError("Embedding selection changed during native backfill; retry to complete.")
+            raise RuntimeError(
+                "Embedding selection changed during native backfill; retry to complete."
+            )
         return {"total": total, "reembedded": done, "skipped": skipped}
 
     @property
@@ -1361,7 +1628,11 @@ class _RemoteGraph:
         aliases: Sequence[str] | None = None,
     ) -> str:
         existing = next(
-            (entity for entity in self.entities() if entity.name.casefold() == name.casefold()),
+            (
+                entity
+                for entity in self.entities()
+                if entity.name.casefold() == name.casefold()
+            ),
             None,
         )
         identifier = (
@@ -1441,7 +1712,11 @@ class _RemoteGraph:
         }
         identity = hashlib.sha256(
             json.dumps(
-                value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+                value,
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
             ).encode("utf-8")
         ).hexdigest()
         record_id = f"graph-link:{identity}"
@@ -1473,7 +1748,10 @@ class _RemoteGraph:
                 value = json.loads(row.text)
             except json.JSONDecodeError:
                 continue
-            if value.get("from_kind") == from_kind and value.get("from_ref") == from_ref:
+            if (
+                value.get("from_kind") == from_kind
+                and value.get("from_ref") == from_ref
+            ):
                 removed += int(self.provider.delete(row.id, source="graph_cleanup"))
         return removed
 
@@ -1497,7 +1775,8 @@ class _RemoteGraph:
             for link in self.backlinks(entity_id, limit=limit):
                 reference = f"{link.get('from_kind', '')}:{link.get('from_ref', '')}"
                 weights[reference] = max(
-                    weights.get(reference, 0.0), float(link.get("confidence", 0.0) or 0.0)
+                    weights.get(reference, 0.0),
+                    float(link.get("confidence", 0.0) or 0.0),
                 )
         return {"entities": matched, "record_boosts": weights}
 
@@ -1544,7 +1823,9 @@ class _RemoteGraph:
 
     def resolve_query(self, text: str, *, index: Mapping[str, str]) -> list[str]:
         folded = text.casefold()
-        return list(dict.fromkeys(value for key, value in index.items() if key in folded))
+        return list(
+            dict.fromkeys(value for key, value in index.items() if key in folded)
+        )
 
     def recall_evidence(self, query_text: str, *, index: Mapping[str, str]) -> dict:
         matches = self.resolve_query(query_text, index=index)
@@ -1552,7 +1833,10 @@ class _RemoteGraph:
 
 
 def install_as_memory_authority(provider: HypermidMemoryProvider) -> object:
-    from gideon.cognition.memory_service import MemoryService, install_authoritative_service
+    from gideon.cognition.memory_service import (
+        MemoryService,
+        install_authoritative_service,
+    )
 
     service = MemoryService(provider)
     install_authoritative_service(service)

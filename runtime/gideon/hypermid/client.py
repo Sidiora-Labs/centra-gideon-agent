@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -17,13 +18,14 @@ import time
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from .models import (
     MAX_FRAME_BYTES,
     MAX_SAFE_INTEGER,
     PROTOCOL,
     Cursor,
+    EffectState,
     EffectStatus,
     Envelope,
     Error,
@@ -68,13 +70,15 @@ class HypermidRemoteError(HypermidClientError):
 class HypermidOutcomeUnknown(HypermidRemoteError):
     """A mutation may have been accepted before transport loss."""
 
-    def __init__(self, message: str = "connection ended after mutation dispatch") -> None:
+    def __init__(
+        self, message: str = "connection ended after mutation dispatch"
+    ) -> None:
         super().__init__(
             Error(
                 code="OUTCOME_UNKNOWN",
                 message=message,
                 retryable=False,
-                effect_state="unknown",
+                effect_state=EffectState.UNKNOWN,
             )
         )
 
@@ -132,7 +136,9 @@ class ConnectionRecord:
         self._secret = secret
 
     def __repr__(self) -> str:
-        endpoint = self.path if self.endpoint_kind == "unix" else f"{self.host}:{self.port}"
+        endpoint = (
+            self.path if self.endpoint_kind == "unix" else f"{self.host}:{self.port}"
+        )
         return (
             f"ConnectionRecord(endpoint_kind={self.endpoint_kind!r}, "
             f"endpoint={endpoint!r}, protocol={self.protocol!r}, "
@@ -194,7 +200,9 @@ class ConnectionRecord:
                     try:
                         port = int(port_text)
                     except ValueError as exc:
-                        raise HypermidProtocolError("invalid TCP endpoint port") from exc
+                        raise HypermidProtocolError(
+                            "invalid TCP endpoint port"
+                        ) from exc
             elif endpoint.startswith("/"):
                 endpoint_kind, socket_path = "unix", endpoint
         if endpoint_kind not in ("unix", "tcp"):
@@ -205,7 +213,7 @@ class ConnectionRecord:
             raise HypermidProtocolError("connection record is missing its credential")
         try:
             secret = base64.b64decode(encoded_secret, validate=True)
-        except (ValueError, base64.binascii.Error) as exc:
+        except (ValueError, binascii.Error) as exc:
             raise HypermidProtocolError("connection credential is malformed") from exc
 
         expires_ms = raw.get("expires_ms")
@@ -216,7 +224,7 @@ class ConnectionRecord:
         ):
             raise HypermidProtocolError("connection record has expired")
         return cls(
-            endpoint_kind=endpoint_kind,
+            endpoint_kind=cast(Literal["unix", "tcp"], endpoint_kind),
             secret=secret,
             path=socket_path,
             host=host,
@@ -353,9 +361,7 @@ class _Pending:
 
 
 class EventSubscription(AsyncIterator[Envelope]):
-    def __init__(
-        self, client: HypermidClient, snapshot: SubscriptionSnapshot
-    ) -> None:
+    def __init__(self, client: HypermidClient, snapshot: SubscriptionSnapshot) -> None:
         self.client = client
         self.snapshot = snapshot
         self._queue: asyncio.Queue[Envelope | BaseException | None] = asyncio.Queue(
@@ -500,7 +506,9 @@ class HypermidClient:
             except (ConnectionError, OSError):
                 pass
         self._fail_pending(HypermidConnectionError("Hypermid client closed"))
-        self._invalidate_subscriptions(HypermidConnectionError("Hypermid client closed"))
+        self._invalidate_subscriptions(
+            HypermidConnectionError("Hypermid client closed")
+        )
 
     async def request(
         self,
@@ -513,7 +521,9 @@ class HypermidClient:
         scope: Scope | None = None,
     ) -> JsonValue:
         if scope is not None and scope != self.scope:
-            raise HypermidClientError("request scope does not match the authenticated host scope")
+            raise HypermidClientError(
+                "request scope does not match the authenticated host scope"
+            )
         if not self.connected:
             await self.connect()
         if deadline_ms is None:
@@ -521,13 +531,15 @@ class HypermidClient:
         remaining = (deadline_ms - int(time.time() * 1000)) / 1000
         if remaining <= 0:
             raise TimeoutError("Hypermid request deadline has elapsed")
-        message_id = secrets.token_hex(16)
-        trace = trace or Trace(trace_id=secrets.token_hex(16), request_id=message_id)
+        message_id = Id(secrets.token_hex(16))
+        trace = trace or Trace(
+            trace_id=Id(secrets.token_hex(16)), request_id=message_id
+        )
         envelope = Envelope(
             kind="request",
             message_id=message_id,
             sequence=1,
-            route_id=_CONTROL_ROUTE,
+            route_id=Id(_CONTROL_ROUTE),
             route_epoch=_CONTROL_EPOCH,
             operation=operation,
             scope=self.scope,
@@ -560,7 +572,11 @@ class HypermidClient:
                         "mutation deadline elapsed after dispatch"
                     ) from exc
             raise
-        except (ConnectionError, HypermidConnectionError, asyncio.IncompleteReadError) as exc:
+        except (
+            ConnectionError,
+            HypermidConnectionError,
+            asyncio.IncompleteReadError,
+        ) as exc:
             if pending.written and effect_kind != "query":
                 raise HypermidOutcomeUnknown() from exc
             raise HypermidConnectionError("Hypermid request connection ended") from exc
@@ -577,9 +593,13 @@ class HypermidClient:
     ) -> JsonValue:
         response = await self.request("passthrough", payload, trace=trace)
         if not isinstance(response, dict) or response.get("mode") != "passthrough":
-            raise HypermidProtocolError("daemon returned an invalid pass-through response")
+            raise HypermidProtocolError(
+                "daemon returned an invalid pass-through response"
+            )
         if "payload" not in response:
-            raise HypermidProtocolError("daemon pass-through response is missing its payload")
+            raise HypermidProtocolError(
+                "daemon pass-through response is missing its payload"
+            )
         return response["payload"]
 
     async def describe(self) -> JsonValue:
@@ -602,9 +622,9 @@ class HypermidClient:
     async def cancel(self, message_id: str) -> None:
         envelope = Envelope(
             kind="cancel",
-            message_id=secrets.token_hex(16),
+            message_id=Id(secrets.token_hex(16)),
             sequence=1,
-            reply_to=message_id,
+            reply_to=Id(message_id),
             scope=self.scope,
         )
         await self._send(envelope)
@@ -678,7 +698,9 @@ class HypermidClient:
             or not record.tls_key
         ):
             raise HypermidProtocolError("mutual TLS connection material is incomplete")
-        context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=record.tls_ca)
+        context = ssl.create_default_context(
+            ssl.Purpose.SERVER_AUTH, cafile=record.tls_ca
+        )
         context.minimum_version = ssl.TLSVersion.TLSv1_3
         context.maximum_version = ssl.TLSVersion.TLSv1_3
         context.check_hostname = True
@@ -709,7 +731,9 @@ class HypermidClient:
         if challenge.get("protocol") != PROTOCOL:
             raise HypermidProtocolError("daemon selected an unsupported protocol")
         if challenge.get("auth_method") != "hmac_sha256":
-            raise HypermidProtocolError("daemon selected an unsupported authentication method")
+            raise HypermidProtocolError(
+                "daemon selected an unsupported authentication method"
+            )
         try:
             server_nonce = bytes.fromhex(str(challenge["server_nonce"]))
         except (KeyError, ValueError) as exc:
@@ -733,7 +757,9 @@ class HypermidClient:
         return SessionAccepted.from_wire(accepted), daemon_id
 
     @staticmethod
-    def _handshake_error(value: Mapping[str, Any], fallback: str) -> HypermidClientError:
+    def _handshake_error(
+        value: Mapping[str, Any], fallback: str
+    ) -> HypermidClientError:
         if value.get("error") is not None:
             try:
                 return HypermidRemoteError(Error.from_wire(value["error"]))

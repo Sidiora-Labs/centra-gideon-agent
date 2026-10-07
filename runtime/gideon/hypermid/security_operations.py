@@ -1,17 +1,22 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from .credential_authority import CredentialStoreSecretVault
+
 import hashlib
 import json
 import os
-from contextlib import contextmanager
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
 import re
 import secrets
 import sqlite3
 import stat
-from typing import Any, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any, Mapping, Protocol
 
 from .client import HypermidOutcomeUnknown, HypermidRemoteError
 from .contracts import MemoryOperation, MutationRequest, RevisionPrecondition
@@ -31,7 +36,6 @@ from .memory_client import MemoryClient
 from .network_policy import SecretHandle, SecretVault
 from .portability import MemoryExportBundle, MemoryImportBatch
 from .sources import scope_digest
-
 
 _ACTIONS = frozenset({"backup", "restore", "tombstone", "purge"})
 _DIGEST = re.compile(r"^[a-f0-9]{64}$")
@@ -65,6 +69,13 @@ class _Plan:
     cursor: Cursor | None = None
 
 
+class _WindowsFileLock(Protocol):
+    LK_NBLCK: int
+    LK_UNLCK: int
+
+    def locking(self, descriptor: int, mode: int, count: int) -> None: ...
+
+
 class SecurityOperations:
     """Owner-bound lifecycle authority used by Hypermid operator handlers."""
 
@@ -74,7 +85,7 @@ class SecurityOperations:
         scope: Scope,
         principal_id: str,
         active_path: str | os.PathLike[str],
-        secret_vault: SecretVault,
+        secret_vault: SecretVault | CredentialStoreSecretVault,
         supported_schema: int,
         memory_client: MemoryClient | None = None,
         credential_handles: Mapping[str, SecretHandle] | None = None,
@@ -152,7 +163,9 @@ class SecurityOperations:
             memory_bundle, encrypted_receipt = bundle_and_receipt
             cursor = memory_bundle.manifest.cursor
             batch_id = Id(f"import-{secrets.token_hex(12)}")
-            memory_request = _memory_request(self.scope, MemoryOperation.IMPORT, "restore")
+            memory_request = _memory_request(
+                self.scope, MemoryOperation.IMPORT, "restore"
+            )
             memory_batch = await memory.stage_import(
                 memory_request,
                 batch_id=batch_id,
@@ -180,7 +193,9 @@ class SecurityOperations:
                 dispatch=lambda material: BackupKey(material),
             )
             export_id = _id(params.pop("export_id"), "export_id")
-            memory_request = _memory_request(self.scope, MemoryOperation.EXPORT, "backup")
+            memory_request = _memory_request(
+                self.scope, MemoryOperation.EXPORT, "backup"
+            )
             memory_bundle = await memory.export_scope(
                 memory_request,
                 export_id=Id(f"review-{secrets.token_hex(12)}"),
@@ -240,7 +255,9 @@ class SecurityOperations:
         self._require_scope(scope)
         plan_id = _text(payload.get("plan_id"), "plan_id", 160)
         if _PLAN_ID.fullmatch(plan_id) is None:
-            raise SecurityOperationsError("PLAN_NOT_FOUND", "reviewed plan is unavailable")
+            raise SecurityOperationsError(
+                "PLAN_NOT_FOUND", "reviewed plan is unavailable"
+            )
         with _exclusive_journal_lock(self._plan_lock_path(plan_id)):
             return await self._apply_locked(action, payload, plan_id)
 
@@ -250,7 +267,9 @@ class SecurityOperations:
         reviewed = _digest(payload.get("plan_digest"), "plan_digest")
         plan = self._plans.get(plan_id) or self._load_plan(plan_id)
         if plan is None or plan.action != action:
-            raise SecurityOperationsError("PLAN_NOT_FOUND", "reviewed plan is unavailable")
+            raise SecurityOperationsError(
+                "PLAN_NOT_FOUND", "reviewed plan is unavailable"
+            )
         if plan.plan_digest != reviewed:
             raise SecurityOperationsError(
                 "PLAN_DIGEST_MISMATCH", "reviewed plan digest does not match"
@@ -258,17 +277,22 @@ class SecurityOperations:
         if datetime.now(UTC) >= plan.expires_at:
             self._discard_plan(plan)
             raise SecurityOperationsError("PLAN_EXPIRED", "reviewed plan expired")
-        if action in {"restore", "tombstone", "purge"} and payload.get(
-            "confirm_destructive"
-        ) is not True:
+        if (
+            action in {"restore", "tombstone", "purge"}
+            and payload.get("confirm_destructive") is not True
+        ):
             raise SecurityOperationsError(
                 "CONFIRMATION_REQUIRED", "destructive operation requires confirmation"
             )
         if action == "purge" and payload.get("confirm_purge") is not True:
             raise SecurityOperationsError(
-                "PURGE_CONFIRMATION_REQUIRED", "physical purge requires distinct confirmation"
+                "PURGE_CONFIRMATION_REQUIRED",
+                "physical purge requires distinct confirmation",
             )
-        if action != "backup" and _database_digest(self.active_path) != plan.authority_digest:
+        if (
+            action != "backup"
+            and _database_digest(self.active_path) != plan.authority_digest
+        ):
             self._discard_plan(plan)
             raise SecurityOperationsError(
                 "AUTHORITY_CHANGED", "active store changed after plan review"
@@ -332,7 +356,9 @@ class SecurityOperations:
         self._require_scope(scope)
         receipt = self._receipts.get(job_id) or self._load_receipt(job_id)
         if receipt is None:
-            raise SecurityOperationsError("JOB_NOT_FOUND", "security lifecycle job is absent")
+            raise SecurityOperationsError(
+                "JOB_NOT_FOUND", "security lifecycle job is absent"
+            )
         return receipt
 
     async def recover(self, job_id: str, scope: Scope) -> Mapping[str, Any]:
@@ -346,7 +372,7 @@ class SecurityOperations:
                 principal_id=self.principal_id,
                 operation="hypermid.backup",
                 dispatch=lambda material: encrypt_memory_bundle(
-                    plan.memory_bundle,
+                    cast(MemoryExportBundle, plan.memory_bundle),
                     plan.params["destination"],
                     BackupKey(material),
                 ),
@@ -451,7 +477,9 @@ class SecurityOperations:
                 operation="hypermid.backup",
                 dispatch=lambda material: BackupKey(material),
             )
-            request = _memory_request(self.scope, MemoryOperation.EXPORT, "backup-apply")
+            request = _memory_request(
+                self.scope, MemoryOperation.EXPORT, "backup-apply"
+            )
             bundle = await memory.export_scope(
                 request,
                 export_id=Id(plan.params["export_id"]),
@@ -502,7 +530,7 @@ class SecurityOperations:
                 plan.params["artifact_path"],
                 self.scope,
                 BackupKey(material),
-                expected_artifact_digest=plan.source_digest,
+                expected_artifact_digest=cast(Digest, plan.source_digest),
             ),
         )
         self._verify_rehydrated_bundle(plan, bundle)
@@ -537,7 +565,9 @@ class SecurityOperations:
                 "state": effect.state.value,
                 "input_digest": str(effect.input_digest),
             }
-            for effect in sorted(unresolved.effects, key=lambda item: str(item.effect_id))
+            for effect in sorted(
+                unresolved.effects, key=lambda item: str(item.effect_id)
+            )
         ]
         return {
             "unresolved_effect_count": len(evidence),
@@ -610,15 +640,22 @@ class SecurityOperations:
             "cursor",
         }
         if set(value) != expected or value.get("version") != 1:
-            raise SecurityOperationsError("PLAN_CORRUPT", "security plan journal is invalid")
-        if value.get("scope") != self.scope.to_wire() or value.get("plan_id") != plan_id:
+            raise SecurityOperationsError(
+                "PLAN_CORRUPT", "security plan journal is invalid"
+            )
+        if (
+            value.get("scope") != self.scope.to_wire()
+            or value.get("plan_id") != plan_id
+        ):
             raise SecurityOperationsError(
                 "AUTHORIZATION_DENIED", "security plan belongs to another authority"
             )
         action = value.get("action")
         params = value.get("params")
         if action not in _ACTIONS or not isinstance(params, dict):
-            raise SecurityOperationsError("PLAN_CORRUPT", "security plan journal is invalid")
+            raise SecurityOperationsError(
+                "PLAN_CORRUPT", "security plan journal is invalid"
+            )
         try:
             cursor_value = value.get("cursor")
             plan = _Plan(
@@ -666,7 +703,9 @@ class SecurityOperations:
     def _persist_receipt(self, receipt: Mapping[str, Any]) -> None:
         job_id = receipt.get("job_id")
         if not isinstance(job_id, str) or _JOB_ID.fullmatch(job_id) is None:
-            raise SecurityOperationsError("RECEIPT_INVALID", "security receipt is invalid")
+            raise SecurityOperationsError(
+                "RECEIPT_INVALID", "security receipt is invalid"
+            )
         body = dict(receipt)
         _atomic_private_json(
             self._receipt_path(job_id),
@@ -743,11 +782,7 @@ class SecurityOperations:
                 raise SecurityOperationsError(
                     "INVALID_RETENTION", "recovery window must be positive"
                 )
-        elif (
-            row[0] != "tombstoned"
-            or row[2] is None
-            or params["now_ms"] < row[2]
-        ):
+        elif row[0] != "tombstoned" or row[2] is None or params["now_ms"] < row[2]:
             raise SecurityOperationsError(
                 "RETENTION_NOT_ELAPSED", "record is not eligible for physical purge"
             )
@@ -764,8 +799,10 @@ class SecurityOperations:
                     "AUTHORIZATION_EXPORT_DENIED", "reusable grants cannot enter backup"
                 )
             export_value = payload.get("export_id")
-            export_id = _id(export_value, "export_id") if export_value is not None else Id(
-                f"export-{secrets.token_hex(12)}"
+            export_id = (
+                _id(export_value, "export_id")
+                if export_value is not None
+                else Id(f"export-{secrets.token_hex(12)}")
             )
             return {
                 "destination": os.fspath(destination),
@@ -782,14 +819,18 @@ class SecurityOperations:
         if action == "restore":
             artifact = _absolute_path(payload.get("artifact_path"), "artifact_path")
             if not artifact.is_file() or artifact.is_symlink():
-                raise SecurityOperationsError("BACKUP_INVALID", "backup artifact is unavailable")
+                raise SecurityOperationsError(
+                    "BACKUP_INVALID", "backup artifact is unavailable"
+                )
             if "effect_states" in payload:
                 raise SecurityOperationsError(
                     "INVALID_REQUEST", "effect states are selected by the server"
                 )
             return {
                 "artifact_path": os.fspath(artifact),
-                "source_digest": str(_digest(payload.get("source_digest"), "source_digest")),
+                "source_digest": str(
+                    _digest(payload.get("source_digest"), "source_digest")
+                ),
                 "credential_handle": _text(
                     payload.get("credential_handle"), "credential_handle", 256
                 ),
@@ -826,8 +867,10 @@ class SecurityOperations:
         cursor: Cursor | None,
     ) -> dict[str, Any]:
         destructive = action in {"restore", "tombstone", "purge"}
-        effect = "delete_authoritative" if action == "purge" else (
-            "write_authoritative" if destructive else "read"
+        effect = (
+            "delete_authoritative"
+            if action == "purge"
+            else ("write_authoritative" if destructive else "read")
         )
         result: dict[str, Any] = {
             "plan_id": plan_id,
@@ -897,9 +940,11 @@ class SecurityOperations:
                     "effect": (
                         "delete_authoritative"
                         if plan.action == "purge"
-                        else "write_authoritative"
-                        if plan.action in {"restore", "tombstone"}
-                        else "read"
+                        else (
+                            "write_authoritative"
+                            if plan.action in {"restore", "tombstone"}
+                            else "read"
+                        )
                     ),
                     "state": "committed" if state == "committed" else "unknown",
                 }
@@ -1007,7 +1052,9 @@ def _source_evidence(plan: _Plan) -> dict[str, Any]:
         "cursor",
     ):
         if field in plan.params:
-            evidence[field if field != "bundle_digest" else "source_digest"] = plan.params[field]
+            evidence[field if field != "bundle_digest" else "source_digest"] = (
+                plan.params[field]
+            )
     if plan.staging_id is not None:
         evidence["batch_id"] = plan.staging_id
     return evidence
@@ -1048,7 +1095,9 @@ def _absolute_path(value: object, name: str) -> Path:
     if not path.is_absolute():
         raise SecurityOperationsError("INVALID_PATH", f"{name} must be absolute")
     if path.is_symlink():
-        raise SecurityOperationsError("INVALID_PATH", f"{name} cannot be a symbolic link")
+        raise SecurityOperationsError(
+            "INVALID_PATH", f"{name} cannot be a symbolic link"
+        )
     return path.resolve(strict=False)
 
 
@@ -1070,11 +1119,17 @@ def _id(value: object, name: str) -> Id:
     try:
         return Id(raw)
     except (TypeError, ValueError) as error:
-        raise SecurityOperationsError("INVALID_REQUEST", f"{name} is invalid") from error
+        raise SecurityOperationsError(
+            "INVALID_REQUEST", f"{name} is invalid"
+        ) from error
 
 
 def _uint(value: object, name: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 2**53 - 1:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= 2**53 - 1
+    ):
         raise SecurityOperationsError("INVALID_REQUEST", f"{name} is invalid")
     return value
 
@@ -1203,12 +1258,14 @@ def _exclusive_journal_lock(path: Path):
         if os.name == "nt":
             import msvcrt
 
+            windows_lock = cast(_WindowsFileLock, msvcrt)
+
             if info.st_size == 0:
                 os.write(descriptor, b"\0")
                 os.fsync(descriptor)
             os.lseek(descriptor, 0, os.SEEK_SET)
             try:
-                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+                windows_lock.locking(descriptor, windows_lock.LK_NBLCK, 1)
             except OSError as error:
                 raise SecurityOperationsError(
                     "PLAN_BUSY", "security plan is already being applied"
@@ -1217,7 +1274,7 @@ def _exclusive_journal_lock(path: Path):
                 yield
             finally:
                 os.lseek(descriptor, 0, os.SEEK_SET)
-                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+                windows_lock.locking(descriptor, windows_lock.LK_UNLCK, 1)
         else:
             import fcntl
 

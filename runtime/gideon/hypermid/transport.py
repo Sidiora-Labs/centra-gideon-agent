@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import math
 import struct
@@ -10,7 +11,6 @@ from typing import Any, Mapping, Sequence
 
 from .foundation import Cursor, Digest, EffectState, Error, Id, Scope, Trace
 from .models import Envelope, JsonValue, Principal
-
 
 MEMORY_PROTOCOL = "memory.v1"
 MAX_MEMORY_PAYLOAD_BYTES = 4 * 1024 * 1024
@@ -57,11 +57,21 @@ class MemoryOperation(str, Enum):
     @property
     def mutation_event_name(self) -> str | None:
         return {
-            self.CREATE: "create", self.UPDATE: "update", self.ARCHIVE: "archive",
-            self.RESTORE: "restore", self.MERGE: "merge", self.SPLIT: "split",
-            self.RELOCATE: "relocate", self.DELETE: "delete", self.PURGE: "purge",
-            self.VERIFY: "verify", self.EMBED: "embed", self.INDEX: "index",
-            self.SUMMARIZE: "summarize", self.IMPORT: "import", self.EXPORT: "export",
+            self.CREATE: "create",
+            self.UPDATE: "update",
+            self.ARCHIVE: "archive",
+            self.RESTORE: "restore",
+            self.MERGE: "merge",
+            self.SPLIT: "split",
+            self.RELOCATE: "relocate",
+            self.DELETE: "delete",
+            self.PURGE: "purge",
+            self.VERIFY: "verify",
+            self.EMBED: "embed",
+            self.INDEX: "index",
+            self.SUMMARIZE: "summarize",
+            self.IMPORT: "import",
+            self.EXPORT: "export",
         }.get(self)
 
 
@@ -84,8 +94,13 @@ def _reject_secrets(value: object) -> None:
     if isinstance(value, Mapping):
         for key, child in value.items():
             normalized = str(key).lower()
-            if normalized in {"secret", "password", "api_key", "credential", "access_token"} \
-                    or normalized.endswith(("_secret", "_password")):
+            if normalized in {
+                "secret",
+                "password",
+                "api_key",
+                "credential",
+                "access_token",
+            } or normalized.endswith(("_secret", "_password")):
                 raise MemoryTransportViolation(
                     "MEMORY_SECRET_FIELD_REFUSED",
                     "secret-bearing fields cannot cross the memory transport",
@@ -112,7 +127,9 @@ def _reject_non_integer_numbers(value: object) -> None:
 
 def _mapping(value: object, name: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
-        raise MemoryTransportViolation("MEMORY_REQUEST_INVALID", f"{name} must be an object")
+        raise MemoryTransportViolation(
+            "MEMORY_REQUEST_INVALID", f"{name} must be an object"
+        )
     return value
 
 
@@ -137,7 +154,8 @@ class MemoryRequest:
             object.__setattr__(self, "idempotency_key", Id(self.idempotency_key))
         if self.version != MEMORY_PROTOCOL:
             raise MemoryTransportViolation(
-                "MEMORY_PROTOCOL_UNSUPPORTED", "the memory protocol version is unsupported"
+                "MEMORY_PROTOCOL_UNSUPPORTED",
+                "the memory protocol version is unsupported",
             )
         if self.operation.mutates and (
             self.expected_cursor is None or self.idempotency_key is None
@@ -180,8 +198,16 @@ class MemoryRequest:
     def from_wire(cls, value: object) -> MemoryRequest:
         raw = _mapping(value, "memory request")
         allowed = {
-            "version", "operation", "actor_scope", "target_scope", "resource_id",
-            "capability_id", "trace", "payload", "expected_cursor", "idempotency_key",
+            "version",
+            "operation",
+            "actor_scope",
+            "target_scope",
+            "resource_id",
+            "capability_id",
+            "trace",
+            "payload",
+            "expected_cursor",
+            "idempotency_key",
         }
         if set(raw) - allowed:
             raise MemoryTransportViolation(
@@ -191,19 +217,27 @@ class MemoryRequest:
             return cls(
                 version=raw["version"],
                 operation=MemoryOperation[raw["operation"].upper()],
-                actor_scope=Scope.from_wire(_mapping(raw["actor_scope"], "actor_scope")),
-                target_scope=Scope.from_wire(_mapping(raw["target_scope"], "target_scope")),
+                actor_scope=Scope.from_wire(
+                    _mapping(raw["actor_scope"], "actor_scope")
+                ),
+                target_scope=Scope.from_wire(
+                    _mapping(raw["target_scope"], "target_scope")
+                ),
                 resource_id=Id(raw["resource_id"]),
                 capability_id=Id(raw["capability_id"]),
                 trace=Trace.from_wire(_mapping(raw["trace"], "trace")),
                 payload=_mapping(raw.get("payload", {}), "payload"),
                 expected_cursor=(
-                    Cursor.from_wire(_mapping(raw["expected_cursor"], "expected_cursor"))
-                    if raw.get("expected_cursor") is not None else None
+                    Cursor.from_wire(
+                        _mapping(raw["expected_cursor"], "expected_cursor")
+                    )
+                    if raw.get("expected_cursor") is not None
+                    else None
                 ),
                 idempotency_key=(
                     Id(raw["idempotency_key"])
-                    if raw.get("idempotency_key") is not None else None
+                    if raw.get("idempotency_key") is not None
+                    else None
                 ),
             )
         except (KeyError, TypeError, ValueError) as exc:
@@ -290,13 +324,21 @@ class MemoryEventBatch:
     version: str = MEMORY_PROTOCOL
 
     def validate(self, maximum_events: int) -> None:
-        if self.version != MEMORY_PROTOCOL or not 1 <= maximum_events or len(self.events) > maximum_events:
+        if (
+            self.version != MEMORY_PROTOCOL
+            or not 1 <= maximum_events
+            or len(self.events) > maximum_events
+        ):
             raise MemoryTransportViolation(
-                "MEMORY_STREAM_INVALID", "the memory stream version or event bound is invalid"
+                "MEMORY_STREAM_INVALID",
+                "the memory stream version or event bound is invalid",
             )
         previous = self.resumed_after
         for event in self.events:
-            if event.cursor.epoch != previous.epoch or event.cursor.sequence <= previous.sequence:
+            if (
+                event.cursor.epoch != previous.epoch
+                or event.cursor.sequence <= previous.sequence
+            ):
                 raise MemoryTransportViolation(
                     "MEMORY_STREAM_INVALID",
                     "memory stream cursors are replayed, reordered, or cross epochs",
@@ -304,7 +346,8 @@ class MemoryEventBatch:
             previous = event.cursor
         if self.next_cursor != previous:
             raise MemoryTransportViolation(
-                "MEMORY_STREAM_INVALID", "the memory stream continuation cursor is invalid"
+                "MEMORY_STREAM_INVALID",
+                "the memory stream continuation cursor is invalid",
             )
 
 
@@ -327,33 +370,47 @@ class EmbeddingVectorWire:
     ) -> EmbeddingVectorWire:
         values = tuple(float(value) for value in vector)
         if not values or len(values) > MAX_VECTOR_DIMENSIONS:
-            raise MemoryTransportViolation("MEMORY_VECTOR_INVALID", "invalid vector dimensions")
+            raise MemoryTransportViolation(
+                "MEMORY_VECTOR_INVALID", "invalid vector dimensions"
+            )
         payload = struct.pack(f"<{len(values)}f", *values)
         result = cls(
-            Id(registration_id), Digest(fingerprint), Digest(input_digest), len(values),
+            Id(registration_id),
+            Digest(fingerprint),
+            Digest(input_digest),
+            len(values),
             base64.b64encode(payload).decode("ascii"),
         )
         result.decode()
         return result
 
     def decode(self) -> tuple[float, ...]:
-        if self.encoding != "f32le-base64" or not 1 <= self.dimensions <= MAX_VECTOR_DIMENSIONS:
+        if (
+            self.encoding != "f32le-base64"
+            or not 1 <= self.dimensions <= MAX_VECTOR_DIMENSIONS
+        ):
             raise MemoryTransportViolation(
-                "MEMORY_VECTOR_INVALID", "the embedding vector encoding or dimensions are invalid"
+                "MEMORY_VECTOR_INVALID",
+                "the embedding vector encoding or dimensions are invalid",
             )
         try:
             payload = base64.b64decode(self.vector_base64, validate=True)
-        except (ValueError, base64.binascii.Error) as exc:
+        except (ValueError, binascii.Error) as exc:
             raise MemoryTransportViolation(
                 "MEMORY_VECTOR_INVALID", "the embedding vector is not canonical base64"
             ) from exc
         if len(payload) != self.dimensions * 4:
             raise MemoryTransportViolation(
-                "MEMORY_VECTOR_INVALID", "the embedding vector byte length does not match"
+                "MEMORY_VECTOR_INVALID",
+                "the embedding vector byte length does not match",
             )
         values = struct.unpack(f"<{self.dimensions}f", payload)
-        if any(not math.isfinite(value) for value in values) or math.fsum(value * value for value in values) <= 0:
+        if (
+            any(not math.isfinite(value) for value in values)
+            or math.fsum(value * value for value in values) <= 0
+        ):
             raise MemoryTransportViolation(
-                "MEMORY_VECTOR_INVALID", "the embedding vector is non-finite or has zero norm"
+                "MEMORY_VECTOR_INVALID",
+                "the embedding vector is non-finite or has zero norm",
             )
         return values

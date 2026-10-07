@@ -7,7 +7,7 @@ import hashlib
 import json
 import weakref
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping, cast
 from uuid import uuid4
 
 from gideon.engine.task_modes import infer_risk_from_name
@@ -114,18 +114,24 @@ class DaemonMcpToolProvider(ToolProvider):
                 descriptor = _mapping(value, "MCP tool descriptor")
                 name = _string(descriptor.get("name"), "tool name")
                 description = _string(
-                    descriptor.get("description", ""), "tool description", allow_empty=True
+                    descriptor.get("description", ""),
+                    "tool description",
+                    allow_empty=True,
                 )
                 schema = descriptor.get("input_schema")
                 if not isinstance(schema, dict):
                     raise DaemonMcpViolation("MCP tool input schema is malformed")
                 if descriptor.get("requires_approval") is not True:
-                    raise DaemonMcpViolation("daemon MCP tools must require Gideon approval")
+                    raise DaemonMcpViolation(
+                        "daemon MCP tools must require Gideon approval"
+                    )
                 effect = descriptor.get("effect")
                 if effect not in {"query", "idempotent", "durable"}:
                     raise DaemonMcpViolation("MCP tool effect class is malformed")
                 if name in catalog:
-                    raise DaemonMcpViolation("MCP catalog contains duplicate tool names")
+                    raise DaemonMcpViolation(
+                        "MCP catalog contains duplicate tool names"
+                    )
                 catalog[name] = _CatalogTool(
                     ToolDefinition(
                         name=name,
@@ -159,9 +165,7 @@ class DaemonMcpToolProvider(ToolProvider):
                 EffectState.NOT_STARTED,
             )
         call_key = f"call-{uuid4().hex}"
-        effect_id = (
-            Id(f"effect-{uuid4().hex}") if tool.effect != "query" else None
-        )
+        effect_id = Id(f"effect-{uuid4().hex}") if tool.effect != "query" else None
         payload: dict[str, Any] = {"tool": tool_name, "arguments": arguments}
         if effect_id is not None:
             payload.update(
@@ -180,7 +184,9 @@ class DaemonMcpToolProvider(ToolProvider):
             self._client.request(
                 "mcp.invoke",
                 payload,
-                effect_kind=tool.effect,
+                effect_kind=cast(
+                    Literal["query", "idempotent", "durable"], tool.effect
+                ),
             ),
             name=f"hypermid-mcp-{call_key}",
         )
@@ -188,7 +194,7 @@ class DaemonMcpToolProvider(ToolProvider):
             self._effects[call_key] = effect_id
         self._active[call_key] = _ActiveCall(effect_id, request)
         try:
-            payload = await request
+            result_payload = await request
         except asyncio.CancelledError:
             self._outcomes[call_key] = EffectState.UNKNOWN
             current = asyncio.current_task()
@@ -228,7 +234,7 @@ class DaemonMcpToolProvider(ToolProvider):
             self._active.pop(call_key, None)
             _trim_effects(self._effects)
             _trim_outcomes(self._outcomes)
-        response = _mapping(payload, "MCP invocation result")
+        response = _mapping(result_payload, "MCP invocation result")
         if response.get("classification") != "committed" or "result" not in response:
             self._outcomes[call_key] = EffectState.UNKNOWN
             return _failure(
@@ -287,10 +293,10 @@ class DaemonMcpToolProvider(ToolProvider):
                 pass
             if effect_id is not None:
                 try:
-                    payload = await self._client.request(
+                    result_payload = await self._client.request(
                         "mcp.effect.status", {"effect_id": str(effect_id)}
                     )
-                    raw = _mapping(payload, "MCP effect status")
+                    raw = _mapping(result_payload, "MCP effect status")
                     reported = raw.get("state")
                     if reported in {"intent", "not_started"}:
                         state = EffectState.NOT_STARTED
@@ -303,7 +309,9 @@ class DaemonMcpToolProvider(ToolProvider):
                 except Exception:
                     state = EffectState.UNKNOWN
             if active_calls == 0 and (
-                effect_id is None or state is not EffectState.UNKNOWN or reported == "unknown"
+                effect_id is None
+                or state is not EffectState.UNKNOWN
+                or reported == "unknown"
             ):
                 break
             await asyncio.sleep(0.01)
@@ -312,8 +320,8 @@ class DaemonMcpToolProvider(ToolProvider):
 
     async def health(self) -> tuple[DaemonMcpHealth, ...]:
         self._require_open()
-        payload = await self._client.request("mcp.health", {})
-        raw = _mapping(payload, "MCP health")
+        result_payload = await self._client.request("mcp.health", {})
+        raw = _mapping(result_payload, "MCP health")
         modules = raw.get("modules")
         if not isinstance(modules, list):
             raise DaemonMcpViolation("MCP health modules are malformed")
@@ -326,10 +334,10 @@ class DaemonMcpToolProvider(ToolProvider):
             return
         error: BaseException | None = None
         try:
-            payload = await self._client.request(
+            result_payload = await self._client.request(
                 "mcp.session.evict", {}, effect_kind="idempotent"
             )
-            result = _mapping(payload, "MCP session eviction")
+            result = _mapping(result_payload, "MCP session eviction")
             if (
                 result.get("classification") != "evicted"
                 or result.get("connected_sessions") != 0

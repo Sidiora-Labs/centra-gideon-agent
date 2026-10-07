@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-import re
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from .contracts import MaintenanceTerminalState
+
 import asyncio
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Mapping
+from typing import TYPE_CHECKING, Any, Literal, Mapping, get_args
 
+from .client import HypermidOutcomeUnknown
 from .contracts import (
     KnowledgePublication,
     KnowledgePublicationAuthority,
@@ -20,7 +26,6 @@ from .contracts import (
     SourceSnapshot,
     SummaryPublication,
 )
-from .client import HypermidOutcomeUnknown
 from .foundation import Digest, Id
 from .model_budget import ActualUsage, BudgetAmount, ModelBudget
 from .models import Cursor, Scope, Trace
@@ -51,7 +56,7 @@ MaintenanceKind = Literal[
     "purge_tombstones",
 ]
 
-_KINDS = frozenset(MaintenanceKind.__args__)
+_KINDS = frozenset(get_args(MaintenanceKind))
 _OPERATIONS = frozenset(
     {
         "create",
@@ -185,7 +190,7 @@ class ClaimedMaintenanceJob:
             raise ValueError("claimed maintenance job is incomplete")
         job = MaintenanceJob(
             job_id=str(raw_job.get("job_id", "")),
-            kind=raw_job.get("kind"),
+            kind=cast(MaintenanceKind, raw_job.get("kind")),
             scope=Scope.from_wire(raw_job.get("target_scope", raw_job.get("scope"))),
             actor_scope=Scope.from_wire(raw_job.get("actor_scope")),
             required_operation=str(raw_job.get("required_operation", "")),
@@ -360,10 +365,14 @@ class MaintenanceScheduler:
             raise ValueError("knowledge publication does not match its claimed job")
         if publication.expected_input_digest != Digest(completion.current_input_digest):
             raise ValueError("knowledge publication input digest changed")
-        if publication.expected_config_digest != Digest(completion.current_config_digest):
+        if publication.expected_config_digest != Digest(
+            completion.current_config_digest
+        ):
             raise ValueError("knowledge publication configuration digest changed")
         if publication.evaluated_cursor != claimed.job.input_cursor:
-            raise ValueError("knowledge publication cursor does not match its claimed job")
+            raise ValueError(
+                "knowledge publication cursor does not match its claimed job"
+            )
         if completion.pre_publish_check is not None:
             completion.pre_publish_check()
         return await self._client.maintenance_publish_knowledge(
@@ -459,7 +468,7 @@ class MaintenanceScheduler:
         await self._client.maintenance_terminate(
             self._job_request(claimed),
             proof=claimed.proof,
-            state=state,
+            state=cast("MaintenanceTerminalState", state),
             error_code=error_code,
         )
 
