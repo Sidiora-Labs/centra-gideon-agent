@@ -1,10 +1,12 @@
 """A real artifact-backed application for moodboard console qualification."""
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
 from aiohttp import web
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.interfaces.dashboard.handlers.capabilities_creative import STORE, register
 from gideon.workspace.artifacts.handlers import api_artifact_raw
@@ -25,7 +27,7 @@ async def main():
     provider.create(name="Long sample", kind="markdown", content="A" * 5000)
     catalog = IngredientStore(home)
     catalog.create({"request_id": "city", "type": "place", "title": "Linked city"})
-    app = web.Application()
+    app = web.Application(middlewares=[token_auth_middleware()])
     app[STORE] = catalog
     register(app)
     app.router.add_get("/api/artifacts/{slug}/raw", api_artifact_raw)
@@ -33,7 +35,7 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
-    print(site._server.sockets[0].getsockname()[1], flush=True)
+    print(json.dumps({"url": f"http://127.0.0.1:{runner.addresses[0][1]}", "token": generate_token("author_server-owner")}), flush=True)
     try:
         await asyncio.Event().wait()
     finally:

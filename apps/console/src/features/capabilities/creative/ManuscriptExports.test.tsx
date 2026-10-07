@@ -11,22 +11,51 @@ import ManuscriptExports from './ManuscriptExports'
 
 let server:ChildProcess,origin='',home='',workId='',revision=0
 const run=promisify(execFile)
-beforeAll(async()=>{
-  home=await mkdtemp(join(tmpdir(),'gideon-export-ui-'));const root=resolve(process.cwd(),'../..');let diagnostics=''
-  server=spawn(process.env.GIDEON_TEST_PYTHON||'/tmp/gideon-runtime-venv/bin/python',['checks/runtime/capabilities/creative/export_ui_server.py'],{cwd:root,env:{...process.env,PYTHONPATH:join(root,'runtime'),GIDEON_HOME:home},stdio:['ignore','pipe','pipe']})
-  server.stderr!.on('data',chunk=>{diagnostics+=chunk.toString()})
-  const ready=await new Promise<{port:number;work_id:string;revision:number}>((accept,reject)=>{const lines=createInterface({input:server.stdout!});lines.on('line',line=>{try{const value=JSON.parse(line);accept(value);lines.close()}catch{}});server.once('error',reject);server.once('exit',code=>reject(new Error(`server exited ${code}: ${diagnostics}`)))})
-  origin=`http://127.0.0.1:${ready.port}`;workId=ready.work_id;revision=ready.revision
+const nativeFetch = globalThis.fetch
+beforeAll(async () => {
+  home = await mkdtemp(join(tmpdir(), 'gideon-creative-ui-'))
+  const root = resolve(process.cwd(), '../..')
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: home }
+  delete childEnv.GIDEON_DEV_NO_AUTH
+  server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', [resolve(root, 'checks/runtime/capabilities/creative/export_ui_server.py')], { cwd: root, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] })
+  let diagnostics = ''
+  server.stderr!.on('data', chunk => { diagnostics += chunk.toString() })
+  const ready = await new Promise<{ url: string; token: string; work_id: string; revision: number }>((accept, reject) => {
+    const lines = createInterface({ input: server.stdout! })
+    lines.on('line', line => {
+      try {
+        const value = JSON.parse(line)
+        if (typeof value.url !== 'string' || typeof value.token !== 'string') return
+        accept(value); lines.close()
+      } catch { /* Read the native child readiness record. */ }
+    })
+    server.once('error', reject)
+    server.once('exit', code => reject(new Error(`HTTP process exited ${code}: ${diagnostics}`)))
+  })
+  const baseUrl = ready.url
+  origin = baseUrl; workId = ready.work_id; revision = ready.revision
+  expect((await nativeFetch(`${baseUrl}/api/capabilities/creative/exports`)).status).toBe(403)
+  globalThis.fetch = (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), baseUrl)
+    if (url.origin !== baseUrl) return nativeFetch(input, init)
+    const headers = new Headers(init?.headers)
+    headers.set('Authorization', `Bearer ${ready.token}`)
+    return nativeFetch(url, { ...init, headers })
+  }
 })
-afterAll(async()=>{if(server?.exitCode===null)await new Promise<void>(done=>{server.once('exit',()=>done());server.kill('SIGTERM')});await rm(home,{recursive:true,force:true})})
-const change=(name:string,value:string)=>fireEvent.change(screen.getByLabelText(name),{target:{value}})
+afterAll(async()=>{globalThis.fetch = nativeFetch;if(server?.exitCode===null)await new Promise<void>(done=>{server.once('exit',()=>done());server.kill('SIGTERM')});await rm(home,{recursive:true,force:true})})
+const change = (name: string, value: string) => {
+  const field = screen.getByLabelText(name)
+  fireEvent.change(field, { target: { value } })
+  if (field instanceof HTMLInputElement && field.type === 'number') fireEvent.blur(field)
+}
 
 test('renders a pinned work through real HTTP and exposes readable EPUB and PDF downloads',async()=>{
   render(<ManuscriptExports baseUrl={origin}/>)
   expect(screen.getByRole('region',{name:'Manuscript exports'})).toHaveTextContent('pin the selected work or ordered series revision')
   expect(screen.getByRole('button',{name:'Create EPUB and print PDF'})).toBeDisabled()
   change('Export source ID',workId);change('Export source revision',String(revision));change('Export title','UI Published Book');change('Export creator','UI Author');change('Export language','en-GB');change('Export identifier','urn:uuid:ui-book')
-  fireEvent.click(screen.getByRole('button',{name:'Create EPUB and print PDF'}))
+  await waitFor(() => { const button = screen.getByRole('button',{name:'Create EPUB and print PDF'}); expect(button).not.toBeDisabled(); expect(button).not.toHaveAttribute('aria-disabled', 'true') }); fireEvent.click(screen.getByRole('button',{name:'Create EPUB and print PDF'}))
   const article=await screen.findByRole('article',{name:'Manuscript export UI Published Book'})
   expect(article).toHaveTextContent(`work ${workId} revision ${revision} · 1 manuscript sections`)
   expect(article).toHaveTextContent('UI Manuscript')
@@ -53,7 +82,7 @@ test('surfaces canonical-source failures without adding a placeholder receipt',a
   render(<ManuscriptExports baseUrl={origin}/>)
   await waitFor(()=>expect(screen.queryAllByRole('article')).toHaveLength(before.items.length))
   change('Export source ID','missing-work');change('Export creator','UI Author');change('Export identifier','urn:uuid:missing')
-  fireEvent.click(screen.getByRole('button',{name:'Create EPUB and print PDF'}))
+  await waitFor(() => { const button = screen.getByRole('button',{name:'Create EPUB and print PDF'}); expect(button).not.toBeDisabled(); expect(button).not.toHaveAttribute('aria-disabled', 'true') }); fireEvent.click(screen.getByRole('button',{name:'Create EPUB and print PDF'}))
   expect(await screen.findByRole('alert')).toHaveTextContent('Work not found')
   const listed=await (await fetch(origin+'/api/capabilities/creative/exports')).json()
   expect(listed.items).toHaveLength(before.items.length)

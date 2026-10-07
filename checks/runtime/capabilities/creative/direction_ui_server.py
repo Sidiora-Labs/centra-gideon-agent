@@ -3,6 +3,7 @@ import json
 import os
 
 from aiohttp import web
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.interfaces.dashboard.handlers.capabilities_creative_direction import (
     register,
@@ -36,12 +37,7 @@ async def main():
     )["work"]
     store = DirectionStore(home)
 
-    @web.middleware
-    async def owner(request, handler):
-        request["user"] = "owner"
-        return await handler(request)
-
-    app = web.Application(middlewares=[owner])
+    app = web.Application(middlewares=[token_auth_middleware()])
     app["creative_direction_factory"] = lambda: store
     register(app)
     runner = web.AppRunner(app)
@@ -51,7 +47,8 @@ async def main():
     print(
         json.dumps(
             {
-                "port": site._server.sockets[0].getsockname()[1],
+                "url": f"http://127.0.0.1:{runner.addresses[0][1]}",
+                "token": generate_token("direction_ui_server-owner"),
                 "work_id": work["id"],
                 "revision": work["revision"],
             }

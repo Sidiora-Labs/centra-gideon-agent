@@ -2,6 +2,7 @@ import json
 import os
 
 from aiohttp import web
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.interfaces.dashboard.handlers.capabilities_creative_exports import register
 from gideon.workspace.capabilities.creative.exports import ManuscriptExports
@@ -33,12 +34,7 @@ async def main():
     )["work"]
     exports = ManuscriptExports(home, works=works)
 
-    @web.middleware
-    async def owner(request, handler):
-        request["user"] = "owner"
-        return await handler(request)
-
-    app = web.Application(middlewares=[owner])
+    app = web.Application(middlewares=[token_auth_middleware()])
     app["creative_exports_factory"] = lambda: exports
     register(app)
     runner = web.AppRunner(app)
@@ -48,7 +44,8 @@ async def main():
     print(
         json.dumps(
             {
-                "port": site._server.sockets[0].getsockname()[1],
+                "url": f"http://127.0.0.1:{runner.addresses[0][1]}",
+                "token": generate_token("export_ui_server-owner"),
                 "work_id": work["id"],
                 "revision": work["revision"],
             }
