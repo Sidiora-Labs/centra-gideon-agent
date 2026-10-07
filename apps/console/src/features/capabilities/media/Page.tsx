@@ -1,3 +1,4 @@
+import { Select, TextInput } from '../../../shared/ui/forms'
 import { BUSY_REASON, unavailableWhen } from '../../../shared/ui/unavailable'
 import SpritePage from './SpritePage'
 import AnimationPage from './AnimationPage'
@@ -79,23 +80,21 @@ function SketchPage({ sketchId, onSelectSketch, onJob }: { sketchId?: string; on
   return <NativeMediaPage title="Image sketches">
     {error && <p role="alert">{error}</p>}
     <div className="grid gap-m rounded-lg bg-surface-container p-l sm:grid-cols-2 lg:grid-cols-5">
-      <label>Source artifact ID (optional)<input aria-label="Source artifact ID" value={source} onChange={e => setSource(e.target.value)} /></label>
-      <label>Source version<input aria-label="Source version" type="number" min="1" value={version} onChange={e => setVersion(Number(e.target.value))} /></label>
-      {['Width', 'Height'].map((label, i) => <label key={label}>{label}<input aria-label={label} type="number" min="1" max="4096" value={size[i]} onChange={e => setSize(size.map((v, j) => j === i ? Number(e.target.value) : v))} /></label>)}
+      <label>Source artifact ID (optional)<TextInput ariaLabel="Source artifact ID" value={String(source)} onChange={nextValue => setSource(nextValue)} /></label>
+      <label>Source version<TextInput ariaLabel="Source version" type="number" min="1" value={String(version)} onChange={nextValue => setVersion(Number(nextValue))} /></label>
+      {['Width', 'Height'].map((label, i) => <label key={label}>{label}<TextInput ariaLabel={label} type="number" min="1" max="4096" value={String(size[i])} onChange={nextValue => setSize(size.map((v, j) => j === i ? Number(nextValue) : v))} /></label>)}
       <Button disabled={busy || !!dirty} onClick={() => void action(async () => {
         const value = await request('', 'POST', { width: size[0], height: size[1], request_id: crypto.randomUUID(), ...(source ? { source_artifact_id: source, source_version: version } : {}) })
         select(value); setItems(old => [value, ...old]); if (onSelectSketch) onSelectSketch(value.id); else location.hash = '/capabilities/media?sketch=' + value.id
       })} disabledReason={busy ? BUSY_REASON : undefined}>New sketch</Button>
     </div>
-    <label>Saved sketches<select aria-label="Saved sketches" disabled={busy || !!dirty} value={sketch?.id || ''} onChange={e => { if (e.target.value) { if (onSelectSketch) onSelectSketch(e.target.value); else location.hash = '/capabilities/media?sketch=' + e.target.value } }}>
-      <option value="">Choose a sketch</option>{items.map(item => <option key={item.id} value={item.id}>{item.id}</option>)}
-    </select></label>
+    <label>Saved sketches<Select ariaLabel="Saved sketches" disabled={busy || !!dirty} value={String(sketch?.id || '')} onChange={nextValue => { if (nextValue) { if (onSelectSketch) onSelectSketch(nextValue); else location.hash = '/capabilities/media?sketch=' + nextValue } }} options={[{ value: String(""), label: "Choose a sketch" }, ...(items.map(item => ({ value: String(item.id), label: String(item.id) })) ?? [])]} /></label>
     {!sketch && <p>Create a blank canvas or open an image artifact at its original dimensions.</p>}
     {sketch && <>
       <div className="flex flex-wrap items-end gap-s rounded-lg bg-surface-container p-m">
         <Button ariaPressed={tool === 'draw'} onClick={() => setTool('draw')}>Draw</Button><Button ariaPressed={tool === 'erase'} onClick={() => setTool('erase')}>Erase</Button>
         <label>Color<input aria-label="Color" type="color" value={color} onChange={e => setColor(e.target.value)} /></label>
-        <label>Brush width<input aria-label="Brush width" type="number" min="1" max="128" value={width} onChange={e => setWidth(Math.max(1, Math.min(128, Number(e.target.value))))} /></label>
+        <label>Brush width<TextInput ariaLabel="Brush width" type="number" min="1" max="128" value={String(width)} onChange={nextValue => setWidth(Math.max(1, Math.min(128, Number(nextValue))))} /></label>
         <Button disabled={!strokes.length || busy} onClick={() => setStrokes(old => old.slice(0, -1))} disabledReason={busy ? BUSY_REASON : undefined}>Undo</Button>
         <Button disabled={!dirty || busy} onClick={() => void action(async () => { select(await request('/' + sketch.id, 'PUT', { revision: sketch.revision, strokes })) })} disabledReason={busy ? BUSY_REASON : undefined}>Save</Button>
         <Button disabled={!dirty || busy} onClick={() => setStrokes(sketch.strokes)} disabledReason={busy ? BUSY_REASON : undefined}>Discard changes</Button>

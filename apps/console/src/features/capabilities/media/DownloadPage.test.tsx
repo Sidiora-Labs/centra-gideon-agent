@@ -25,7 +25,9 @@ describe('media source downloader', () => {
     expect([...doc.querySelectorAll('option')].map(option => [option.value, option.textContent])).toEqual([['video', 'Video'], ['audio', 'Audio']])
     expect((doc.querySelector('select') as HTMLSelectElement).value).toBe('video')
     const submit = [...doc.querySelectorAll('button')].find(button => button.textContent === 'Queue guarded download')
-    expect(submit?.disabled).toBe(true)
+    expect(submit?.disabled).toBe(false)
+    expect(submit?.getAttribute('aria-disabled')).toBe('true')
+    expect(submit?.getAttribute('title')).toBe('Enter a source URL before queuing a download.')
     expect(doc.querySelector('a')?.getAttribute('href')).toBe('#/capabilities/media?view=jobs')
   })
 

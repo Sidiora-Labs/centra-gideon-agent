@@ -18,9 +18,13 @@ describe('continuous episode planning', () => {
     expect(doc.body.textContent).toContain('Loading episodes')
     expect(doc.querySelectorAll('li')).toHaveLength(0)
     const save = [...doc.querySelectorAll('button')].find(button => button.textContent === 'Validate and save')
-    expect(save?.disabled).toBe(true)
+    expect(save?.disabled).toBe(false)
+    expect(save?.getAttribute('aria-disabled')).toBe('true')
+    expect(save?.getAttribute('title')).toBe('Loading episodes…')
     const render = [...doc.querySelectorAll('button')].find(button => button.textContent === 'Render saved episode')
-    expect(render?.disabled).toBe(true)
+    expect(render?.disabled).toBe(false)
+    expect(render?.getAttribute('aria-disabled')).toBe('true')
+    expect(render?.getAttribute('title')).toBe('Loading episodes…')
   })
   it('removes stale input pins when switching reuse to generation', () => {
     const reused = { prompt: 'Scene', duration_seconds: 4, mode: 'reuse' as const, allow_fallback: false, artifact_id: 'old', version: 3 }

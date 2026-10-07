@@ -1,3 +1,4 @@
+import { Select, TextArea, TextInput } from '../../../shared/ui/forms'
 import { unavailableWhen } from '../../../shared/ui/unavailable'
 import LoraPicker, { type LoraInventory } from './LoraPicker'
 import { useEffect, useRef, useState } from 'react'
@@ -7,11 +8,11 @@ export function ConditioningFields({ capabilities, values, change }: { capabilit
   const model = capabilities.models[0]
   if (!model) return <p>No selected model capability catalog is available.</p>
   return <fieldset className="space-y-2"><legend>Model controls</legend>
-    <label>Output size<select value={values.size || ''} onChange={event => change('size', event.target.value)}><option value="">Provider default</option>{model.sizes.map(size => <option key={size}>{size}</option>)}</select></label>
-    {Object.entries(model.controls).map(([name, bounds]) => <label key={name}>{name}<input type="number" min={bounds.minimum} max={bounds.maximum} step={bounds.integer ? 1 : 'any'} value={values[name] || ''} onChange={event => change(name, event.target.value)} /></label>)}
+    <label>Output size<Select value={String(values.size || '')} onChange={nextValue => change('size', nextValue)} options={[{ value: String(""), label: "Provider default" }, ...(model.sizes.map(size => ({ value: String(size), label: String(size) })) ?? [])]} /></label>
+    {Object.entries(model.controls).map(([name, bounds]) => <label key={name}>{name}<TextInput type="number" min={bounds.minimum} max={bounds.maximum} step={bounds.integer ? 1 : 'any'} value={String(values[name] || '')} onChange={nextValue => change(name, nextValue)} /></label>)}
     {Object.keys(model.controls).length === 0 && <p>This model advertises no seed, steps, guidance or strength controls.</p>}
-    {model.supports_edit ? <><label>Source image artifact<input value={values.source_artifact_id || ''} onChange={event => change('source_artifact_id', event.target.value)} /></label><label>Source version<input type="number" min="1" value={values.source_version || '1'} onChange={event => change('source_version', event.target.value)} /></label></> : <p>Image conditioning is not advertised by this model.</p>}
-    {model.supports_mask && <><label>Mask image artifact<input value={values.mask_artifact_id || ''} onChange={event => change('mask_artifact_id', event.target.value)} /></label><label>Mask version<input type="number" min="1" value={values.mask_version || '1'} onChange={event => change('mask_version', event.target.value)} /></label><p>Mask dimensions must match the pinned source; mask alpha is preserved.</p></>}
+    {model.supports_edit ? <><label>Source image artifact<TextInput value={String(values.source_artifact_id || '')} onChange={nextValue => change('source_artifact_id', nextValue)} /></label><label>Source version<TextInput type="number" min="1" value={String(values.source_version || '1')} onChange={nextValue => change('source_version', nextValue)} /></label></> : <p>Image conditioning is not advertised by this model.</p>}
+    {model.supports_mask && <><label>Mask image artifact<TextInput value={String(values.mask_artifact_id || '')} onChange={nextValue => change('mask_artifact_id', nextValue)} /></label><label>Mask version<TextInput type="number" min="1" value={String(values.mask_version || '1')} onChange={nextValue => change('mask_version', nextValue)} /></label><p>Mask dimensions must match the pinned source; mask alpha is preserved.</p></>}
   </fieldset>
 }
 export default function ImagePage({ onJob }: { onJob?: (id: string) => void } = {}) {
@@ -24,7 +25,7 @@ export default function ImagePage({ onJob }: { onJob?: (id: string) => void } = 
   return <NativeMediaPage title="Image generation" actions={<><a href="#/capabilities/media?view=readiness">Readiness</a><a href="#/capabilities/media?view=jobs">Jobs</a></>}>
     <p>Requests pin the selected model and original image versions. Generated output becomes a separate artifact. Unsupported controls fail before inference; provider execution requires an available configured model.</p>
     {error && <p role="alert">{error}</p>}{!capabilities && <p>Loading image capabilities…</p>}{capabilities && <><p>Selected: {capabilities.selection || 'None'}</p>{!capabilities.available && <p role="status">Provider unavailable. Configure a model through media readiness.</p>}
-      <label>Prompt<textarea maxLength={4000} value={prompt} onChange={event => setPrompt(event.target.value)} /></label><ConditioningFields capabilities={capabilities} values={values} change={(key, value) => setValues(old => ({ ...old, [key]: value }))} />
+      <label>Prompt<TextArea maxLength={4000} value={String(prompt)} onChange={nextValue => setPrompt(nextValue)} /></label><ConditioningFields capabilities={capabilities} values={values} change={(key, value) => setValues(old => ({ ...old, [key]: value }))} />
       {inventory && <LoraPicker inventory={inventory} selected={adapters} change={(id, value) => setAdapters(old => { const next = { ...old }; if (value === null) delete next[id]; else next[id] = value; return next })} />}
       <button {...unavailableWhen(!capabilities.available || !prompt.trim(), !capabilities.available ? 'Configure an available image model through media readiness' : 'Enter an image prompt first', { busy })} onClick={() => void submit()}>{busy ? 'Queuing…' : 'Queue image generation'}</button></>}
   </NativeMediaPage>

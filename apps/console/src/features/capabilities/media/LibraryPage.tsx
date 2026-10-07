@@ -1,3 +1,4 @@
+import { Select, TextInput } from '../../../shared/ui/forms'
 import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import NativeMediaPage from './NativeMediaPage'
 import { useEffect, useRef, useState } from 'react'
@@ -68,8 +69,8 @@ export default function LibraryPage({ artifactId, onSelectArtifact, onNavigate }
     : <a href="#/capabilities/media">Image sketches</a>}>
     {error && <p role="alert">{error}</p>}
     <div className="grid gap-m rounded-lg bg-surface-container p-l sm:grid-cols-2 lg:grid-cols-5">
-      <label>Search<input aria-label="Search media" type="search" value={q} onChange={e => { setQ(e.target.value); setOffset(0) }} /></label>
-      <label>Kind<select aria-label="Media kind" value={kind} onChange={e => { setKind(e.target.value); setOffset(0) }}><option value="">Images and videos</option><option value="image">Images</option><option value="video">Videos</option></select></label>
+      <label>Search<TextInput ariaLabel="Search media" type="search" value={String(q)} onChange={nextValue => { setQ(nextValue); setOffset(0) }} /></label>
+      <label>Kind<Select ariaLabel="Media kind" value={String(kind)} onChange={nextValue => { setKind(nextValue); setOffset(0) }} options={[{ value: String(""), label: "Images and videos" }, { value: String("image"), label: "Images" }, { value: String("video"), label: "Videos" }]} /></label>
       <label>Tag<input aria-label="Filter tag" value={tag} onChange={e => { setTag(e.target.value); setOffset(0) }} list="media-tags" /></label>
       <datalist id="media-tags">{Object.keys(result?.facets.tags || {}).map(value => <option key={value} value={value} />)}</datalist>
       <label>Collection<input aria-label="Filter collection" value={collection} onChange={e => { setCollection(e.target.value); setOffset(0) }} list="media-collections" /></label>
@@ -89,9 +90,9 @@ export default function LibraryPage({ artifactId, onSelectArtifact, onNavigate }
     </>}
     {selected && <section aria-label="Media details" className="rounded-lg bg-surface-high p-l space-y-m">
       <h2>{selected.name}</h2><a href={selected.raw_url} download>Download original</a>
-      <label>Name<input aria-label="Media name" value={name} onChange={e => setName(e.target.value)} maxLength={200} /></label>
-      <label>Tags (comma separated)<input aria-label="Media tags" value={tags} onChange={e => setTags(e.target.value)} /></label>
-      <label>Collection<input aria-label="Media collection" value={membership} onChange={e => setMembership(e.target.value)} maxLength={200} /></label>
+      <label>Name<TextInput ariaLabel="Media name" value={String(name)} onChange={nextValue => setName(nextValue)} maxLength={200} /></label>
+      <label>Tags (comma separated)<TextInput ariaLabel="Media tags" value={String(tags)} onChange={nextValue => setTags(nextValue)} /></label>
+      <label>Collection<TextInput ariaLabel="Media collection" value={String(membership)} onChange={nextValue => setMembership(nextValue)} maxLength={200} /></label>
       <Button disabled={!dirty || busy || selected.readonly} onClick={() => void action(async () => {
         const item = await fetch(base + '/' + selected.id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_updated_at: selected.updated_at, name, tags: tags.split(',').map(value => value.trim()).filter(Boolean), collection: membership }) }).then(json)
         choose(item); setRefresh(value => value + 1)

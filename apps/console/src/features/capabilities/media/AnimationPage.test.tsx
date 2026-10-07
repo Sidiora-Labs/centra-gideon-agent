@@ -25,7 +25,9 @@ describe('code animation workspace', () => {
     expect((doc.querySelector('select') as HTMLSelectElement).value).toBe('canvas2d')
     expect(doc.querySelector('input[type="checkbox"]')?.hasAttribute('checked')).toBe(false)
     const generate = [...doc.querySelectorAll('button')].find(button => button.textContent === 'Generate with reasoning model')
-    expect(generate?.disabled).toBe(true)
+    expect(generate?.disabled).toBe(false)
+    expect(generate?.getAttribute('aria-disabled')).toBe('true')
+    expect(generate?.getAttribute('title')).toBe('Enter both an animation title and a concept before generating.')
     expect(initialAnimation).toEqual({ title: '', concept: '', renderer: 'canvas2d', duration_seconds: 20, width: 1280, height: 720, fps: 30, interactive: false })
   })
 

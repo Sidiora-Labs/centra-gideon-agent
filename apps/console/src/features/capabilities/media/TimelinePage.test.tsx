@@ -19,9 +19,13 @@ describe('video timeline editor', () => {
     expect(doc.querySelectorAll('fieldset > section')).toHaveLength(3)
     expect(doc.querySelector('[role="alert"]')).toBeNull()
     const save = [...doc.querySelectorAll('button')].find(button => button.textContent === 'Save timeline')
-    expect(save?.disabled).toBe(true)
+    expect(save?.disabled).toBe(false)
+    expect(save?.getAttribute('aria-disabled')).toBe('true')
+    expect(save?.getAttribute('title')).toBe('Make a draft change before saving.')
     const render = [...doc.querySelectorAll('button')].find(button => button.textContent === 'Render saved revision')
-    expect(render?.disabled).toBe(true)
+    expect(render?.disabled).toBe(false)
+    expect(render?.getAttribute('aria-disabled')).toBe('true')
+    expect(render?.getAttribute('title')).toBe('Save a timeline before rendering.')
   })
   it('defines real typed track defaults and independent new drafts', () => {
     expect(emptyTimeline()).toEqual({ title: '', width: 1280, height: 720, fps: 24, segments: [], overlays: [], audio: [] })
@@ -56,10 +60,14 @@ describe('video timeline editor', () => {
     expect(rows[0].querySelectorAll('option')).toHaveLength(2)
     const firstButtons = [...rows[0].querySelectorAll('button')]
     const secondButtons = [...rows[1].querySelectorAll('button')]
-    expect(firstButtons[0].disabled).toBe(true)
+    expect(firstButtons[0].disabled).toBe(false)
+    expect(firstButtons[0].getAttribute('aria-disabled')).toBe('true')
+    expect(firstButtons[0].getAttribute('title')).toBe('This item is already first and cannot be moved earlier.')
     expect(firstButtons[1].disabled).toBe(false)
     expect(secondButtons[0].disabled).toBe(false)
-    expect(secondButtons[1].disabled).toBe(true)
+    expect(secondButtons[1].disabled).toBe(false)
+    expect(secondButtons[1].getAttribute('aria-disabled')).toBe('true')
+    expect(secondButtons[1].getAttribute('title')).toBe('This item is already last and cannot be moved later.')
     expect(firstButtons[2].textContent).toBe('Remove')
   })
   it('exposes actual overlay placement and audio fades', () => {
