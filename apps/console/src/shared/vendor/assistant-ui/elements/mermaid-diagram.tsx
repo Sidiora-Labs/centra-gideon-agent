@@ -178,7 +178,7 @@ function MermaidZoom({ svg, children }: MermaidZoomProps) {
             role="dialog"
             aria-modal="true"
             aria-label="Diagram"
-            className="aui-mermaid-zoom-overlay fade-in animate-in bg-background fixed inset-0 z-50 duration-200"
+            className="aui-mermaid-zoom-overlay fade-in animate-in bg-background fixed inset-0 z-[var(--z-modal)] duration-200"
           >
             <div
               ref={viewportRef}

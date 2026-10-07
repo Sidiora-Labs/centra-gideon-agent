@@ -59,7 +59,7 @@ export default function AmbientDisplay({ baseUrl = '/api/capabilities/experience
     } catch (cause) { if (active.current) setError(String(cause)) }
   }
   const wake = () => { lastInput.current = Date.now(); setIdle(false) }
-  return <main ref={root} aria-label="Ambient display" className="fixed inset-0 z-50 overflow-auto bg-canvas text-on-surface p-4 sm:p-8" onPointerMove={wake} onPointerDown={wake} onFocus={wake} style={{ fontSize: `${snapshot?.preferences.font_scale || 1}rem` }}>
+  return <main ref={root} aria-label="Ambient display" className="fixed inset-0 z-[var(--z-content)] overflow-auto bg-canvas text-on-surface p-4 sm:p-8" onPointerMove={wake} onPointerDown={wake} onFocus={wake} style={{ fontSize: `${snapshot?.preferences.font_scale || 1}rem` }}>
     <div ref={chrome} className="sticky top-0 z-10 flex flex-wrap items-end gap-s border-b border-outline-variant/30 bg-surface/95 px-l py-s backdrop-blur" style={idle ? { opacity: 0 } : undefined}>
       <Button onClick={close}>Exit ambient display</Button>
       <Button onClick={() => void enterFullscreen()} disabled={fullscreen}>{fullscreen ? 'Fullscreen active' : 'Enter fullscreen'}</Button>

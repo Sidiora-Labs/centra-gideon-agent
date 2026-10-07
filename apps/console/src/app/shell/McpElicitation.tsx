@@ -38,7 +38,7 @@ export function McpElicitationCards({ transport = gatewayEvents() }: {
     }), [transport]);
     if (!requests.length)
         return null;
-    return <aside aria-label="MCP requests" className="fixed bottom-4 right-4 z-50 max-h-[80vh] w-96 max-w-[calc(100vw-2rem)] space-y-3 overflow-auto">
+    return <aside aria-label="MCP requests" className="fixed bottom-4 right-4 z-[var(--z-overlay)] max-h-[80vh] w-96 max-w-[calc(100vw-2rem)] space-y-3 overflow-auto">
     {requests.map(request => <ElicitationCard key={request.id} request={request} onRespond={(action, content) => {
                 const sent = transport.send({ type: 'mcp_elicitation_response', id: request.id, action, content });
                 if (sent)

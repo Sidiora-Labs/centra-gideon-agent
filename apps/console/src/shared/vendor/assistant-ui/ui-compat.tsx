@@ -22,7 +22,7 @@ export function TooltipContent({ side = "top", sideOffset = 6, className, childr
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
 export function DialogContent({ className, children }: { className?: string; children?: ReactNode }) {
-  return <DialogPrimitive.Portal><DialogPrimitive.Backdrop className="fixed inset-0 z-40 bg-black/50" /><DialogPrimitive.Popup className={cn("bg-background fixed top-1/2 left-1/2 z-50 w-[min(90vw,40rem)] -translate-x-1/2 -translate-y-1/2 rounded-xl border p-4", className)}>{children}<DialogPrimitive.Close aria-label="Close dialog" className="absolute end-2 top-2">×</DialogPrimitive.Close></DialogPrimitive.Popup></DialogPrimitive.Portal>;
+  return <DialogPrimitive.Portal><DialogPrimitive.Backdrop className="fixed inset-0 z-[calc(var(--z-modal)-1)] bg-black/50" /><DialogPrimitive.Popup className={cn("bg-background fixed top-1/2 left-1/2 z-[var(--z-modal)] w-[min(90vw,40rem)] -translate-x-1/2 -translate-y-1/2 rounded-xl border p-4", className)}>{children}<DialogPrimitive.Close aria-label="Close dialog" className="absolute end-2 top-2">×</DialogPrimitive.Close></DialogPrimitive.Popup></DialogPrimitive.Portal>;
 }
 export const DialogTitle = DialogPrimitive.Title;
 export const DialogDescription = DialogPrimitive.Description;

@@ -40,7 +40,7 @@ export function AssistantModal({ thread, history, open, onOpenChange, trigger }:
     if (!currentOpen || typeof document === "undefined") return null;
     return createPortal(
       <div role="dialog" aria-label="Assistant" data-slot="aui_assistant-modal"
-        className="bg-background border-border fixed inset-x-3 bottom-3 z-50 flex h-[min(80vh,40rem)] flex-col overflow-hidden rounded-xl border shadow-xl">
+        className="bg-background border-border fixed inset-x-3 bottom-3 z-[var(--z-modal)] flex h-[min(80vh,40rem)] flex-col overflow-hidden rounded-xl border shadow-xl">
         {content}
       </div>, document.body,
     );
@@ -50,7 +50,7 @@ export function AssistantModal({ thread, history, open, onOpenChange, trigger }:
     <PopoverPrimitive.Root open={currentOpen} onOpenChange={changeOpen}>
       <PopoverPrimitive.Trigger aria-label="Open assistant">{trigger ?? "Assistant"}</PopoverPrimitive.Trigger>
       <PopoverPrimitive.Portal>
-        <PopoverPrimitive.Positioner side="top" align="end" sideOffset={16}>
+        <PopoverPrimitive.Positioner className="z-[var(--z-modal)]" side="top" align="end" sideOffset={16}>
           <PopoverPrimitive.Popup data-slot="aui_assistant-modal" className="bg-background border-border flex h-[min(80vh,40rem)] w-[min(90vw,36rem)] flex-col overflow-hidden rounded-xl border shadow-xl">
             {content}
           </PopoverPrimitive.Popup>
