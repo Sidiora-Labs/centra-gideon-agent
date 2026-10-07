@@ -642,7 +642,8 @@ function DeniedCommandsEditor({ builtin, user, baseline, userAdditions, onChange
             {shown.map((p) => (
               <div key={p} className="flex items-center gap-2 rounded-lg bg-surface-container px-3 py-2">
                 <code data-type="body-s" className="min-w-0 flex-1 truncate text-on-surface">{p}</code>
-                <IconButton icon={X} iconSize={15} size={23} label={`Remove ${p}`} disabled={busy || !document?.revision}
+                <IconButton icon={X} iconSize={15} size={23} label={`Remove ${p}`} loading={busy} disabled={!document?.revision}
+            disabledReason={!document?.revision ? 'Reload the outside-home permissions before removing a location' : undefined}
             onClick={() => save(shown.filter((x) => x !== p))}
             className="shrink-0 rounded-md p-1 text-on-surface-low hover:bg-surface-high hover:text-on-surface" />
               </div>

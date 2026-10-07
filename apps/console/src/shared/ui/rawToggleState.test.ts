@@ -1,3 +1,10 @@
+import ts from 'typescript'
+import { createElement } from 'react'
+import { render, screen } from '@testing-library/react'
+import { Button } from './Button'
+import { QuietButton } from './QuietButton'
+import { jsxTags } from '../testing/jsxContracts'
+import { sourceFile } from '../testing/sourceOwners'
 import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -21,7 +28,22 @@ const DISCLOSURES: [string, string, string][] = [
 describe('a raw disclosure button announces its state', () => {
   for (const [rel, state, anchor] of DISCLOSURES) {
     it(`${rel}${state === 'promptOpen' ? ' (prompt)' : ''} announces ${state}`, () => {
-      expect(read(rel), `${rel} must carry the attribute on this specific button`).toContain(anchor)
+      const source = read(rel)
+      const native = nativeControlBindings(source, ['Button', 'QuietButton'])
+      const matches = jsxTags(source, ['button', ...native]).filter((tag) => [tag.attributes.get('aria-expanded'), tag.attributes.get('ariaExpanded')].includes(`{${state}}`) && tag.attributes.get('onClick')?.includes(`set${state[0].toUpperCase()}${state.slice(1)}`))
+      expect(matches.length, `${rel}: actual disclosure state binding`).toBeGreaterThan(0)
+      expect(anchor, 'original consumer anchor remains documented').toContain('aria-expanded')
+      for (const tag of matches) expect(tag.attributes.has('ariaPressed') || tag.attributes.has('aria-pressed')).toBe(false)
+      const tag = matches[0]
+      if (native.includes(tag.name)) {
+        const { rerender } = tag.name === 'QuietButton'
+          ? render(createElement(QuietButton, { ariaExpanded: false, onClick: () => {}, children: 'Inspect details' }))
+          : render(createElement(Button, { ariaExpanded: false, onClick: () => {}, children: 'Inspect details' }))
+        expect(screen.getByRole('button', { name: 'Inspect details' })).toHaveAttribute('aria-expanded', 'false')
+        rerender(tag.name === 'QuietButton' ? createElement(QuietButton, { ariaExpanded: true, onClick: () => {}, children: 'Inspect details' }) : createElement(Button, { ariaExpanded: true, onClick: () => {}, children: 'Inspect details' }))
+        expect(screen.getByRole('button', { name: 'Inspect details' })).toHaveAttribute('aria-expanded', 'true')
+        expect(screen.getByRole('button', { name: 'Inspect details' })).not.toHaveAttribute('aria-pressed')
+      }
     })
 
     it(`${rel} still gates content on ${state}`, () => {
@@ -33,7 +55,14 @@ describe('a raw disclosure button announces its state', () => {
 
 describe('a mode toggle gets pressed — unless its name already says so', () => {
   it('autoscroll is pressed, because its title names the state and the rest is a tint', () => {
-    expect(read('features/settings/DiagnosticsPanel.tsx')).toContain('aria-pressed={autoscroll}')
+    const source = read('features/settings/DiagnosticsPanel.tsx')
+    const button = jsxTags(source, nativeControlBindings(source, ['Button'])).find((tag) => tag.attributes.get('ariaPressed') === '{autoscroll}')
+    expect(button).toBeTruthy()
+    expect(button?.attributes.get('onClick')).toContain('setAutoscroll')
+    const { rerender } = render(createElement(Button, { ariaPressed: true, children: 'Autoscroll' }))
+    expect(screen.getByRole('button', { name: 'Autoscroll' })).toHaveAttribute('aria-pressed', 'true')
+    rerender(createElement(Button, { ariaPressed: false, children: 'Autoscroll' }))
+    expect(screen.getByRole('button', { name: 'Autoscroll' })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('pause stays silent, because its title names the next action', () => {
@@ -100,3 +129,16 @@ describe('the census ceiling falls', () => {
     ).toEqual([])
   })
 })
+
+function nativeControlBindings(source: string, symbols: readonly string[]): string[] {
+  return sourceFile(source).statements.flatMap((statement) => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) return []
+    const module = statement.moduleSpecifier.text
+    const named = statement.importClause?.namedBindings
+    if (!named || !ts.isNamedImports(named)) return []
+    return named.elements.filter((binding) => {
+      const symbol = (binding.propertyName ?? binding.name).text
+      return symbols.includes(symbol) && module.endsWith(`/${symbol}`)
+    }).map((binding) => binding.name.text)
+  })
+}

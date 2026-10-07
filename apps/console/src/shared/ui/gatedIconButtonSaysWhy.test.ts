@@ -1,3 +1,5 @@
+import ts from 'typescript'
+import { sourceFile, namedOwner } from '../testing/sourceOwners'
 import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -15,9 +17,9 @@ const walk = (d: string): string[] =>
   })
 
 function gatedTags(src: string): string[] {
-  return [...src.matchAll(/<(?:Square)?IconButton\b[\s\S]{0,500}?\/>/g)]
-    .map((m) => m[0])
-    .filter((t) => /(?<!aria-)disabled=/.test(t))
+  const native = nativeControlBindings(src, ['IconButton', 'SquareIconButton'])
+  if (!native.length) return []
+  return jsxTags(src, native).filter((tag) => tag.attributes.has('disabled')).map((tag) => tag.tag)
 }
 
 describe('a gated icon button whose gate the user can fix says so', () => {
@@ -44,9 +46,18 @@ describe('a gated icon button whose gate the user can fix says so', () => {
 
   it('it converges on the canonical composer, which had it first', () => {
     const composer = readFileSync(join(SRC, 'shared/ui/Composer.tsx'), 'utf8')
-    expect(composer, "the canonical send button's reason is the model for the others").toMatch(
-      /label="Send message" disabledReason="Type a bit more first"/,
-    )
+    expect(composer).toContain('ComposerSend as AssistantComposerSend')
+    const send = jsxTags(composer, ['AssistantComposerSend'])[0]
+    expect(send.attributes.get('aria-disabled')).toBe("{action === 'send-disabled' || undefined}")
+    expect(send.attributes.get('aria-description')).toBe('{sendReason}')
+    expect(send.attributes.get('title')).toBe('{sendReason}')
+    expect(send.attributes.get('onClick')).toBe('{primaryClick}')
+    expect(namedOwner(composer, 'sendReason')).toContain("action === 'send-disabled'")
+    expect(namedOwner(composer, 'primaryClick')).toContain('surface.action.canSubmit ? surface.submit : undefined')
+    const surface = readFileSync(join(SRC, 'shared/ui/composer/useComposerSurface.ts'), 'utf8')
+    expect(surface).toContain('if (!action.canSubmit) return')
+    const native = readFileSync(join(SRC, 'shared/vendor/assistant-ui/elements/composer.tsx'), 'utf8')
+    expect(namedOwner(native, 'ComposerSend')).toContain('{...props}')
   })
 
   it('a self-evident gate is still left mute — and every one left is a REAL gate', () => {
@@ -73,3 +84,16 @@ describe('a gated icon button whose gate the user can fix says so', () => {
     }
   })
 })
+
+function nativeControlBindings(source: string, symbols: readonly string[]): string[] {
+  return sourceFile(source).statements.flatMap((statement) => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) return []
+    const module = statement.moduleSpecifier.text
+    const named = statement.importClause?.namedBindings
+    if (!named || !ts.isNamedImports(named)) return []
+    return named.elements.filter((binding) => {
+      const symbol = (binding.propertyName ?? binding.name).text
+      return symbols.includes(symbol) && module.endsWith(`/${symbol}`)
+    }).map((binding) => binding.name.text)
+  })
+}

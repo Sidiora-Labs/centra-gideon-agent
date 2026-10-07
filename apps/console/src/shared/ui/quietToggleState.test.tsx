@@ -1,3 +1,6 @@
+import ts from 'typescript'
+import { jsxTags } from '../testing/jsxContracts'
+import { sourceFile } from '../testing/sourceOwners'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -136,7 +139,7 @@ describe('SquareIconButton asks the right question of the right caller', () => {
   })
 })
 
-describe('the SquareIconButton state family is classified, all eleven of it', () => {
+describe('the SquareIconButton state family is classified, all twelve of it', () => {
   const SRC = join(process.cwd(), "src")
   const walkTsx = (d: string): string[] =>
     readdirSync(d).flatMap((n) => {
@@ -149,17 +152,10 @@ describe('the SquareIconButton state family is classified, all eleven of it', ()
     const out: { rel: string; kind: 'disclosure' | 'toggle' }[] = []
     for (const abs of walkTsx(SRC)) {
       const src = readFileSync(abs, 'utf8')
-      for (const m of src.matchAll(/<SquareIconButton\b/g)) {
-        let depth = 0, end = -1
-        for (let i = m.index! + m[0].length; i < src.length; i++) {
-          const c = src[i]
-          if (c === '{') depth++
-          else if (c === '}') depth--
-          else if (c === '>' && depth === 0) { end = i; break }
-        }
-        if (end < 0) continue
-        const tag = src.slice(m.index!, end + 1)
-        const on = /\bon=\{/.test(tag), ex = /ariaExpanded=/.test(tag)
+      const bindings = nativeControlBindings(src, ['SquareIconButton'])
+      if (!bindings.length) continue
+      for (const tag of jsxTags(src, bindings)) {
+        const on = tag.attributes.has('on'), ex = tag.attributes.has('ariaExpanded')
         if (!on && !ex) continue
         expect(on && ex, `${abs}: a control may not claim both states`).toBe(false)
         out.push({ rel: abs.slice(SRC.length + 1), kind: ex ? 'disclosure' : 'toggle' })
@@ -168,10 +164,11 @@ describe('the SquareIconButton state family is classified, all eleven of it', ()
     return out
   }
 
-  it('is 7 disclosures and 4 toggles — and nothing unclassified', () => {
+  it('is 8 disclosures and 4 toggles — and nothing unclassified', () => {
     const all = stateBearing()
-    expect(all.length, 'the state-bearing population').toBe(11)
-    expect(all.filter((x) => x.kind === 'disclosure').length, 'disclosures').toBe(7)
+    expect(all.length, 'retain the established consumer population').toBeGreaterThanOrEqual(11)
+    expect(all.length, 'new session marker disclosure is included').toBe(12)
+    expect(all.filter((x) => x.kind === 'disclosure').length, 'disclosures').toBe(8)
     expect(all.filter((x) => x.kind === 'toggle').length, 'toggles').toBe(4)
   })
 
@@ -200,3 +197,16 @@ describe('the SquareIconButton state family is classified, all eleven of it', ()
     }
   })
 })
+
+function nativeControlBindings(source: string, symbols: readonly string[]): string[] {
+  return sourceFile(source).statements.flatMap((statement) => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) return []
+    const module = statement.moduleSpecifier.text
+    const named = statement.importClause?.namedBindings
+    if (!named || !ts.isNamedImports(named)) return []
+    return named.elements.filter((binding) => {
+      const symbol = (binding.propertyName ?? binding.name).text
+      return symbols.includes(symbol) && module.endsWith(`/${symbol}`)
+    }).map((binding) => binding.name.text)
+  })
+}

@@ -1,3 +1,10 @@
+import ts from 'typescript'
+import { createElement } from 'react'
+import { render, screen, fireEvent } from '@testing-library/react'
+import { vi } from 'vitest'
+import { Button } from './Button'
+import { jsxTags } from '../testing/jsxContracts'
+import { sourceFile } from '../testing/sourceOwners'
 import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -24,7 +31,26 @@ describe('a converted raw control keeps its tab stop AND its dimming', () => {
   for (const { file, reason, guard } of FIXED) {
     it(`${file} — "${reason}"`, () => {
       const src = readFileSync(join(SRC, file), 'utf8')
-      expect(src, 'the gate must publish aria-disabled, not the native attribute').toMatch(guard)
+      if (file === 'features/settings/AccountPanel.tsx') {
+        const condition = guard.source.includes('botDirty') ? 'botDirty' : 'dirty'
+        const matches = jsxTags(src, nativeControlBindings(src, ['Button'])).filter((tag) => tag.attributes.get('disabled') === `{!${condition}}`)
+        expect(matches.length).toBe(1)
+        const tag = matches[0]
+        expect(tag.attributes.get('disabledReason')).toBe('"No changes to save"')
+        expect(tag.attributes.get('onClick')).toContain(`${condition} ?`)
+        expect(tag.attributes.get('className')).toContain('aria-disabled:opacity-40')
+        const click = vi.fn()
+        render(createElement(Button, { disabled: true, disabledReason: reason, onClick: click, className: 'aria-disabled:opacity-40', children: 'Save settings' }))
+        const button = screen.getByRole('button', { name: 'Save settings' })
+        expect(button).not.toBeDisabled()
+        expect(button).toHaveAttribute('aria-disabled', 'true')
+        expect(button).toHaveClass('aria-disabled:opacity-40')
+        button.focus()
+        expect(button).toHaveFocus()
+        fireEvent.click(button)
+        expect(click).not.toHaveBeenCalled()
+        expect(button).toHaveAccessibleDescription(reason)
+      } else expect(src, 'the raw gate must publish aria-disabled').toMatch(guard)
       expect(src.toLowerCase(), 'and it must say why').toContain(reason.toLowerCase())
       const softTags = [...src.matchAll(/<button\b[\s\S]{0,900}?>/g)]
         .map((m) => m[0])
@@ -89,7 +115,25 @@ describe('the remaining raw disabled buttons are accounted for', () => {
   })
 
   it('still finds the population it is filtering (not vacuously green)', () => {
-    const all = walk(SRC).flatMap((f) => [...readFileSync(f, 'utf8').matchAll(/<button\b[^>]{0,600}?(?<!aria-)disabled=\{/gs)].map(() => 1))
-    expect(all.length, 'the matcher must find the raw disabled buttons').toBeGreaterThanOrEqual(30)
+    const population = walk(SRC).flatMap((file) => {
+      const source = readFileSync(file, 'utf8')
+      const native = nativeControlBindings(source, ['Button', 'IconButton', 'SquareIconButton', 'QuietButton'])
+      return jsxTags(source, ['button', 'motion.button', ...native]).filter((tag) => tag.attributes.has('disabled'))
+    })
+    expect(population.filter((tag) => ['button', 'motion.button'].includes(tag.name)).length, 'AST still resolves the original raw population without a bounded regex').toBeGreaterThanOrEqual(30)
+    expect(population.filter((tag) => !['button', 'motion.button'].includes(tag.name)).length, 'native migrations remain independently represented').toBeGreaterThanOrEqual(30)
   })
 })
+
+function nativeControlBindings(source: string, symbols: readonly string[]): string[] {
+  return sourceFile(source).statements.flatMap((statement) => {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) return []
+    const module = statement.moduleSpecifier.text
+    const named = statement.importClause?.namedBindings
+    if (!named || !ts.isNamedImports(named)) return []
+    return named.elements.filter((binding) => {
+      const symbol = (binding.propertyName ?? binding.name).text
+      return symbols.includes(symbol) && module.endsWith(`/${symbol}`)
+    }).map((binding) => binding.name.text)
+  })
+}
