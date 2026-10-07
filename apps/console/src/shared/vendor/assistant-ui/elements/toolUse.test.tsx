@@ -10,6 +10,15 @@ import { CodeRunner, type RunState } from './code-runner'
 
 afterEach(cleanup)
 
+function expectUnavailableControl(control: HTMLElement, reason: string) {
+  expect(control).not.toBeDisabled();
+  expect(control).toHaveAttribute("aria-disabled", "true");
+  expect(control).toHaveAttribute("title", reason);
+  expect(control).toHaveAccessibleDescription(reason);
+  control.focus();
+  expect(control).toHaveFocus();
+}
+
 const fields: ElicitationField[] = [
   { name: 'branch', label: 'Branch name', value: 'release', kind: 'text', required: true },
   { name: 'region', label: 'Region', value: 'EU', kind: 'choice', options: ['US', 'EU', 'APAC'] },
@@ -228,7 +237,7 @@ describe('ToolError donor behavior', () => {
   })
   it('disables skip when no skip action exists', () => {
     render(<ToolError {...props} />)
-    expect((screen.getByRole('button', { name: 'Skip' }) as HTMLButtonElement).disabled).toBe(true)
+    expectUnavailableControl((screen.getByRole('button', { name: 'Skip' }) as HTMLButtonElement), "Skipping this error is unavailable.");
   })
   it('disables retry while retrying and labels the in-flight state', () => {
     const onRetry = vi.fn()
@@ -368,7 +377,7 @@ describe('PermissionGrant exact caller decisions', () => {
     render(<PermissionGrant capability="Read" reach={[]} scope="pending"
       choices={[exactChoices[0]]} onGrant={onGrant} />)
     const button = screen.getByRole('button', { name: 'Allow once' }) as HTMLButtonElement
-    expect(button.disabled).toBe(true)
+    expectUnavailableControl(button, "Answering this request is unavailable.");
     fireEvent.click(button)
     expect(onGrant).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: 'Always' })).toBeNull()
@@ -400,8 +409,8 @@ describe('PermissionGrant exact caller decisions', () => {
     expect(deny.textContent).toBe('Deny')
     expect(deny.title).toBe('Deny this request')
     expect(deny.className).toContain('text-red-600')
-    expect(revise.disabled).toBe(true)
-    expect(revise.title).toBe('Request a revised action')
+    expectUnavailableControl(revise, "This answer is unavailable.");
+    expect(revise).toHaveAccessibleName('Request a revised action')
     fireEvent.click(allow)
     fireEvent.click(deny)
     fireEvent.click(revise)
@@ -610,13 +619,13 @@ describe('Tool use components under changing caller data', () => {
     render(<ElicitationForm server="Git" message="Choose" fields={[]} state="request" />)
     const accept = screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement
     const decline = screen.getByRole('button', { name: 'Decline' }) as HTMLButtonElement
-    expect(accept.disabled).toBe(true)
-    expect(decline.disabled).toBe(true)
+    expectUnavailableControl(accept, "Accepting this request is unavailable.");
+    expectUnavailableControl(decline, "Declining this request is unavailable.");
   })
   it('disables only the missing elicitation action if the other is supplied', () => {
     const onAccept = vi.fn()
     render(<ElicitationForm server="Git" message="Choose" fields={[]} state="request" onAccept={onAccept} />)
-    expect((screen.getByRole('button', { name: 'Decline' }) as HTMLButtonElement).disabled).toBe(true)
+    expectUnavailableControl((screen.getByRole('button', { name: 'Decline' }) as HTMLButtonElement), "Declining this request is unavailable.");
     expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect(onAccept).toHaveBeenCalledTimes(1)
@@ -700,8 +709,8 @@ describe('ToolError retry and skip availability', () => {
     attempt: 1, maxAttempts: 4, retrying: false }
   it('never exposes an active retry without a caller action', () => {
     render(<ToolError {...base} />)
-    expect((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByRole('button', { name: 'Skip' }) as HTMLButtonElement).disabled).toBe(true)
+    expectUnavailableControl((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement), "Retrying this action is unavailable.");
+    expectUnavailableControl((screen.getByRole('button', { name: 'Skip' }) as HTMLButtonElement), "Skipping this error is unavailable.");
   })
   it('keeps skip available while a retry is pending when the caller allows it', () => {
     const onSkip = vi.fn()
@@ -745,8 +754,8 @@ describe('ToolError with real failure segments lacking retry telemetry', () => {
     expect(screen.getByText('Navigation failed')).toBeTruthy()
     expect(container.querySelector('[data-slot="tool-error"]')).toBeTruthy()
     expect(container.querySelector('.tabular-nums')).toBeNull()
-    expect((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByRole('button', { name: 'Skip' }) as HTMLButtonElement).disabled).toBe(true)
+    expectUnavailableControl((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement), "Retrying this action is unavailable.");
+    expectUnavailableControl((screen.getByRole('button', { name: 'Skip' }) as HTMLButtonElement), "Skipping this error is unavailable.");
   })
 
   it('does not show a partial retry budget as if its missing value were known', () => {
@@ -879,7 +888,7 @@ describe('CodeRunner state transitions and action availability', () => {
   const base = { language: 'python', code: 'print(1)', output: [] as string[] }
   it('disables the run affordance when no handler is supplied', () => {
     render(<CodeRunner {...base} state="idle" />)
-    expect((screen.getByRole('button', { name: 'Run this snippet' }) as HTMLButtonElement).disabled).toBe(true)
+    expectUnavailableControl((screen.getByRole('button', { name: 'Run this snippet' }) as HTMLButtonElement), "Running snippets is unavailable in this view.");
   })
   it('does not fabricate output or duration in idle state', () => {
     render(<CodeRunner {...base} state="idle" onRun={vi.fn()} />)

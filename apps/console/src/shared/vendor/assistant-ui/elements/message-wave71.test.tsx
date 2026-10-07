@@ -9,6 +9,15 @@ import { EditMessage } from "./edit-message";
 
 afterEach(cleanup);
 
+function expectUnavailableControl(control: HTMLElement, reason: string) {
+  expect(control).not.toBeDisabled();
+  expect(control).toHaveAttribute("aria-disabled", "true");
+  expect(control).toHaveAttribute("title", reason);
+  expect(control).toHaveAccessibleDescription(reason);
+  control.focus();
+  expect(control).toHaveFocus();
+}
+
 describe("MessagePair donor transcript treatment", () => {
   it("shows the user turn and only the requested assistant words", () => {
     const { container } = render(<MessagePair userMessage="How does this work?"
@@ -169,7 +178,7 @@ describe("MessageBranches donor variant navigation", () => {
     expect(screen.getByText("1 / 1")).toBeTruthy();
     for (const label of ["Show previous response", "Show next response"]) {
       const button = screen.getByRole("button", { name: label });
-      expect(button.hasAttribute("disabled")).toBe(true);
+      expectUnavailableControl(button, "There are no other responses to show.");
       fireEvent.click(button);
     }
     expect(onIndexChange).not.toHaveBeenCalled();
@@ -180,7 +189,7 @@ describe("MessageBranches donor variant navigation", () => {
     const { container } = render(<MessageBranches variants={[]} index={0} onIndexChange={onIndexChange} />);
     expect(screen.getByText("0 / 0")).toBeTruthy();
     expect(container.querySelector('[data-slot="message-branches"] p')?.textContent).toBe("");
-    expect(screen.getByRole("button", { name: "Show next response" }).hasAttribute("disabled")).toBe(true);
+    expectUnavailableControl(screen.getByRole("button", { name: "Show next response" }), "There are no other responses to show.");
     expect(onIndexChange).not.toHaveBeenCalled();
   });
 
@@ -486,7 +495,7 @@ describe("EditMessage donor revision surface", () => {
   it("does not present an enabled edit action when the owner cannot edit", () => {
     render(<EditMessage value="Immutable request" discardedReplies={0} editing={false} />);
     expect(screen.getByText("Immutable request")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Immutable request" }).hasAttribute("disabled")).toBe(true);
+    expectUnavailableControl(screen.getByRole("button", { name: "Immutable request" }), "Editing is unavailable for this message.");
   });
 
   it("forwards draft changes and save to the owner without mutating props", () => {
@@ -539,8 +548,8 @@ describe("EditMessage donor revision surface", () => {
   it("disables unsupported edit actions instead of presenting dead buttons", () => {
     render(<EditMessage value="Original" discardedReplies={0} editing />);
     expect(screen.getByRole("textbox", { name: "Edit your message" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getByRole("button", { name: "Send" }).hasAttribute("disabled")).toBe(true);
+    expectUnavailableControl(screen.getByRole("button", { name: "Cancel" }), "Canceling this edit is unavailable.");
+    expectUnavailableControl(screen.getByRole("button", { name: "Send" }), "Saving this edit is unavailable.");
   });
 
   it("updates the editor from owner props and stops showing discarded replies after cancel", () => {
@@ -565,7 +574,7 @@ describe("EditMessage donor revision surface", () => {
       onSave={onSave} />);
     const editor = screen.getByRole("textbox", { name: "Edit your message" });
     expect(editor.hasAttribute("disabled")).toBe(true);
-    expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(true);
+    expectUnavailableControl(screen.getByRole("button", { name: "Cancel" }), "Canceling this edit is unavailable.");
     const send = screen.getByRole("button", { name: "Send" });
     expect(send.hasAttribute("disabled")).toBe(false);
     fireEvent.click(send);
@@ -684,11 +693,11 @@ describe("MessageBranches with real variant counts and no invented bodies", () =
   it("disables switching without a real latest-turn callback", () => {
     const { container, rerender } = render(<MessageBranches count={2} index={0} showBody={false} />);
     expect(screen.getByText("1 / 2")).toBeTruthy();
-    for (const button of screen.getAllByRole("button")) expect(button.hasAttribute("disabled")).toBe(true);
+    for (const button of screen.getAllByRole("button")) expectUnavailableControl(button, "Response navigation is unavailable.");
     expect(container.querySelector('[data-slot="message-branches"] p')).toBeNull();
     rerender(<MessageBranches count={0} index={0} showBody={false} onIndexChange={vi.fn()} />);
     expect(screen.getByText("0 / 0")).toBeTruthy();
-    for (const button of screen.getAllByRole("button")) expect(button.hasAttribute("disabled")).toBe(true);
+    for (const button of screen.getAllByRole("button")) expectUnavailableControl(button, "There are no other responses to show.");
   });
 
   it("never inserts a fallback body when only a count was supplied", () => {
@@ -701,7 +710,7 @@ describe("MessageBranches with real variant counts and no invented bodies", () =
     const { container } = render(<MessageBranches index={0} />);
     expect(screen.getByText("0 / 0")).toBeTruthy();
     expect(container.querySelector('[data-slot="message-branches"] p')).toBeNull();
-    for (const button of screen.getAllByRole("button")) expect(button.hasAttribute("disabled")).toBe(true);
+    for (const button of screen.getAllByRole("button")) expectUnavailableControl(button, "There are no other responses to show.");
   });
 
   it("uses caller navigation labels without changing the recorded variant index", () => {
@@ -735,7 +744,7 @@ describe("MessageActions with persisted feedback and caller-owned controls", () 
     const helpful = screen.getByRole("button", { name: "Mark response helpful" });
     const unhelpful = screen.getByRole("button", { name: "Mark response unhelpful" });
     expect(helpful.getAttribute("aria-pressed")).toBe("true");
-    expect(helpful.hasAttribute("disabled")).toBe(true);
+    expectUnavailableControl(helpful, "This reaction is already selected and cannot be cleared.");
     expect(unhelpful.hasAttribute("disabled")).toBe(false);
     fireEvent.click(helpful);
     expect(onReactionChange).not.toHaveBeenCalled();
@@ -749,7 +758,7 @@ describe("MessageActions with persisted feedback and caller-owned controls", () 
       onReactionChange={onReactionChange} />);
     const unhelpful = screen.getByRole("button", { name: "Mark response unhelpful" });
     expect(unhelpful.getAttribute("aria-pressed")).toBe("true");
-    expect(unhelpful.hasAttribute("disabled")).toBe(true);
+    expectUnavailableControl(unhelpful, "This reaction is already selected and cannot be cleared.");
     fireEvent.click(screen.getByRole("button", { name: "Mark response helpful" }));
     expect(onReactionChange.mock.calls).toEqual([["up"]]);
   });
@@ -827,7 +836,7 @@ describe("EditMessage hosted labels while retaining donor defaults", () => {
     render(<EditMessage value="Edited request" discardedReplies={0} editing
       onSave={vi.fn()} labels={{ send: "Resend", discardedReplies }} />);
     expect(screen.getByRole("textbox", { name: "Edit your message" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(true);
+    expectUnavailableControl(screen.getByRole("button", { name: "Cancel" }), "Canceling this edit is unavailable.");
     expect(screen.getByRole("button", { name: "Resend" })).toBeTruthy();
     expect(discardedReplies).not.toHaveBeenCalled();
   });
