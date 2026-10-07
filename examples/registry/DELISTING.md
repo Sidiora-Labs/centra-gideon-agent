@@ -6,8 +6,8 @@ it takes.
 ## What delisting does, and what it cannot do
 
 Removing a row from `app-registry.json` stops **new** discovery: the app disappears from
-the registry source, from the Store listing that reads it, and from the registry pages
-on gideon.dev.
+the registry source, from the Store listing that reads it, after that consumer refreshes its registry data. This example does not establish
+that any public registry website is deployed.
 
 It does **not** uninstall anything. Anyone who already installed the app still has it,
 and Gideon will not reach out and remove it. A delisting is a statement about
@@ -42,7 +42,8 @@ on unreachability exists so one bad afternoon at a git host is not a delisting.
 
 ## Process
 
-1. Scheduled re-validation runs weekly over every row (`revalidate-listings.yml`). It
+1. The example `revalidate-listings.yml` workflow configures weekly re-validation
+   when enabled in a registry repository. It
    is the same script CI runs on a PR, over the whole file rather than the changed
    rows.
 2. A failure opens or updates one tracking issue that names the row, the check that

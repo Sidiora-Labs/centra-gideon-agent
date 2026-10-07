@@ -18,13 +18,16 @@ places we know enforcement is weaker, read
 
 ## What the project collects
 
-Nothing. Gideon sends no usage telemetry. Nothing about your usage leaves your machine
-unless you configure an integration that sends it.
+Gideon does not include a usage-analytics service. This does not mean it makes no
+network requests: update checks, configured providers and integrations, selected
+content sources, and browser-rendered resources can contact external services.
+Those services can observe request metadata such as the source IP address.
 
-Every hostname that shipped code can reach is listed in
+The declared source-host inventory is maintained in
 [docs/architecture/NETWORK_EGRESS_HOSTS.txt](docs/architecture/NETWORK_EGRESS_HOSTS.txt),
-each with a judgment about whether it is fetched and by whose action. If code ever reaches
-a host that is not declared there, a test fails.
+with judgments about how each literal is used. A static test checks covered source
+literals against this inventory; it is not a runtime firewall or an exhaustive
+list of user-configured destinations.
 
 ## Report a suspected vulnerability
 

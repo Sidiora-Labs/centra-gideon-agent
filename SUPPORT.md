@@ -16,8 +16,9 @@ Security reports do not go there. Use the private channel described in
 1. Read [docs/guides/GETTING_STARTED.md](docs/guides/GETTING_STARTED.md).
 2. Check [docs/reference/CONFIGURATION_REFERENCE.md](docs/reference/CONFIGURATION_REFERENCE.md) for the
    setting you are fighting. Most surprising defaults are documented there.
-3. Run `gideon doctor`. It checks dependencies, configuration, credentials, and
-   connectivity, and prints what it found.
+3. Run `gideon doctor`. It reports configured diagnostic checks.
+   Inspect their results; passing diagnostics do not prove every integration can
+   complete a task.
 4. Confirm which `GIDEON_HOME` you are on. A second instance keeps its own state, so a fix
    in one home does nothing for the other, and a bug may not reproduce at all.
 

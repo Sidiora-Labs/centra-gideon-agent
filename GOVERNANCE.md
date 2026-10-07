@@ -23,16 +23,17 @@ that already exists on someone's machine:
 - a change to persisted state
 - a change to a stored schema
 
-While the project is pre-1.0, those ship as clean breaks. We do not build compatibility
-shims or migration helpers for them. [CONTRIBUTING.md](CONTRIBUTING.md) classes a change as
+Pre-1.0 changes may break compatibility. Describe the affected stored state and
+public contracts, and evaluate existing migration paths rather than assuming every
+store can be reset or automatically migrated. [CONTRIBUTING.md](CONTRIBUTING.md) classes a change as
 reversible, behavioral, or structural, and says how to describe the break when it ships.
 
 ## Releases
 
-The version lives in [pyproject.toml](pyproject.toml). The client package releases in
-lockstep with the runtime, from the same workflow run and at the same version.
+The version lives in [pyproject.toml](pyproject.toml). The release workflow includes runtime and client distribution jobs; inspect each
+package version and the selected workflow inputs before publishing.
 
-Python distributions and container images are published from
+Python distributions and container images have publishing jobs in
 [.github/workflows/release.yml](.github/workflows/release.yml). That workflow also reads
 the version's section of `CHANGELOG.md` to build the release notes, which is why a change
 that breaks a surface or a stored format ships with an entry there.
