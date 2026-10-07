@@ -474,11 +474,24 @@ class TestHmacKeyManagementExtras:
 
     def test_singleton_init_is_idempotent(self, tmp_path: Path) -> None:
         a = SecurityEventLog(base_dir=tmp_path)
+        a.log(_make_event(event_id="home-a", operation="home-a-operation"))
+        assert SecurityEventLog(base_dir=tmp_path) is a
+        original_key = (tmp_path / "sel_hmac.key").read_bytes()
         other = tmp_path / "other"
         b = SecurityEventLog(base_dir=other)
-        assert a is b
+        assert a is not b
+        assert SecurityEventLog(base_dir=other) is b
+        assert SecurityEventLog(base_dir=tmp_path) is a
         assert a._dir == tmp_path
-        assert not other.exists()
+        assert b._dir == other
+        assert (tmp_path / "sel_hmac.key").read_bytes() == original_key
+        assert (other / "sel_hmac.key").read_bytes() != original_key
+        assert b.verify_integrity() == (0, 0)
+        b.log(_make_event(event_id="home-b", operation="home-b-operation"))
+        assert [json.loads(line)["event_id"] for line in a._path.read_text().splitlines()] == ["home-a"]
+        assert [json.loads(line)["event_id"] for line in b._path.read_text().splitlines()] == ["home-b"]
+        assert a.verify_integrity() == (1, 1)
+        assert b.verify_integrity() == (1, 1)
 
 
 class TestLogHashAndCallbackExtras:
