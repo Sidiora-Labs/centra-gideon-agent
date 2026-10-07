@@ -21,7 +21,7 @@ it('runs the selected command from its named modal and restores focus on escape'
   trigger.focus()
   fireEvent.keyDown(window, { ctrlKey: true, key: 'k' })
   expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeTruthy()
-  const search = screen.getByLabelText('Search pages and actions')
+  const search = screen.getByLabelText('Search pages, actions and content')
   fireEvent.keyDown(search, { key: 'ArrowDown' })
   expect(screen.getByRole('option', { name: 'Second' })).toHaveAttribute('aria-selected', 'true')
   fireEvent.keyDown(search, { key: 'Enter' })
@@ -37,7 +37,7 @@ it('does not launch a command from an empty result set and resets selection with
   let count = 0
   render(<CommandPalette commands={[{ id: 'one', label: 'One', icon: Search, run: () => { count += 1 } }]} />)
   fireEvent.keyDown(window, { ctrlKey: true, key: 'k' })
-  const search = screen.getByLabelText('Search pages and actions')
+  const search = screen.getByLabelText('Search pages, actions and content')
   fireEvent.change(search, { target: { value: 'missing' } })
   fireEvent.keyDown(search, { key: 'ArrowDown' })
   fireEvent.keyDown(search, { key: 'Enter' })

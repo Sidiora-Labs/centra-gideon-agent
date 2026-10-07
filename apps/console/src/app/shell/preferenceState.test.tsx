@@ -43,9 +43,12 @@ it('saved theme edits retain identity and removing only the active theme restore
 it('a delayed identity load cannot erase a local edit, including clearing the name', () => {
   let state = identityReducer(initialIdentity, { type: 'edit', name: '  Ada  ' })
   state = identityReducer(state, { type: 'loaded', name: 'Old name', revision: 0 })
-  expect(state).toMatchObject({ name: 'Ada', loaded: true })
+  expect(state).toMatchObject({ name: 'Ada', status: 'loaded' })
   state = identityReducer(state, { type: 'edit', name: '' })
   expect(identityReducer(state, { type: 'loaded', name: 'Old name', revision: 0 }).name).toBe('')
+  state = identityReducer(state, { type: 'loadStarted', request: 2 })
+  expect(identityReducer(state, { type: 'loaded', name: 'Stale request', revision: state.revision, request: 1 })).toBe(state)
+  expect(identityReducer(state, { type: 'loaded', name: 'Old name', revision: 0, request: 2 })).toMatchObject({ name: '', status: 'loaded' })
 })
 it('auto follows the system until an explicit toggle selects the opposite mode', () => {
   let state = themeReducer({ preference: 'auto', system: 'dark' }, { type: 'system', value: 'light' })

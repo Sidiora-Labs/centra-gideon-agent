@@ -23,18 +23,18 @@ describe('command launcher state', () => {
     }
     render(createElement(Launcher))
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
-    const input = screen.getByLabelText('Search pages and actions')
+    const input = screen.getByLabelText('Search pages, actions and content')
     fireEvent.change(input, { target: { value: 'Files' } })
     fireEvent.click(screen.getByRole('option', { name: 'Files' }))
     expect(destination).toBe('files')
     expect(screen.queryByRole('dialog')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Search' }))
-    expect(screen.getByLabelText('Search pages and actions')).toHaveValue('')
+    expect(screen.getByLabelText('Search pages, actions and content')).toHaveValue('')
     expect(screen.getByRole('option', { name: 'Projects' })).toBeInTheDocument()
     fireEvent.keyDown(window, { ctrlKey: true, key: 'k' })
     expect(screen.queryByRole('dialog')).toBeNull()
     fireEvent.keyDown(window, { ctrlKey: true, key: 'k' })
-    expect(screen.getByLabelText('Search pages and actions')).toHaveValue('')
+    expect(screen.getByLabelText('Search pages, actions and content')).toHaveValue('')
   })
 
   it('opens from the rail with a fresh query and closes with a fresh cursor', () => {

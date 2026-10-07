@@ -115,8 +115,13 @@ describe('every lazy page stays reachable through the preload hook', () => {
 
 describe('unknown route correction', () => {
   it('replaces an unknown hash without changing onboarding redirects or removing the render clamp', () => {
-    expect(SRC).toContain("if (!onboarded && route !== 'onboarding') navigate('onboarding')")
-    expect(SRC).toContain("else if (onboarded && route === 'onboarding') navigate(peekOnboardingExit() || 'dashboard')")
+    expect(SRC).toContain('if (!loaded) return')
+    expect(SRC).toContain("if (!onboarded && route !== 'onboarding') {")
+    expect(SRC).toContain('if (ROUTABLE.has(route)) setOnboardingExit(location.hash)')
+    expect(SRC).toContain("navigate('onboarding?step=name', { replace: true })")
+    expect(SRC).toContain("else if (onboarded && route === 'onboarding') {")
+    expect(SRC).toContain('const destination = peekOnboardingExit()')
+    expect(SRC).toContain("navigate(ROUTABLE.has(parseRouteHash(destination, 'dashboard').route) ? destination : 'dashboard', { replace: true })")
     expect(SRC).toContain("else if (onboarded && route !== 'companion' && !ROUTABLE.has(route)) navigate('dashboard', { replace: true })")
     expect(SRC).toContain("const rendered = ROUTABLE.has(route) ? route : 'dashboard'")
   })
