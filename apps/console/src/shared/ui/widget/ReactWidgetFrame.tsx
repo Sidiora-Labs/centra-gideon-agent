@@ -43,7 +43,7 @@ export function ReactWidgetFrame({ jsx, title = 'React widget', onReady, onError
         <SquareIconButton label={expansion.expanded ? 'Minimize' : 'Expand'} icon={expansion.expanded ? Minimize2 : Maximize2} onClick={expansion.toggle} />
       </div>
     </div>
-    {url && source && <iframe ref={frame} src={url} sandbox="allow-scripts" title={title} className="w-full border-none bg-surface" style={{ height: expansion.expanded ? 'calc(100% - 44px)' : height }} />}
+    {url && source && <iframe ref={frame} src={url} sandbox="allow-scripts" title={title} className={expansion.expanded ? 'min-h-0 w-full flex-1 border-none bg-surface' : 'w-full border-none bg-surface'} style={{ height: expansion.expanded ? undefined : height }} />}
     {error && <div role="alert" data-type="body-s" className="border-t border-outline-variant bg-surface-high px-m py-s text-danger">React artifact could not be rendered: {error}</div>}
     {expansion.expanded && <div className="fixed inset-0 -z-10 bg-black/55 backdrop-blur-sm" onClick={expansion.close} />}
   </motion.div>

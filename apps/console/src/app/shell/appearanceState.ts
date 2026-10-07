@@ -84,5 +84,7 @@ export function themeToScheme(theme: ThemeRecord): Scheme {
   for (const token of TOKENS) if (token.kind === 'color' && (theme.dark?.[token.varName] != null || theme.light?.[token.varName] != null)) {
     colors[token.varName] = { dark: theme.dark?.[token.varName] ?? token.dark, light: theme.light?.[token.varName] ?? token.light }
   }
-  return { id: `custom:${theme.slug}`, label: theme.name, emoji: theme.emoji, colors, swatch: colors['--color-primary'] ?? { dark: '#ff6b5b', light: '#e85a3f' } }
+  const primary = TOKENS.find(token => token.kind === 'color' && token.varName === '--color-primary')
+  const swatch = primary?.kind === 'color' ? { dark: primary.dark, light: primary.light } : {}
+  return { id: `custom:${theme.slug}`, label: theme.name, emoji: theme.emoji, colors, swatch: colors['--color-primary'] ?? swatch }
 }
