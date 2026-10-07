@@ -125,12 +125,12 @@ export function KnowledgeGraphEmptyState({ extraction, onRegenerate, regeneratin
   let hint = 'No recorded extraction outcomes are available.'
   if (extraction) {
     const details: string[] = []
-    if (extraction.running) details.push(`Entity processing is running for ${extraction.running} item(s).`)
-    if (extraction.failed) details.push(`Entity processing failed for ${extraction.failed} item(s).`)
-    if (extraction.ran) details.push(`Entity processing completed for ${extraction.ran} item(s).`)
-    if (extraction.skipped) details.push(`${extraction.skipped} item(s) skipped entity processing.`)
-    if (extraction.not_applicable) details.push(`${extraction.not_applicable} item(s) did not need entity processing.`)
-    if (extraction.not_run) details.push(`${extraction.not_run} item(s) have no recorded extraction outcome.`)
+    if (extraction.running) details.push(`Entity processing is running for ${extraction.running} item${extraction.running === 1 ? '' : 's'}.`)
+    if (extraction.failed) details.push(`Entity processing failed for ${extraction.failed} item${extraction.failed === 1 ? '' : 's'}.`)
+    if (extraction.ran) details.push(`Entity processing completed for ${extraction.ran} item${extraction.ran === 1 ? '' : 's'}.`)
+    if (extraction.skipped) details.push(`${extraction.skipped} item${extraction.skipped === 1 ? '' : 's'} skipped entity processing.`)
+    if (extraction.not_applicable) details.push(`${extraction.not_applicable} item${extraction.not_applicable === 1 ? '' : 's'} did not need entity processing.`)
+    if (extraction.not_run) details.push(`${extraction.not_run} item${extraction.not_run === 1 ? '' : 's'} ${extraction.not_run === 1 ? 'has' : 'have'} no recorded extraction outcome.`)
     hint = details.join(' ') || (extraction.total === 0 ? 'The current library view has no items.' : hint)
   }
   const retry = extraction && !extraction.running && (extraction.failed > 0 || extraction.not_run > 0)

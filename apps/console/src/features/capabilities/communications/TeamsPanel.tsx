@@ -63,7 +63,7 @@ export function TeamsPanel() {
     <Field label={"Graph credential reference"}><TextInput value={form.credential_ref} maxLength={120} onChange={nextValue => setForm({ ...form, credential_ref: nextValue })} /></Field>
     <Button disabled={busy || !form.name || !form.owner_email || !form.credential_ref} disabledReason={busy ? BUSY_REASON : undefined} onClick={save}>{id ? 'Save Teams source' : 'Create Teams source'}</Button>
     {current && <div className="space-y-2"><p>Sync: {current.sync.state} · coverage: {current.sync.coverage}</p>{current.sync.error && <p>{current.sync.error}</p>}<Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={sync}>Sync Teams history</Button>
-      {messages.length === 0 ? <p>No Teams messages have been acquired.</p> : <ul>{messages.map(message => <li key={message.provenance_key} className="my-2"><time>{message.created_at}</time> · {message.source_kind} · {message.direction}{message.person_id ? ' · linked person' : ' · unlinked sender'}<p>{message.deleted_at ? '[Deleted]' : message.body}</p>{message.attachments.length > 0 && <p>{message.attachments.length} attachment reference(s)</p>}</li>)}</ul>}
+      {messages.length === 0 ? <p>No Teams messages have been acquired.</p> : <ul>{messages.map(message => <li key={message.provenance_key} className="my-2"><time>{message.created_at}</time> · {message.source_kind} · {message.direction}{message.person_id ? ' · linked person' : ' · unlinked sender'}<p>{message.deleted_at ? '[Deleted]' : message.body}</p>{message.attachments.length > 0 && <p>{message.attachments.length} attachment reference{message.attachments.length === 1 ? '' : 's'}</p>}</li>)}</ul>}
     </div>}
   </section>
 }
