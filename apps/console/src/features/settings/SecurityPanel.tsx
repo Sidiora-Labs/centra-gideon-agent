@@ -4,7 +4,7 @@ import { rebaseList, rebaseRecord, type Revisioned } from '../../shared/data/sta
 import { HeldChange, StaleWriteNotice } from '../../shared/ui/StaleWriteNotice'
 import { useState } from 'react'
 import { FieldError, Checkbox, TextInput } from '../../shared/ui/forms'
-import { unavailableWhen, BUSY_REASON } from '../../shared/ui/unavailable'
+import { BUSY_REASON } from '../../shared/ui/unavailable'
 import {
   ShieldBan, ScanLine, FileCode2, EyeOff, Plus, X, Lock, Globe, MonitorOff, ShieldCheck, ShieldAlert,
   KeyRound, Undo2,
