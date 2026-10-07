@@ -1,7 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { Blocks } from 'lucide-react'
 import { BentoCard, CardSkeleton } from './bento'
 
@@ -35,9 +33,15 @@ describe('a loading tile says it is busy on the node AT can reach', () => {
     expect(container.querySelector('[aria-live]')).toBeNull()
   })
 
-  it('the source records the count that made this decision', () => {
-    const src = readFileSync(join(process.cwd(), "src/features/settings/bento.tsx"), 'utf8')
-    expect(src).toMatch(/22 tiles shimmer/)
-    expect(src).toMatch(/aria-busy=\{loading \|\| undefined\}/)
+  it('updates the reachable busy state without replacing the navigation button', () => {
+    const onClick = vi.fn()
+    const view = render(<BentoCard icon={Blocks} title="Apps" onClick={onClick} loading><div>body</div></BentoCard>)
+    const button = screen.getByRole('button', { name: 'Open Apps settings' })
+    expect(button).toHaveAttribute('aria-busy', 'true')
+    view.rerender(<BentoCard icon={Blocks} title="Apps" onClick={onClick}><div>body</div></BentoCard>)
+    expect(screen.getByRole('button', { name: 'Open Apps settings' })).toBe(button)
+    expect(button).not.toHaveAttribute('aria-busy')
+    button.click()
+    expect(onClick).toHaveBeenCalledTimes(1)
   })
 })

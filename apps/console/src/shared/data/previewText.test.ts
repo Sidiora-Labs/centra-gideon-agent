@@ -48,8 +48,11 @@ describe('both leak surfaces route through the strip point (source-level)', () =
 
   it('the inbox row preview and its label both strip the message', () => {
     expect(inbox).toContain("import { previewText } from '../../shared/data/previewText'")
-    expect(inbox).toMatch(/<p[^>]*truncate[^>]*>\{previewText\(it\.message\)\}<\/p>/)
-    expect(inbox).toMatch(/rowSubject\(\[[^\]]*previewText\(it\.message\)\]/)
+    const declaration = /const (\w+) = previewText\(item\.message\)/.exec(inbox)
+    expect(declaration, 'derive the rendered preview from the actual message').not.toBeNull()
+    const preview = declaration![1]
+    expect(inbox).toMatch(new RegExp(`<p[^>]*truncate[^>]*>\\{${preview}\\}<\\/p>`))
+    expect(inbox).toMatch(new RegExp(`rowSubject\\(\\[[^\\]]*\\b${preview}\\]`))
   })
 
   it('the artifact excerpt is a decorative thumbnail, hidden from the accessible tree', () => {

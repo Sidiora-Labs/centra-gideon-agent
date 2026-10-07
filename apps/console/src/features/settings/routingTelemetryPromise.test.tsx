@@ -35,8 +35,9 @@ describe('the routing empty state tells the truth per axis', () => {
 
   it('the fold really is inside the guard — the other end of the chain', () => {
     const guard = readFileSync(join(PY, 'security/guardrails/model_call.py'), 'utf8')
-    const audit = guard.slice(guard.indexOf('    def _audit('))
-    expect(audit.slice(0, 2600), 'the stats fold hangs off the audit').toMatch(
+    const audit = guard.match(/    def _audit\([\s\S]*?(?=\n    @|\n    (?:async )?def |$)/)?.[0] ?? ''
+    expect(audit, 'the actual audit method must be found').not.toBe('')
+    expect(audit, 'the stats fold hangs off the audit').toMatch(
       /record_routing_stats\(_asdict_row\(rec\), home=config_dir\(\)/,
     )
     const gate = bridge.indexOf('if guard_use_case:')
