@@ -39,7 +39,7 @@ export default function TwinPage({ endpoint = '/api/capabilities/identity/twin' 
     {error && <p role="alert" className="text-danger">{error}</p>}{!state && <p role="status">Loading identity…</p>}
     <Button onClick={() => void load()} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>Reload identity</Button>
     <div className="grid md:grid-cols-2 gap-4">
-      <section className="space-y-3 min-w-0"><h2 className="text-xl">Source documents</h2>
+      <section className="space-y-3 min-w-0"><h2 data-type="headline-s">Source documents</h2>
         {state?.documents.length === 0 && <p>No sources yet.</p>}
         {state?.documents.map(doc => <div key={doc.id}><button className="underline" onClick={() => select(doc)}>{doc.title}</button> {doc.private ? '(private)' : ''}</div>)}
         <Button variant="secondary" onClick={() => { setDraft(blank); window.location.hash = '#/capabilities/identity/twin' }}>New source</Button>
@@ -55,7 +55,7 @@ export default function TwinPage({ endpoint = '/api/capabilities/identity/twin' 
               <Button variant="secondary" disabled={busy || draft.private || !draft.enabled} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void perform(async () => { const result = await call<{ text: string }>('/enrich', 'POST', { document_id: draft.id }); setPreview(result.text) })}>Suggest questions</Button></>}</div>
         </form>
       </section>
-      <section className="space-y-3 min-w-0"><h2 className="text-xl">Traits and persona overlays</h2>
+      <section className="space-y-3 min-w-0"><h2 data-type="headline-s">Traits and persona overlays</h2>
         <label className="block"><Checkbox checked={enabled} className="size-4 shrink-0 accent-primary" onChange={nextValue => setEnabled(nextValue)} ariaLabel={`Use identity in private conversations`} /> Use identity in private conversations</label>
         <label className="block" htmlFor="twin-traits">Traits (JSON object)</label><TextArea className="w-full min-w-0 resize-y rounded-md border border-outline-variant/30 bg-surface-container p-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" id="twin-traits" rows={4} value={traits} onChange={nextValue => setTraits(nextValue)} />
         <label className="block" htmlFor="twin-personas">Persona overlays (JSON list)</label><TextArea className="w-full min-w-0 resize-y rounded-md border border-outline-variant/30 bg-surface-container p-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" id="twin-personas" rows={5} value={personas} onChange={nextValue => setPersonas(nextValue)} />
