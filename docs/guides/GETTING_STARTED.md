@@ -10,24 +10,42 @@ takes you from **nothing installed** to your first chat.
 ## Prerequisites
 
 - macOS or Linux (on Windows, use the Docker Compose path below)
-- An API key for at least one model provider: Anthropic, OpenAI, an OpenAI-compatible
-  endpoint, AWS Bedrock credentials, or a local Ollama. Anything from the Store's
-  model-provider apps will do.
+- A configured model provider for model-backed work: a provider API key, an
+  OpenAI-compatible endpoint, AWS Bedrock credentials, or a supported local model.
+  Local models do not necessarily require an API key; their runtime and downloads
+  still need configuration.
 
-For a source checkout, install Python 3.12+ and Node 20+, then build the console before
-packaging the runtime. A wheel built from this tree includes the console assets, so it can
-run without Node on the destination machine.
+For a source checkout, install Python 3.12+ and Node.js 22.12+ with npm. Runtime wheel
+builds also require Rust/Cargo: `setup.py` builds the Hypermid daemon with
+`cargo build --locked --release -p hypermid-daemon`. The checkout pins Rust 1.91.1 in `rust-toolchain.toml`.
+An explicitly supplied `GIDEON_PREBUILT_HYPERMID_DAEMON` skips that native build.
+
+A platform-specific wheel can run without Node or Cargo on the destination when it
+contains the built daemon and console assets. Building console assets first makes
+that inclusion explicit; an arbitrary supplied wheel is not proof that they are present.
 
 ## 1. Install
 
 From the repository root:
 
 ```bash
+python3 -m venv .venv
+. .venv/bin/activate
+.venv/bin/python -m pip install -e .
 npm ci
 npm run build
-python3 -m pip install .
-gideon setup
+
+export GIDEON_HOME="$PWD/.dev-home"
+.venv/bin/gideon setup
 ```
+
+This checkout recipe uses an isolated development home. Keep `GIDEON_HOME` set in the
+same terminal when starting the gateway; without it, state defaults to `~/.gideon`.
+On Windows, use the documented container path rather than the Unix virtual-environment
+commands above.
+
+To build both console and assistant assets for packaging, use `make web-build`. The
+assistant has its own npm lockfile; `npm run build` at the root builds only the console.
 
 The bootstrap path uses `uv` and accepts the current checkout by default:
 
@@ -103,7 +121,7 @@ are the plain-pip path.
 | `openai` | `pip install '.[openai]'` | the OpenAI SDK (chat/embeddings/STT/TTS) | small |
 | `anthropic` | `pip install '.[anthropic]'` | the Anthropic SDK | small |
 | `bedrock` | `pip install '.[bedrock]'` | AWS Bedrock (`boto3`) | medium |
-| `mcp` | `pip install '.[mcp]'` | Model Context Protocol servers/tools | small |
+| `mcp` | Included in the base dependencies | Model Context Protocol client/server support | small |
 | `js-render` | `pip install '.[js-render]'` | JS-rendered web fetch (Playwright) | large (browser) |
 | `models` | `pip install '.[models]'` | local inference: embeddings + STT + TTS | large (ML) |
 
@@ -143,8 +161,8 @@ Model providers are installable apps, and nothing is hardwired to a vendor.
 
 Prefer the terminal? Once a provider app is installed,
 `gideon setup --provider NAME --credential NAME=VALUE` stores the
-credential without the dashboard, and `gideon doctor` verifies the result
-end to end.
+credential without the dashboard, and `gideon doctor` reports setup and provider diagnostics. Those checks do not replace a
+successful real chat or qualify every provider capability.
 
 ## 4. First chat
 
@@ -154,8 +172,10 @@ Open the dashboard's **Chat** page and send a message, or go from the terminal:
 gideon chat -m "hello"
 ```
 
-Tool calls the agent wants to make appear as approval prompts (the default is
-`agent.approval_mode: auto`). See the
+Tool execution follows the selected agent's grants and approval policy (the default
+`agent.approval_mode` is `auto`). Some calls can proceed under existing policy; others
+require review or are refused. An app's agent tier is an additional ceiling, not a
+standing grant for every tool. See the
 [configuration reference](../reference/CONFIGURATION.md) to tune approval,
 sandboxing, and security policy.
 
@@ -205,5 +225,6 @@ live on `gideon_home`. If you need environment variables, create `.env` and add
   that the provider's **Test** passes. `gideon doctor` reports the live
   binding and any missing optional dependency with the exact install command.
 - **Dashboard shows nothing / 404 assets** (source checkouts only). The SPA
-  isn't built, so run `make web-build` and then restart the gateway. Wheel, uv, pipx,
-  and Docker installs ship the prebuilt dashboard, so this never applies to them.
+  isn't built, so run `make web-build` and then restart the gateway. A properly built runtime wheel or container includes its web assets; check the actual
+  distribution when using a separately supplied package. The install tool alone does not
+  guarantee that the publisher included those assets.

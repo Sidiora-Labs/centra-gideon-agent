@@ -1,194 +1,115 @@
-# Gideon: architecture overview
+# Gideon architecture overview
 
-Gideon is a self-hosted personal AI gateway: one long-running process that hosts
-chat sessions, autonomous loops, a knowledge base, memory, tasks, scheduling, an
-inbox, and an app platform, all behind a local web dashboard. This document is the
-map; each subsystem has its own reference doc, linked throughout.
+Gideon is a self-hosted personal agent. Its Python gateway coordinates conversations,
+agent runtimes, tools, knowledge, memory, tasks, schedules, workflows and channels, and
+serves the console over HTTP and WebSocket. Integrations and optional local services can
+run additional processes; “one gateway” does not mean every capability runs in that process.
 
-```mermaid
-flowchart TB
-    subgraph proc["The gateway process (gateway.py)"]
-        DASH["Dashboard server\n(aiohttp: REST · WS · SPA)"]
-        BG["Background services\ncron · heartbeat · inbox · subagents"]
-        CT["Channel transports\n(vendor-blind seam)"]
-    end
-    DASH --> SESS["Sessions\n(chat · loop · webhook · subagent)"]
-    SESS --> CE["Context engine\n(ingest · assemble · compact · after_turn)"]
-    CE --> CAP["Capability seams (pluggable)"]
-    CAP --> LLM["LLM providers"]
-    CAP --> MEMK["Memory · Knowledge"]
-    CAP --> TOOLS["Tools · Search · Speech"]
-    CAP --> ACT["Actions · Inbox · Artifacts"]
-    PROV["providers/loader.py\n(loads enabled apps)"] --> CAP
-    SDK["runtime/gideon/sdk/ (app integration surface)"] -. "apps import only this" .-> PROV
-    SEC["Security: auth · sandbox · egress guard · SEL · scanner"] --- proc
-```
+Paths below are relative to the repository root.
 
+## Runtime and surfaces
 
+`runtime/gideon/engine/gateway.py` defines the runtime coordinator;
+`runtime/gideon/engine/lifecycle.py` starts and stops its services. The dashboard is
+an aiohttp application assembled in `runtime/gideon/interfaces/dashboard/server.py`.
+Its handlers, chat pipeline and shared `ConsoleState` live beside that module.
 
-The core source is grouped into domain packages under `runtime/gideon/`.
-Application catalogues and release repositories are supplied by the operator, and
-this architecture does not assume a hosted Gideon service or a public source
-location.
+The React console lives in `apps/console`. `npm run build` produces
+`apps/console/dist`; the gateway resolves checkout or packaged assets. The separate
+assistant surface lives in `apps/assistant` and has its own dependency installation
+and build. Electron and Capacitor shells live in `apps/desktop` and `apps/mobile`.
+Their presence in the tree does not establish platform release availability.
 
-## The core tenet: a provider-agnostic core
+Backend Python changes require a gateway restart. Console development uses Vite
+on port 3100, proxying the gateway on `GIDEON_PORT` (10000 by default). Installed
+app source is copied into the chosen home's `apps/<name>` directory, so changing
+an external source checkout does not directly change its installed copy.
 
-**The core package contains only capability-enabling logic and pluggable
-contracts. Anything that integrates a *specific* provider (Slack, OpenAI, a
-particular local model, …) lives in an app bundle, never in core.**
+## Conversations and execution
 
-Core owns protocols, registries and resolvers. Apps own endpoints, auth,
-catalogs, binary resolution and wire formats. The full boundary-judgment table,
-including the deliberately kept exceptions (wire-protocol clients, secret
-detection patterns, credential key names), is in
-[PROVIDER_BOUNDARY.md](PROVIDER_BOUNDARY.md).
+`runtime/gideon/engine/session.py` owns runtime acquisition and conversation queues.
+The native agent implementation is under `engine/agents/native`; ACP adapters are
+under `integrations/acp`. Conversation history and context assembly live under
+`cognition`. The dashboard chat pipeline handles accepted turns, streaming, replay,
+approvals and persistence.
 
-App bundles come in three tiers:
+Session privacy and work authority are separate. Temporary work suppresses persistent
+memory reads and writes; Incognito permits authorized reads while suppressing writes.
+`runtime/gideon/security/session_credentials.py` binds actual work origins and execution
+lineage. A caller-supplied session key, app label or parent identifier does not establish
+that authority. App-origin work also carries a live capability ceiling; descendants
+cannot widen it.
 
-| Tier | Location | Examples |
-|---|---|---|
-| Native | `runtime/gideon/extensions/apps/native/` (shipped in-package, seeded and locked on) | `native-agents`, `gideon-memory`, `bash-action` |
-| First-party | Operator-configured application catalogue or local bundle checkout | `slack-channel`, `anthropic-models`, `faster-whisper` |
-| Third-party | user-installed into `~/.gideon/apps/` | `third-party-apps/hello-search`, `demo-dashboard` (fixtures) |
+See [Chat and sessions](CHAT_SESSIONS.md), [Loops](LOOPS.md),
+[Workflows](WORKFLOWS.md) and [Tasks and triggers](TASKS_TRIGGERS.md).
 
-## Process model: the gateway
+## Context and memory
 
-`gateway.py` defines `RuntimeCoordinator` and the `run_gateway` entry point: one
-process that boots everything.
+The ordinary context implementation is `runtime/gideon/cognition/context.py`.
+Hypermid integration lives under `runtime/gideon/hypermid`, with a Rust daemon built
+from this repository's Cargo workspace. `hypermid/config.py` defines `off`,
+`pass_through`, `shadow` and `primary` context modes; the default context configuration
+is `off`. `hypermid/lifecycle.py` manages the configured integration, and
+`hypermid/primary_engine.py` implements primary context assembly.
 
-- **Background services**: cron scheduling (`schedule.py`), heartbeat
-  (`heartbeat.py`: pending-task dispatch, and driving the health-scored
-  remediation engine that owns store maintenance, meaning FTS reconciliation, the
-  history/SEL prunes and skill aging, see `resilience/remediation.py`),
-  autonudge (`autonudge.py`: reactive same-session self-prompting), inbox polling
-  (`inbox_service.py`), background subagents (`subagent.py`), and MCP server
-  wiring.
-- **The dashboard server**: `dashboard/server.py`, an aiohttp app serving the
-  REST API, WebSocket event fan-out, and the built SPA (see below).
-- **Channel transports**: the gateway names no channel vendor. It iterates
-  `channel_transports/manager.py` `list_transports()` and calls each transport's
-  `start_inbound(services)`, handing it a `GatewayServices` protocol object
-  (`gateway_services.py`) that exposes the shared runtime: sessions, context
-  builder, conversation log, consolidator, cron service, subagent manager,
-  channel history, dashboard state, config, and owner id. Outbound delivery flows
-  through the registered `ChannelDelivery` protocol (`channel_delivery.py`). See
-  [INBOX_CHANNELS.md](INBOX_CHANNELS.md).
-- **Service management**: `service/` installs the gateway as a systemd unit
-  (Linux) or a launchd agent (macOS, label `io.gideon.gateway`), and the CLI
-  lifecycle lives in `cli_server.py` (`gideon gateway`, with a `--headless` mode
-  for channel-only operation).
+Hypermid's memory adapter, private-work scopes and app scopes are distinct native
+consumers. Availability and permitted reads depend on configuration, the live service,
+work origin and scope grants. A private workflow requires a live native private-work
+receipt; changing its mode label does not supply one. Knowledge documents are a separate
+library under `runtime/gideon/cognition/knowledge`.
 
-**Restart discipline** matters when developing: backend `.py` changes need a
-gateway restart, while the frontend is served live from `apps/console/dist`, so a
-rebuild is enough. Installed app copies at `~/.gideon/apps/<name>/` are what the
-gateway actually loads, so edits to the repo `apps/` tree reach a running gateway
-only via `POST /api/apps/{name}/update`.
+See [Knowledge and memory](KNOWLEDGE_MEMORY.md) for the subsystem discussion. Its
+configuration and authorization must be considered alongside the selected provider.
 
-## The dashboard server
+## Extension boundary
 
-`dashboard/server.py` assembles the aiohttp application:
+Provider contracts and loaders live under `runtime/gideon/extensions/providers`;
+app manifests, installation and lifecycle live under `extensions/apps`. Bundled
+apps ship under `extensions/apps/native`, and additional catalog or local sources
+are configured by the operator. Model, channel, search, speech, agent and tool
+integrations register through these seams.
 
-- **Route handlers** live under `dashboard/handlers/`, one module per feature area
-  (`sessions.py`, `knowledge.py`, `memory.py`, `apps.py`, `schedule.py`,
-  `terminal.py`, `updates.py`, …), plus the chat pipeline modules directly under
-  `dashboard/` (`chat_runner.py`, `chat_handlers.py`, `chat_persistence.py`, …).
-- **Auth middleware**: token auth (`dashboard/token_auth.py`), CSRF, and
-  app-permission middlewares; the ordering is explicit in `server.py`. Modes and
-  the `AUTH_MODE=none` loopback invariant are covered in
-  [SECURITY.md](SECURITY.md).
-- **Live state**: `dashboard/state.py` (`ConsoleState`) is the shared in-memory
-  hub: WebSocket event broadcast, notifications (`ConsoleState.notify()` is the
-  single notification choke point), and the session/channel link maps.
-- **Static frontend**: the SPA is a Vite + React app at `Gideon/web/`, built to
-  `apps/console/dist` and served through a `static/dist` symlink. It uses a hash
-  router with a URL-navigation doctrine (state lives in the URL, enforced by a
-  frontend test), shared shell primitives (TopBar/ListScaffold/SidePanel/
-  HeaderActions) that own the chrome, and design tokens in
-  `apps/console/src/design/tokens.css`.
+The app import surface is **`gideon.sdk`**, implemented in `runtime/gideon/sdk`.
+`packages/python-client` is a separate HTTP client for the gateway. Contributed
+console pages use `@gideon/app-sdk`, implemented by
+`apps/console/src/app/shell/appSdk.tsx`. Provider-specific behavior belongs in its
+bundle; core supplies capability contracts and coordination.
 
-## Session model
+App review covers permissions and declared execution paths. API access, work tiers,
+MCP/tool grants and memory scopes are separate controls. In-process Python and host-tree
+UI integrations are not isolation boundaries. See [App platform](APP_PLATFORM.md),
+[Provider boundary](PROVIDER_BOUNDARY.md) and [Security limits](../security/LIMITATIONS.md).
 
-A **session** is one conversation thread. Dashboard chat, a channel thread, a
-loop worker, a webhook run and a subagent all get one:
+## Source map
 
-- `session.py`: `ConversationDirectory`; each session has a FIFO message queue,
-  so a channel thread serializes its turns.
-- `session_map.py`: the persistent session↔thread map
-  (`~/.gideon/session_map.json`); entries carry generic `thread_ts` /
-  `channel_id` keys, so a dashboard chat can be linked to a channel thread and
-  back.
-- `session_restrictions.py`: memory modes. **temporary** is a blank slate:
-  memory reads *and* writes are suppressed. **incognito** suppresses writes and
-  allows reads. The registry is core because any surface, dashboard or channel,
-  can request either mode.
-- `history.py`: one JSONL file per session under `~/.gideon/sessions/`, with
-  2 MB rotation to `sessions/archive/` and 7-day archive retention.
+| Area | Source |
+|---|---|
+| Configuration and shared persistence | `runtime/gideon/core` |
+| Agent sessions, delegation and lifecycle | `runtime/gideon/engine` |
+| Context, history and knowledge | `runtime/gideon/cognition` |
+| Native context and memory service integration | `runtime/gideon/hypermid`, `crates/` |
+| Triggers, schedules and workflow execution | `runtime/gideon/automation` |
+| Authentication, work credentials and guardrails | `runtime/gideon/security` |
+| App lifecycle and extension registries | `runtime/gideon/extensions` |
+| Protocol and external-service adapters | `runtime/gideon/integrations` |
+| CLI, gateway API and console events | `runtime/gideon/interfaces` |
+| App-facing Python API | `runtime/gideon/sdk` |
+| Updates, snapshots, diagnostics and assurance | `runtime/gideon/operations`, `runtime/gideon/assurance` |
 
-Details, including the chat turn pipeline and variant branching, are in
-[CHAT_SESSIONS.md](CHAT_SESSIONS.md).
+## State and configuration
 
-## Capability seams
+`GIDEON_HOME` selects the state directory (default `~/.gideon`). Core configuration
+is `config.json`, described by `runtime/gideon/core/config/loader.py`. Model bindings
+live in `active_models.json`; search bindings, entity settings, installed app metadata,
+provider settings and credentials have their own stores. Editing one store does not
+necessarily update another. Dashboard writes may require the revision returned with
+the original read; a stale draft must not be paired with a newer revision.
 
-Every capability is behind a pluggable seam. The extension system that loads them
-is `providers/`: `providers/loader.py` loads each enabled app, pins its directory
-on `sys.path`, and registers its contributions through a typed
-`ToolTypeHandler`. The app-facing import surface is `runtime/gideon/sdk/`, so apps
-import through `gideon.sdk.*`, checked by
-`checks/runtime/test_apps_import_boundary.py`. The separate
-`packages/python-client/` package is a gateway client.
+Updates depend on installation type. The update handlers and
+`runtime/gideon/operations/self_update.py` coordinate supported git/package updates and recovery
+state; container and desktop distribution remain deployment-specific. An app update
+has its own review and lifecycle, separate from a core update.
 
-| Capability | Core seam | Contributed by |
-|---|---|---|
-| LLM providers | `llm/registry.py` (`registry.build`), `llm/catalog.py` | model apps (`apps/anthropic-models`, `apps/openai-models`, `apps/ollama-models`, …) |
-| Model bindings | `~/.gideon/active_models.json` per use case (chat, background, embedding, ingestion, stt, tts, …) | Settings → Models |
-| Channels | `channel_transports/` (inbound) + `channel_delivery.py` (outbound) | `apps/slack-channel` (reference implementation) |
-| Agents | `agents/native/` runtime + `acp/` (Agent Client Protocol) | ACP agent apps (`apps/claude-code-agent`, `apps/codex-agent`, …) |
-| Tools | `tool_providers/` registry + `mcp_client.py` for external MCP servers | tool apps, app-shipped MCP servers |
-| Search | `search_providers/` (capability model incl. `keyless` floor) | 7 search apps |
-| Embeddings | `embedding_providers/` ABCs; `knowledge/embedder.py` `UnifiedEmbedder` | `apps/sentence-transformers` or any bound provider |
-| Speech | `stt/` + `tts/` + `diarization/` registries | `apps/faster-whisper`, `apps/piper-tts`, … |
-| Local models | `local_models/` (`LocalModel`/`LocalModelProvider` management contract) | the 5 local-model apps |
-| Inbox sources | `inbox_providers/` + `provider_registry.py` | native push + filesystem sources |
-| Actions (triggers) | `action_providers/` registry | native action bundles |
-| Artifacts | `artifacts/` provider registry | native filesystem provider |
-
-## Subsystem index
-
-| Subsystem | Doc | Core modules |
-|---|---|---|
-| Provider boundary | [PROVIDER_BOUNDARY.md](PROVIDER_BOUNDARY.md) | `llm/`, `packages/python-client/`, `media_catalogs.py` |
-| Chat & sessions | [CHAT_SESSIONS.md](CHAT_SESSIONS.md) | `session.py`, `dashboard/chat_*.py`, `history.py`, `context.py` |
-| Loops & projects | [LOOPS.md](LOOPS.md) | `loop/`, `planning/`, `grill.py`, `projects.py` |
-| Knowledge & memory | [KNOWLEDGE_MEMORY.md](KNOWLEDGE_MEMORY.md) | `knowledge/`, `vector_memory.py`, `memory_service.py` |
-| Tasks & triggers | [TASKS_TRIGGERS.md](TASKS_TRIGGERS.md) | `tasks/`, `schedule.py`, `event_triggers.py` |
-| Workflows | [WORKFLOWS.md](WORKFLOWS.md) | `workflows/` (engine, frontier, journal, mutation, templates) |
-| Inbox & channels | [INBOX_CHANNELS.md](INBOX_CHANNELS.md) | `inbox.py`, `inbox_service.py`, `channel_delivery.py` |
-| App platform | [APP_PLATFORM.md](APP_PLATFORM.md) | `apps/app_manager.py`, `apps/backend_runtime.py`, `apps/permissions.py` |
-| Security | [SECURITY.md](SECURITY.md) | `security.py`, `net/`, `auth/`, `sel.py`, `supply_chain.py` |
-| Agent worlds | [AGENT_ACTIVITY_FEED.md](AGENT_ACTIVITY_FEED.md) | `apps/console/src/lib/useAgentActivity.ts`, `apps/console/src/pages/dashboard/world/` |
-
-## Configuration
-
-`config/loader.py` defines the `AppConfig` dataclass tree
-(`~/.gideon/config.json`). A config field works end-to-end only when it is wired
-through: (1) the dataclass plus `_meta` metadata, (2) `load()`'s explicit
-mapping, (3) `to_dict()`, (4) an API write path (the `_EDITABLE_CONFIG` PATCH
-allowlist or a dedicated PUT), and optionally (5) a frontend control.
-`checks/runtime/test_config_roundtrip.py` enforces (1) to (3) generically.
-
-Entity settings deliberately live *outside* config.json:
-`~/.gideon/entity_settings/{inbox,notifications}.json`, use-case settings under
-`~/.gideon/extensions/use_case_settings/`, model bindings in
-`active_models.json`, search bindings in `active_search_providers.json`, and each
-app's own `data/config.json`. Backend-only operator knobs are documented in
-`docs/reference/CONFIGURATION_REFERENCE.md`.
-
-## Self-update
-
-`dashboard/handlers/updates.py` (`api_update_apply`) runs the public update
-pipeline: `git pull` → `pip install -e .` (into the running venv) → frontend
-build → graceful re-exec, reporting the steps
-`pulling → installing → building → restarting` over `update_progress` WebSocket
-events. A pip failure aborts *before* the restart, and concurrent applies get a
-409. This covers the **core repo only**; apps update individually through the
-Store (`POST /api/apps/{name}/update`).
+Architecture describes implemented source paths, not a certification of every integration,
+platform or deployment. Live provider credentials and platform capabilities still need
+configuration and checks appropriate to their actual use.

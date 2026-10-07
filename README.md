@@ -4,10 +4,10 @@
 <p align="center">
   <a href="https://github.com/Sidiora-Labs/centra-gideon-agent"><img src="https://img.shields.io/badge/Project-Centra%20AI-0A0A0A?style=flat-square" alt="Centra AI" /></a>
   <a href="https://github.com/Sidiora-Labs"><img src="https://img.shields.io/badge/Built%20by-Sidiora%20Labs-0A0A0A?style=flat-square" alt="Built by Sidiora Labs" /></a>
-  <a href="LICENSE.md"><img src="https://img.shields.io/badge/LICENSE-2-0A0A0A?style=flat-square" alt="Apache License Version 2.0" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/LICENSE-2-0A0A0A?style=flat-square" alt="Apache License Version 2.0" /></a>
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/Version-0.1.3-0A0A0A?style=flat-square" alt="Version 0.1.3" /></a>
 </p>
-Gideon is a personal AI agent that runs on your own machine. One process serves a web console and does the work: chat, long-running goal loops, memory, a knowledge base, tasks, schedules, an inbox, and a permission-gated app platform.
+Gideon is a personal AI agent that runs on your own machine. The gateway serves a web console and coordinates the work: chat, long-running goal loops, memory, a knowledge base, tasks, schedules, an inbox, and a permission-gated app platform.
 
 It is built for one person who wants an agent with real access to their own computer and their own services, without handing the keys to a hosted product. State lives in a directory you choose. Model providers are pluggable: an Anthropic or OpenAI key, an OpenAI-compatible endpoint, AWS Bedrock credentials, or a model running locally.
 
@@ -26,11 +26,12 @@ It is built for one person who wants an agent with real access to their own comp
 ## Requirements
 
 - Python 3.12 or newer.
+- Rust and Cargo for building the packaged Hypermid daemon from source. The checkout pins Rust 1.91.1 in `rust-toolchain.toml`. A supplied platform-specific wheel already contains the built daemon.
 - Node.js 22.12 or newer with npm, if you want to build the console from source. CI builds the console with Node 24.
 - macOS or Linux. On Windows, use the Docker Compose path in [docs/guides/CONTAINERS.md](docs/guides/CONTAINERS.md).
 - A model provider for anything model-backed, configured after first start. A local model works too.
 
-There is no external database and no message broker. Everything runs in the one gateway process.
+No external database server or message broker is required. The gateway can launch app backends, agent programs and the local Hypermid daemon; provider integrations may depend on services you configure.
 
 ## Run from a checkout
 
@@ -67,7 +68,8 @@ The hook script formats staged Python and signs your commits off, which is what 
 | `make format` | Format Python with black and isort |
 | `make lint` | black, isort, flake8 and mypy over the runtime and checks |
 | `make test` | Run the Python suite (`checks/runtime`) |
-| `make serve` | Build the console and start a gateway against `.dev-home` |
+| `make serve` | Start a gateway against `.dev-home` using the existing console build |
+| `make serve-fresh` | Build console and assistant assets, then start the development gateway |
 | `make serve-web` | Run the console dev server on port 3100 against a gateway |
 | `npm run typecheck:web` | Type-check the console |
 | `npm run test:web` | Console tests with Vitest |
@@ -82,7 +84,8 @@ The hook script formats staged Python and signs your commits off, which is what 
 | --- | --- |
 | `runtime/gideon/core` | Configuration, shared resources, persistence helpers |
 | `runtime/gideon/engine` | Agent execution and runtime coordination |
-| `runtime/gideon/cognition` | Memory, knowledge and context assembly |
+| `runtime/gideon/cognition` | History, knowledge and context assembly |
+| `runtime/gideon/hypermid`, `crates/` | Native context and memory service, scope authority and Rust daemon |
 | `runtime/gideon/automation` | Schedules, triggers and workflows |
 | `runtime/gideon/security` | Permissions, credential handling and screening |
 | `runtime/gideon/integrations`, `runtime/gideon/extensions` | Provider and application integration |
@@ -90,6 +93,7 @@ The hook script formats staged Python and signs your commits off, which is what 
 | `runtime/gideon/sdk` | The app SDK, imported as `gideon.sdk` |
 | `runtime/gideon/operations`, `runtime/gideon/assurance` | Self-update, backup and verification |
 | `apps/console` | React console and shared client assets |
+| `apps/assistant` | Separate assistant surface and web asset build |
 | `apps/desktop`, `apps/mobile` | Electron and Capacitor shells |
 | `packages/python-client` | Python client for the gateway API |
 | `checks/runtime`, `checks/harness` | Behaviour checks and the self-development harness |
@@ -101,7 +105,7 @@ The hook script formats staged Python and signs your commits off, which is what 
 
 [docs/README.md](docs/README.md) is the index. The short path in:
 
-- [docs/VISION.md](docs/VISION.md) for what this is trying to be.
+- [Console product guide](apps/console/PRODUCT.md) for the interface and its destinations.
 - [docs/architecture/OVERVIEW.md](docs/architecture/OVERVIEW.md) for how the gateway is put together.
 - [docs/reference/CLI.md](docs/reference/CLI.md) for every command and flag.
 - [docs/reference/CONFIGURATION_REFERENCE.md](docs/reference/CONFIGURATION_REFERENCE.md) for every setting.
@@ -109,15 +113,15 @@ The hook script formats staged Python and signs your commits off, which is what 
 
 ## Status
 
-Gideon is pre-1.0 and under active development. The gateway, console, desktop and mobile shells, the Python client, and the checks that exercise them are all in the tree, and CI runs the Python suite, the console tests and the interaction checks on every change.
+Gideon is pre-1.0 and under active development. The gateway, console, desktop and mobile shells, the Python client, and the checks that exercise them are all in the tree, and CI defines Python, console, bundled-app and interaction checks. Which checks run depends on the workflow event and job configuration; this is not a claim that every capability has been qualified.
 
 What that does not mean: no hosted service exists, and this repository assumes neither a published package nor a release endpoint unless you point `GIDEON_RELEASE_REPOSITORY` at one. Integrations need their own configuration, credentials and platform support. Some capabilities in the tree have not been exercised end to end against a live provider. Passing checks say something about what they cover and nothing about the rest.
 
 ## Security
 
-Gideon reads local files, runs tools and talks to services you configure, so the gateway token and the account it runs under grant real access. Reports go through a private channel to whoever gave you the checkout. See [SECURITY.md](SECURITY.md).
+Gideon reads local files, runs tools and talks to services you configure, so the gateway token and the account it runs under grant real access. Report vulnerabilities through the private reporting route in [SECURITY.md](SECURITY.md).
 
-Gideon sends no telemetry. Nothing about your usage leaves your machine unless you configure an integration that does.
+Model requests, channel delivery, downloads, catalog access and updates can contact configured external services. Review the provider settings and [network egress inventory](docs/architecture/NETWORK_EGRESS_HOSTS.txt) before connecting an integration.
 
 ## Contributing and getting help
 

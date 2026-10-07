@@ -1,6 +1,6 @@
 # Gideon documentation
 
-The docs are split by the question you are asking. The architecture documents are the map of how the system is built. The guides are the how-to for getting a task done. The reference is the lookup for a command, a setting or a route. The security documents state the honest limits, including what is not enforced yet.
+The docs are split by the question you are asking. The architecture documents are the map of how the system is built. The guides are the how-to for getting a task done. The reference is the lookup for a command, a setting or a route. Source registrations and schemas remain authoritative when a reference table is incomplete. The security documents state the honest limits, including declaration-only controls and platform-dependent enforcement.
 
 Every link below points at a file in this tree. Start with the project overview or getting-started guide, then open the folder that matches your question: `architecture/`, `guides/`, `reference/`, `security/`, `design/` or `brand/`.
 
@@ -18,7 +18,7 @@ Every link below points at a file in this tree. Start with the project overview 
 - [TASKS_TRIGGERS.md](architecture/TASKS_TRIGGERS.md): how projects, tasks and task lists work, and what fires a trigger or a schedule.
 - [KNOWLEDGE_MEMORY.md](architecture/KNOWLEDGE_MEMORY.md): what separates the knowledge library from what the assistant remembers, and how each is searched.
 - [INBOX_CHANNELS.md](architecture/INBOX_CHANNELS.md): how items arrive for your attention, and how a channel app carries messages in both directions.
-- [APP_PLATFORM.md](architecture/APP_PLATFORM.md): what an app can be, and how it is installed, permissioned and run as a backend subprocess.
+- [APP_PLATFORM.md](architecture/APP_PLATFORM.md): how apps are reviewed, installed and withdrawn, and how agent tiers, providers, backends and UI contributions differ.
 - [WIDGETS.md](architecture/WIDGETS.md): what an agent-authored widget may send to its host, and what the host accepts back.
 - [AGENT_ACTIVITY_FEED.md](architecture/AGENT_ACTIVITY_FEED.md): what a dashboard agent world is handed as its read contract, and what it must not assume.
 - [TOOL_NAMES.md](architecture/TOOL_NAMES.md): whether a tool call still lands on the tool it names after every hop.

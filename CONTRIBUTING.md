@@ -6,7 +6,7 @@ Two things decide whether a change lands: it does something real for a user, and
 
 ## Set up your environment
 
-You need Python 3.12 or newer, and Node.js 22.12 or newer with npm for console work. CI builds the console with Node 24.
+You need Python 3.12 or newer, and Node.js 22.12 or newer with npm for console work. CI builds the console with Node 24. Building a runtime wheel from source also builds the Rust Hypermid daemon; install the pinned Rust 1.91.1 toolchain through rustup, or supply the platform-specific prebuilt daemon through `GIDEON_PREBUILT_HYPERMID_DAEMON`. See [Getting started](docs/guides/GETTING_STARTED.md).
 
 With a virtual environment:
 
@@ -17,7 +17,7 @@ python3 -m venv .venv
 
 Or with uv, which is what CI uses: `uv sync --locked --extra dev`.
 
-Keep npm installs at the repository root. The root `package-lock.json` covers all three workspaces, and `uv.lock` is committed, so a local install matches CI.
+Keep npm installs at the repository root. The root `package-lock.json` covers console, desktop and mobile workspaces. The assistant surface uses its own `apps/assistant/package-lock.json` and `npm --prefix apps/assistant ci`. `uv.lock` pins the Python environment used by the locked setup path.
 
 ## Install the git hooks
 
@@ -27,7 +27,7 @@ Run `sh tooling/scripts/install_git_hooks.sh` once per clone. It points `core.ho
 
 ## Run it
 
-`make serve` starts the gateway on port 10000 against `.dev-home` in your checkout. On a fresh clone, `make serve-fresh` builds the console first.
+`make serve` starts the gateway on port 10000 against `.dev-home` in your checkout. `make serve` uses an existing console build. On a fresh clone, `make serve-fresh` installs and builds both console and assistant assets first.
 
 To set up and start it by hand:
 
@@ -72,7 +72,7 @@ Gideon is pre-1.0, so we can still change things. Class your change before you o
 - **B (behavioral):** changes a stable surface (API, CLI, config) or persisted state.
 - **S (schema):** changes a stored schema or another stable contract.
 
-Aim for R. If your change is B or S, describe the break in the pull request and add a CHANGELOG entry. Do not build compatibility shims or migration helpers: we have no migration machinery yet, and that is deliberate. The maintainer decides whether to take the break, reshape it, or schedule it.
+Aim for R. If your change is B or S, describe the break in the pull request and add a CHANGELOG entry. Document persisted-state and API compatibility implications explicitly. Existing migration and portability paths must be evaluated for the specific store; do not assume a universal automatic migration or add a compatibility layer without agreeing its scope. The maintainer decides whether to take the break, reshape it, or schedule it.
 
 ## Developer Certificate of Origin (DCO)
 
