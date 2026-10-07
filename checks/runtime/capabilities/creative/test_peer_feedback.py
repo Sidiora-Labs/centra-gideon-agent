@@ -516,10 +516,10 @@ async def test_real_dashboard_middleware_delegates_only_exact_signed_receive_pos
             "/api/capabilities/creative/commission-feedback/receive-nearby", json={}
         )
         assert nearby.status == 403
-        assert (await nearby.json())["error"] == "Forbidden"
+        assert (await nearby.json())["error"] == "Token required"
         wrong_method = await client.get(RECEIVE_PATH)
         assert wrong_method.status == 403
-        assert (await wrong_method.json())["error"] == "Forbidden"
+        assert (await wrong_method.json())["error"] == "Token required"
 
 
 def test_creative_registrar_mounts_the_exact_peer_feedback_route(tmp_path):

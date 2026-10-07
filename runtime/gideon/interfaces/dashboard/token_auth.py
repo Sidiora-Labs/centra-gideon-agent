@@ -51,12 +51,6 @@ parse_config_duration = lifetimes.parse_config_duration
 
 logger = logging.getLogger(__name__)
 
-_HANDLER_AUTH_ROUTES = frozenset(
-    {
-        ("POST", "/api/capabilities/creative/commission-feedback/receive"),
-    }
-)
-
 ERR_BEARER_INVALID = "auth_bearer_invalid"
 ERR_CREDENTIAL_CONFLICT = "auth_credential_conflict"
 
@@ -415,6 +409,7 @@ def _is_assistant_static_request(request: web.Request) -> bool:
 
 _HANDLER_AUTH_ROUTES = frozenset(
     {
+        ("POST", "/api/capabilities/creative/commission-feedback/receive"),
         ("POST", "/api/capabilities/communications/telegram/webhook"),
         ("POST", "/api/capabilities/platform/peers/proofs/verify"),
         ("POST", "/api/capabilities/platform/replication/receive"),
