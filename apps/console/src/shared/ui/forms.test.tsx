@@ -284,3 +284,149 @@ describe('Checkbox', () => {
     expect(box.checked).toBe(true)
   })
 })
+
+// These operations exercise the native DOM API, including browser form semantics.
+describe('native field constraints and editing guards', () => {
+  it('preserves calendar bounds, keyboard hints, refs and typed blur callbacks', () => {
+    const blur = vi.fn()
+    let node: HTMLInputElement | null = null
+    const { container } = render(<form><TextInput value="2026-10-07T09:30" onChange={() => {}}
+      type="datetime-local" min="2026-10-01T00:00" max="2026-10-31T23:59" step={60}
+      required name="meeting" ariaLabel="Meeting time" inputMode="numeric" autoComplete="off"
+      spellCheck={false} ref={element => { node = element }} onBlur={blur} className="col-span-2" /></form>)
+    const input = container.querySelector('input')!
+    expect(node).toBe(input)
+    expect(input.type).toBe('datetime-local')
+    expect(input.min).toBe('2026-10-01T00:00')
+    expect(input.max).toBe('2026-10-31T23:59')
+    expect(input.step).toBe('60')
+    expect(input.required).toBe(true)
+    expect(input.inputMode).toBe('numeric')
+    expect(input.autocomplete).toBe('off')
+    expect(input.getAttribute('spellcheck')).toBe('false')
+    expect(input.classList.contains('col-span-2')).toBe(true)
+    expect(new FormData(container.querySelector('form')!).get('meeting')).toBe('2026-10-07T09:30')
+    input.focus()
+    input.blur()
+    expect(blur).toHaveBeenCalledOnce()
+    expect(blur.mock.calls[0][0].target).toBe(input)
+  })
+
+  it('uses genuine native email/url and required constraints', () => {
+    const { container } = render(<><TextInput type="email" value="invalid" onChange={() => {}} required />
+      <TextInput type="url" value="https://example.org" onChange={() => {}} /></>)
+    const [email, url] = Array.from(container.querySelectorAll('input'))
+    expect(email.validity.typeMismatch).toBe(true)
+    expect(email.required).toBe(true)
+    expect(url.validity.valid).toBe(true)
+  })
+
+  it('keeps native disabled submission semantics and binds a real explanation plus hint', () => {
+    const change = vi.fn()
+    const { container } = render(<form><Field label="Endpoint" hint="Use the registered endpoint">
+      <TextInput name="endpoint" ariaLabel="Endpoint" value="https://example.org" onChange={change}
+        disabled disabledReason="Policy prevents edits" /></Field></form>)
+    const input = container.querySelector('input')!
+    expect(input.disabled).toBe(true)
+    expect(new FormData(container.querySelector('form')!).has('endpoint')).toBe(false)
+    const descriptions = input.getAttribute('aria-describedby')!.split(' ').map(id => container.querySelector(`[id="${id}"]`)!.textContent)
+    expect(descriptions).toEqual(['Use the registered endpoint', 'Policy prevents edits'])
+    fireEvent.change(input, { target: { value: 'changed' } })
+    expect(change).not.toHaveBeenCalled()
+  })
+
+  it('keeps an explicitly readonly text field focusable and guards changes', () => {
+    const change = vi.fn()
+    const { container, rerender } = render(<TextInput value="retained" onChange={change} readOnly readOnlyReason="Already bound" />)
+    const input = container.querySelector('input')!
+    expect(input.disabled).toBe(false)
+    expect(input.readOnly).toBe(true)
+    input.focus()
+    expect(document.activeElement).toBe(input)
+    expect(container.querySelector(`[id="${input.getAttribute('aria-describedby')}"]`)!.textContent).toBe('Already bound')
+    fireEvent.change(input, { target: { value: 'changed' } })
+    expect(change).not.toHaveBeenCalled()
+    expect(input.value).toBe('retained')
+    rerender(<TextInput value="retained" onChange={change} />)
+    expect(input.getAttribute('aria-describedby')).toBeNull()
+    fireEvent.change(input, { target: { value: 'edited' } })
+    expect(change).toHaveBeenCalledWith('edited')
+  })
+
+  it('forwards textarea constraints, form name, ref and keyboard/blur handlers', () => {
+    const blur = vi.fn(), key = vi.fn(), change = vi.fn()
+    let node: HTMLTextAreaElement | null = null
+    const { container } = render(<TextArea name="passage" ariaLabel="Passage" value="saved" onChange={change}
+      required minLength={2} maxLength={100} spellCheck={false} wrap="hard" readOnly readOnlyReason="Saved excerpt"
+      ref={element => { node = element }} onBlur={blur} onKeyDown={key} className="min-h-48" />)
+    const textarea = container.querySelector('textarea')!
+    expect(node).toBe(textarea)
+    expect(textarea.name).toBe('passage')
+    expect(textarea.required).toBe(true)
+    expect(textarea.minLength).toBe(2)
+    expect(textarea.maxLength).toBe(100)
+    expect(textarea.wrap).toBe('hard')
+    expect(textarea.getAttribute('spellcheck')).toBe('false')
+    textarea.focus()
+    expect(document.activeElement).toBe(textarea)
+    fireEvent.keyDown(textarea, { key: 'Escape' })
+    fireEvent.change(textarea, { target: { value: 'changed' } })
+    textarea.blur()
+    expect(key).toHaveBeenCalledOnce()
+    expect(blur).toHaveBeenCalledOnce()
+    expect(change).not.toHaveBeenCalled()
+    expect(textarea.value).toBe('saved')
+  })
+
+  it('guards a focusable readonly select against pointer, keyboard and synthetic selection', () => {
+    const change = vi.fn(), blur = vi.fn()
+    let node: HTMLSelectElement | null = null
+    const { container, rerender } = render(<Select value="a" onChange={change} required name="region" ariaLabel="Region"
+      options={[{ value: 'a', label: 'Here' }, { value: 'b', label: 'Other' }, { value: 'c', label: 'Unavailable', disabled: true }]}
+      readOnly readOnlyReason="Fixed deployment region" ref={element => { node = element }} onBlur={blur} />)
+    const select = container.querySelector('select')!
+    expect(node).toBe(select)
+    expect(select.required).toBe(true)
+    expect(select.disabled).toBe(false)
+    expect(select.getAttribute('aria-readonly')).toBe('true')
+    select.focus()
+    expect(document.activeElement).toBe(select)
+    expect(fireEvent.mouseDown(select)).toBe(false)
+    expect(fireEvent.keyDown(select, { key: 'ArrowDown' })).toBe(false)
+    expect(fireEvent.keyDown(select, { key: 'b' })).toBe(false)
+    expect(fireEvent.keyDown(select, { key: 'Tab' })).toBe(true)
+    fireEvent.change(select, { target: { value: 'b' } })
+    expect(select.value).toBe('a')
+    expect(change).not.toHaveBeenCalled()
+    select.blur()
+    expect(blur).toHaveBeenCalledOnce()
+    rerender(<Select value="a" onChange={change} options={[{ value: 'a', label: 'Here' }, { value: 'c', label: 'Unavailable', disabled: true }]} />)
+    fireEvent.change(select, { target: { value: 'c' } })
+    expect(change).not.toHaveBeenCalled()
+    expect(select.value).toBe('a')
+  })
+
+  it('keeps checkbox readonly focus, isolation, submission and native disabled contracts', () => {
+    const change = vi.fn(), row = vi.fn(), blur = vi.fn()
+    let node: HTMLInputElement | null = null
+    const { container, rerender } = render(<form><div onClick={row}><Checkbox checked onChange={change}
+      ariaLabel="Select passage" id="passage-check" name="passage" value="saved" required readOnly readOnlyReason="Selection is locked"
+      ref={element => { node = element }} onBlur={blur} /></div></form>)
+    const checkbox = container.querySelector('input')!
+    expect(node).toBe(checkbox)
+    expect(checkbox.required).toBe(true)
+    checkbox.focus()
+    expect(document.activeElement).toBe(checkbox)
+    fireEvent.click(checkbox)
+    expect(checkbox.checked).toBe(true)
+    expect(change).not.toHaveBeenCalled()
+    expect(row).not.toHaveBeenCalled()
+    expect(new FormData(container.querySelector('form')!).get('passage')).toBe('saved')
+    checkbox.blur()
+    expect(blur).toHaveBeenCalledOnce()
+    rerender(<form><Checkbox checked onChange={change} ariaLabel="Select passage" name="passage"
+      disabled disabledReason="Unavailable selection" /></form>)
+    expect(container.querySelector('input')!.disabled).toBe(true)
+    expect(new FormData(container.querySelector('form')!).has('passage')).toBe(false)
+  })
+})

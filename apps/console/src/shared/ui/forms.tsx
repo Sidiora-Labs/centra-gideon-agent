@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useId, useReducer, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useId, useReducer, useRef, useState, type FocusEventHandler, type InputHTMLAttributes, type KeyboardEvent, type ReactNode, type Ref } from 'react'
 import { ChevronDown, X } from 'lucide-react'
 import { cx } from './cx'
 import { Eyebrow } from './Eyebrow'
@@ -34,47 +34,74 @@ export function Field({ label, hint, right, children }: { label: string; hint?: 
   </FieldHintProvider></FieldLabelProvider>
 }
 
-interface TextInputProps {
-  value: string; onChange: (value: string) => void; placeholder?: string; autoFocus?: boolean
-  onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void; name?: string; ariaLabel?: string; required?: boolean
-  id?: string; size?: FieldSize; surface?: FieldSurface; type?: 'text' | 'password' | 'number'; mono?: boolean
-  min?: number; max?: number; step?: string | number; minLength?: number; maxLength?: number; pattern?: string; leadingIcon?: ReactNode; trailingSlot?: ReactNode
-  disabled?: boolean; disabledReason?: string
+interface EditGuardProps {
+  disabled?: boolean; disabledReason?: string; readOnly?: boolean; readOnlyReason?: string
 }
-export function TextInput({ value, onChange, placeholder, autoFocus, onKeyDown, name, ariaLabel, required,
-  id, size = 'lg', surface = 'container', type, mono, min, max, step, minLength, maxLength, pattern, leadingIcon, trailingSlot,
-  disabled, disabledReason }: TextInputProps) {
-  const label = useFieldLabelId()
+function useEditDescription({ disabled, disabledReason, readOnly, readOnlyReason }: EditGuardProps) {
   const hint = useFieldHintId()
   const identity = useId()
+  const reason = disabled ? disabledReason : readOnly ? readOnlyReason : undefined
+  const reasonId = reason ? `${identity}-reason` : undefined
+  return {
+    describedBy: [hint, reasonId].filter(Boolean).join(' ') || undefined,
+    explanation: reason ? <span id={reasonId} className="sr-only">{reason}</span> : null,
+  }
+}
+
+interface TextInputProps extends EditGuardProps {
+  value: string; onChange: (value: string) => void; placeholder?: string; autoFocus?: boolean
+  onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void; onBlur?: FocusEventHandler<HTMLInputElement>
+  ref?: Ref<HTMLInputElement>; name?: string; ariaLabel?: string; required?: boolean
+  id?: string; size?: FieldSize; surface?: FieldSurface
+  type?: 'text' | 'password' | 'number' | 'date' | 'datetime-local' | 'email' | 'url' | 'tel' | 'search' | 'time' | 'month' | 'week'
+  mono?: boolean; className?: string; inputMode?: InputHTMLAttributes<HTMLInputElement>['inputMode']
+  autoComplete?: InputHTMLAttributes<HTMLInputElement>['autoComplete']; spellCheck?: boolean
+  min?: string | number; max?: string | number; step?: string | number; minLength?: number; maxLength?: number; pattern?: string; leadingIcon?: ReactNode; trailingSlot?: ReactNode
+}
+export function TextInput({ value, onChange, placeholder, autoFocus, onKeyDown, onBlur, ref, name, ariaLabel, required,
+  id, size = 'lg', surface = 'container', type, mono, className, inputMode, autoComplete, spellCheck,
+  min, max, step, minLength, maxLength, pattern, leadingIcon, trailingSlot,
+  disabled, disabledReason, readOnly, readOnlyReason }: TextInputProps) {
+  const label = useFieldLabelId()
+  const identity = useId()
+  const { describedBy, explanation } = useEditDescription({ disabled, disabledReason, readOnly, readOnlyReason })
   const dimensions = sizeTokens[size]
-  const input = <input id={id || name || identity} name={name} type={type} value={value} autoFocus={autoFocus} placeholder={placeholder}
+  const input = <input ref={ref} id={id || name || identity} name={name} type={type} value={value} autoFocus={autoFocus} placeholder={placeholder}
     min={min} max={max} step={step} minLength={minLength} maxLength={maxLength} pattern={pattern}
-    {...fieldNaming(label, ariaLabel, name)} aria-describedby={hint} aria-required={required || undefined}
+    inputMode={inputMode} autoComplete={autoComplete} spellCheck={spellCheck} required={required} readOnly={readOnly}
+    {...fieldNaming(label, ariaLabel, name)} aria-describedby={describedBy} aria-required={required || undefined}
     disabled={disabled} title={disabled ? disabledReason || undefined : undefined}
-    onChange={(event) => { if (!disabled) onChange(event.target.value) }} onKeyDown={onKeyDown}
+    onChange={(event) => { if (!disabled && !readOnly) onChange(event.target.value) }} onKeyDown={onKeyDown} onBlur={onBlur}
     data-type={dimensions.role} className={cx(fieldChrome, 'w-full min-w-0 max-w-full', dimensions.height, surfaces[surface],
       leadingIcon && trailingSlot ? 'pl-9 pr-10' : leadingIcon ? 'pl-9 pr-m' : trailingSlot ? 'pl-m pr-10' : 'px-m',
-      mono && 'font-mono', disabled && 'opacity-50')} />
-  if (!leadingIcon && !trailingSlot) return input
+      mono && 'font-mono', disabled && 'opacity-50', className)} />
+  if (!leadingIcon && !trailingSlot) return <>{input}{explanation}</>
   return <div className="relative w-full min-w-0 max-w-full">
     {leadingIcon && <span aria-hidden className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-low">{leadingIcon}</span>}
-    {input}
+    {input}{explanation}
     {trailingSlot && <span className="absolute right-1.5 top-1/2 -translate-y-1/2">{trailingSlot}</span>}
   </div>
 }
 
-export function TextArea({ value, onChange, placeholder, rows = 4, mono, ariaLabel, autoFocus, id, size = 'lg', surface = 'container', disabled, disabledReason }: {
+interface TextAreaProps extends EditGuardProps {
   value: string; onChange: (value: string) => void; placeholder?: string; rows?: number; mono?: boolean; ariaLabel?: string
-  autoFocus?: boolean; id?: string; size?: FieldSize; surface?: FieldSurface; disabled?: boolean; disabledReason?: string
-}) {
+  autoFocus?: boolean; id?: string; name?: string; size?: FieldSize; surface?: FieldSurface; className?: string
+  required?: boolean; minLength?: number; maxLength?: number; spellCheck?: boolean; wrap?: 'hard' | 'soft' | 'off'
+  ref?: Ref<HTMLTextAreaElement>; onBlur?: FocusEventHandler<HTMLTextAreaElement>; onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void
+}
+export function TextArea({ value, onChange, placeholder, rows = 4, mono, ariaLabel, autoFocus, id, name,
+  size = 'lg', surface = 'container', className, required, minLength, maxLength, spellCheck, wrap,
+  ref, onBlur, onKeyDown, disabled, disabledReason, readOnly, readOnlyReason }: TextAreaProps) {
   const label = useFieldLabelId()
-  const hint = useFieldHintId()
   const identity = useId()
-  return <textarea id={id || identity} value={value} rows={rows} autoFocus={autoFocus} placeholder={placeholder}
-    {...fieldNaming(label, ariaLabel)} aria-describedby={hint} disabled={disabled} title={disabled ? disabledReason || undefined : undefined}
-    onChange={(event) => { if (!disabled) onChange(event.target.value) }} data-type={mono ? 'body-s' : sizeTokens[size].role}
-    className={cx(fieldChrome, 'w-full min-w-0 max-w-full resize-y px-m py-2', surfaces[surface], mono && 'font-mono')} />
+  const { describedBy, explanation } = useEditDescription({ disabled, disabledReason, readOnly, readOnlyReason })
+  return <><textarea ref={ref} id={id || name || identity} name={name} value={value} rows={rows} autoFocus={autoFocus} placeholder={placeholder}
+    required={required} minLength={minLength} maxLength={maxLength} spellCheck={spellCheck} wrap={wrap} readOnly={readOnly}
+    {...fieldNaming(label, ariaLabel, name)} aria-describedby={describedBy} aria-required={required || undefined}
+    disabled={disabled} title={disabled ? disabledReason || undefined : undefined}
+    onChange={(event) => { if (!disabled && !readOnly) onChange(event.target.value) }} onBlur={onBlur} onKeyDown={onKeyDown}
+    data-type={mono ? 'body-s' : sizeTokens[size].role}
+    className={cx(fieldChrome, 'w-full min-w-0 max-w-full resize-y px-m py-2', surfaces[surface], mono && 'font-mono', className)} />{explanation}</>
 }
 
 export function NumberField({ value, onChange, min, max, step, width = 'w-24', ariaLabel }: {
@@ -104,23 +131,32 @@ export function DateInput({ value, onChange }: { value: string; onChange: (value
     onChange={(event) => onChange(event.target.value)} data-type="body-m" className={cx(fieldChrome, 'h-10 w-full min-w-0 max-w-full bg-surface-container px-m')} />
 }
 
-interface SelectProps {
+interface SelectProps extends EditGuardProps {
   value: string; onChange: (value: string) => void; options: { value: string; label: string; disabled?: boolean; title?: string }[]
-  disabled?: boolean; id?: string; name?: string; ariaLabel?: string; disabledReason?: string; size?: FieldSize; surface?: FieldSurface; required?: boolean
+  id?: string; name?: string; ariaLabel?: string; size?: FieldSize; surface?: FieldSurface; required?: boolean
+  autoFocus?: boolean; ref?: Ref<HTMLSelectElement>; onBlur?: FocusEventHandler<HTMLSelectElement>; className?: string
 }
-export function Select({ value, onChange, options, disabled, id, name, ariaLabel, disabledReason, size = 'lg', surface = 'container', required }: SelectProps) {
+export function Select({ value, onChange, options, disabled, id, name, ariaLabel, disabledReason,
+  readOnly, readOnlyReason, size = 'lg', surface = 'container', required, autoFocus, ref, onBlur, className }: SelectProps) {
   const label = useFieldLabelId()
-  const hint = useFieldHintId()
   const identity = useId()
-  return <div className="relative w-full min-w-0 max-w-full"><select id={id || name || identity} name={name} value={value} disabled={disabled}
-    {...fieldNaming(label, ariaLabel, name)} aria-describedby={hint} aria-required={required || undefined}
-    title={disabled ? disabledReason || undefined : undefined} data-type={sizeTokens[size].role}
+  const { describedBy, explanation } = useEditDescription({ disabled, disabledReason, readOnly, readOnlyReason })
+  return <div className="relative w-full min-w-0 max-w-full"><select ref={ref} id={id || name || identity} name={name} value={value}
+    disabled={disabled} required={required} autoFocus={autoFocus} aria-readonly={readOnly || undefined}
+    {...fieldNaming(label, ariaLabel, name)} aria-describedby={describedBy} aria-required={required || undefined}
+    title={disabled ? disabledReason || undefined : undefined} data-type={sizeTokens[size].role} onBlur={onBlur}
+    onMouseDown={(event) => { if (readOnly) event.preventDefault() }}
+    onKeyDown={(event) => {
+      if (readOnly && !event.ctrlKey && !event.metaKey && !event.altKey &&
+        (event.key.length === 1 || ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Enter'].includes(event.key))) event.preventDefault()
+    }}
     onChange={(event) => {
       const next = event.target.value
-      if (!disabled && !options.find((option) => option.value === next)?.disabled) onChange(next)
-    }} className={cx(fieldChrome, sizeTokens[size].height, 'w-full min-w-0 max-w-full appearance-none pl-m pr-8 disabled:opacity-50', surfaces[surface])}>
+      if (!disabled && !readOnly && !options.find((option) => option.value === next)?.disabled) onChange(next)
+      else event.currentTarget.value = value
+    }} className={cx(fieldChrome, sizeTokens[size].height, 'w-full min-w-0 max-w-full appearance-none pl-m pr-8 disabled:opacity-50', surfaces[surface], className)}>
     {options.map(({ value: key, label: text, disabled: unavailable, title }) => <option key={key} value={key} disabled={unavailable} title={title}>{text}</option>)}
-  </select><ChevronDown size={16} aria-hidden="true" className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-low ${disabled ? 'opacity-50' : ''}`} /></div>
+  </select>{explanation}<ChevronDown size={16} aria-hidden="true" className={`pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-low ${disabled ? 'opacity-50' : ''}`} /></div>
 }
 
 export { Segmented, type SegOption } from './Segmented'
@@ -165,10 +201,17 @@ export function ChipInput({ values, onChange, placeholder, max, suggestions, ari
   </div>
 }
 
-export function Checkbox({ checked, onChange, ariaLabel, className }: {
+interface CheckboxProps extends EditGuardProps {
   checked: boolean; onChange: (value: boolean) => void; ariaLabel: string; className?: string
-}) {
-  return <input type="checkbox" checked={checked} aria-label={ariaLabel} onClick={(event) => event.stopPropagation()}
-    onChange={(event) => { event.stopPropagation(); onChange(event.target.checked) }}
-    className={cx('size-4 min-h-4 min-w-4 shrink-0 cursor-pointer rounded border-outline-variant accent-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary', className)} />
+  id?: string; name?: string; value?: string; required?: boolean; ref?: Ref<HTMLInputElement>; onBlur?: FocusEventHandler<HTMLInputElement>
+}
+export function Checkbox({ checked, onChange, ariaLabel, className, id, name, value, required, ref, onBlur,
+  disabled, disabledReason, readOnly, readOnlyReason }: CheckboxProps) {
+  const { describedBy, explanation } = useEditDescription({ disabled, disabledReason, readOnly, readOnlyReason })
+  return <><input ref={ref} id={id} name={name} value={value} type="checkbox" checked={checked} required={required}
+    disabled={disabled} readOnly={readOnly} aria-readonly={readOnly || undefined} aria-required={required || undefined}
+    aria-label={ariaLabel} aria-describedby={describedBy} title={disabled ? disabledReason || undefined : undefined} onBlur={onBlur}
+    onClick={(event) => event.stopPropagation()}
+    onChange={(event) => { event.stopPropagation(); if (!disabled && !readOnly) onChange(event.target.checked); else event.currentTarget.checked = checked }}
+    className={cx('size-4 min-h-4 min-w-4 shrink-0 cursor-pointer rounded border-outline-variant accent-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary', className)} />{explanation}</>
 }
