@@ -291,6 +291,18 @@ describe("ImageActions data URI handling", () => {
   });
 });
 
+describe("ImageActions clipboard errors", () => {
+  it("reports rejection and clears the error on a successful retry", async () => {
+    clipboardWrite.mockRejectedValueOnce(new Error("permission denied"));
+    renderActions("data:image/png;base64,aGVsbG8=");
+    fireEvent.click(screen.getByLabelText("Copy image"));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("Copy image"));
+    await waitFor(() => expect(clipboardWrite).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
 describe("ImageActions regeneration", () => {
   it("handles rejected regeneration callbacks", async () => {
     const rejection = new Error("regeneration failed");

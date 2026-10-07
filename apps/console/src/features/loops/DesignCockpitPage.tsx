@@ -58,13 +58,15 @@ export function DesignCockpitPage({ id, onBack, onDeleted, onOpenProject, onBuil
   const [nudgeOpen, setNudgeOpen] = useState(false)
   const [nudgeText, setNudgeText] = useState('')
   const [projName, setProjName] = useState('')
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const loadLoop = useCallback(() => {
     api.uLoop(id).then((l) => {
       setLoop(l); setNotFound(false)
       const pid = l.project_id || l.tasks_project_id || ''
-      if (pid) api.project(pid).then((p) => setProjName(p?.name || '')).catch(() => {})
-    }).catch((e) => { if (e?.status === 404) setNotFound(true) })
+      setLoadError(null)
+      if (pid) api.project(pid).then((p) => setProjName(p?.name || '')).catch(() => setLoadError('Could not load the linked project.'))
+    }).catch((e) => { if (e?.status === 404) setNotFound(true); else setLoadError('Could not load this design loop.') })
   }, [id])
 
   const loadTokens = useCallback(() => {
@@ -75,7 +77,7 @@ export function DesignCockpitPage({ id, onBack, onDeleted, onOpenProject, onBuil
   }, [id, scheme])
 
   const loadArtifacts = useCallback(() => {
-    api.artifacts({ tag: `loop:${id}` }).then(setArtifacts).catch(() => {})
+    api.artifacts({ tag: `loop:${id}` }).then(setArtifacts).catch(() => notify('Could not load design artifacts. Refresh to try again.', 'error'))
   }, [id])
 
   useEffect(() => { loadLoop() }, [loadLoop])
@@ -165,7 +167,7 @@ export function DesignCockpitPage({ id, onBack, onDeleted, onOpenProject, onBuil
       </div>
     </div>
   )
-  if (!loop) return <div className="grid h-full place-items-center text-on-surface-low">Loading…</div>
+  if (!loop) return <div className="grid h-full place-items-center text-on-surface-low">{loadError ? <div><p role="alert">{loadError}</p><Button onClick={loadLoop}>Retry</Button></div> : 'Loading…'}</div>
 
   const reactArtifacts = artifacts.filter((a) => a.kind === 'react')
   const docArtifacts = artifacts.filter((a) => a.kind === 'markdown')
@@ -256,6 +258,7 @@ export function DesignCockpitPage({ id, onBack, onDeleted, onOpenProject, onBuil
 
       { }
       <CockpitPromptBar prompt={loop.task || ''} />
+      {loadError && <div className="px-2xl py-s"><p role="alert" className="text-danger">{loadError}</p><Button onClick={loadLoop}>Retry</Button></div>}
 
       <div className="shrink-0 px-2xl pt-2 flex items-center gap-1 border-b border-outline-variant/30">
         {([['tokens', 'Tokens', Palette], ['canvas', 'Canvas', Box], ['palette', 'Palette', Upload], ['contrast', 'Contrast', Contrast], ['exports', 'Exports', Download]] as [Tab, string, any][]).map(([t, label, Icon]) => (
@@ -680,7 +683,7 @@ function CanvasComponent({ a, loopId, draggable, onDragStart, onDragEnd }: {
   }, [loopId, a.slug, a.version, a.content])
   const renderFailed = (message: string) => {
     setRendered(false); setRenderError(message); setReviewed(false)
-    void api.reviewULoopDesignPreview(loopId, a.slug, a.version, false).catch(() => {})
+    void api.reviewULoopDesignPreview(loopId, a.slug, a.version, false).catch(() => setActionError('Could not save the failed preview review.'))
   }
   const approve = async () => {
     if (!rendered || renderError || reviewBusy) return

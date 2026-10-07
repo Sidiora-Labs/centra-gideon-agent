@@ -476,6 +476,7 @@ function RegenerateButton({
 }
 
 function ImageActions({ part, onRegenerate, className }: ImageActionsProps) {
+  const [copyError, setCopyError] = useState<string | null>(null);
   return (
     <div
       data-slot="image-actions"
@@ -493,7 +494,8 @@ function ImageActions({ part, onRegenerate, className }: ImageActionsProps) {
       <button
         type="button"
         onClick={() => {
-          copyImagePart(part).catch(() => {});
+          setCopyError(null);
+          copyImagePart(part).catch(() => setCopyError("Could not copy image. Check clipboard permissions and try again."));
         }}
         data-slot="image-copy"
         aria-label="Copy image"
@@ -501,6 +503,7 @@ function ImageActions({ part, onRegenerate, className }: ImageActionsProps) {
       >
         <CopyIcon className="size-4" />
       </button>
+      {copyError && <span role="alert" className="text-destructive text-xs">{copyError}</span>}
       {onRegenerate && <RegenerateButton onRegenerate={onRegenerate} />}
     </div>
   );

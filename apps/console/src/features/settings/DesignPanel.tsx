@@ -23,6 +23,7 @@ import { useNavDisclosure } from '../../app/shell/navDisclosure'
 import { BUSY_REASON } from '../../shared/ui/unavailable'
 
 export function DesignPanel() {
+  const [actionError, setActionError] = useState<string | null>(null)
   const { activeScheme, allSchemes, saveCustomScheme, themeBase, readCustomScheme, updateCustomScheme, revertCustomScheme, deleteCustomScheme, themesLoading, resetAll, currentColors } = useAppearance()
   const { personality, activate, pickScheme } = usePersonality()
   const { mode, preference, setPreference } = useMode()
@@ -40,7 +41,8 @@ export function DesignPanel() {
         : 'It cannot be undone — a saved theme is a file, not a snapshot.',
     })
     if (!ok) return
-    await deleteCustomScheme(s.id).catch(() => {})
+    setActionError(null)
+    await deleteCustomScheme(s.id).catch((cause) => setActionError(`Could not confirm the updated theme list: ${cause instanceof Error ? cause.message : 'Please refresh to check the saved themes.'}`))
   }
   const [editingColors, setEditingColors] = useState(false)
   const dark = mode === 'dark'
@@ -50,7 +52,8 @@ export function DesignPanel() {
     read: () => readCustomScheme(activeSaved?.id ?? ''),
     write: (next, revision) => updateCustomScheme(activeSaved?.id ?? '', next, revision),
     onDiscard: () => {
-      if (activeSaved) void revertCustomScheme(activeSaved.id).catch(() => {})
+      setActionError(null)
+      if (activeSaved) void revertCustomScheme(activeSaved.id).catch(() => setActionError('Could not restore the saved theme. Please try again.'))
     },
   })
   const base = activeSaved ? themeBase(activeSaved.id) : undefined
@@ -70,6 +73,7 @@ export function DesignPanel() {
       { }
       {
 }
+      {actionError && <div role="alert"><FieldError>{actionError}</FieldError></div>}
       <Section
         title="Color scheme"
         hint={<>A scheme is the system's color identity. Tuning the <strong className="text-on-surface-var">{mode}</strong> mode.</>}
