@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { jsxTags } from '../testing/jsxContracts'
+import { controlAvailability } from './controlState'
 
 
 const SRC = join(process.cwd(), "src")
@@ -15,55 +17,23 @@ const BUSY =
   /busy|saving|loading|pending|submitting|acting|probing|searching|testing|running|reloading|installing|deleting|syncing|creating|sending|launching|retrying|regenning|bundling|starting|stopping|pulling|applying|resolving|refreshing|rebuilding|generating|uploading|downloading|reconnecting|scanning|verifying|repairing|restoring|pausing|resuming|cancelling|dismissing|promoting|consolidating|rechecking|exporting|importing|merging|pinPending|flash/i
 const REASON = /disabledReason|unavailableWhen|aria-disabled|title=|hint=/i
 
-function elementWithChildren(src: string, i: number): string {
-  const a = src.lastIndexOf('<', i)
-  if (a < 0) return ''
-  const tag = /^<([A-Za-z][\w.]*)/.exec(src.slice(a))?.[1]
-  if (!tag) return src.slice(a, a + 400)
-  let depth = 0
-  let j = a
-  for (; j < src.length; j++) {
-    const c = src[j]
-    if (c === '{') depth++
-    else if (c === '}') depth--
-    else if (c === '>' && depth === 0) break
-  }
-  if (src[j - 1] === '/') return src.slice(a, j + 1)
-  const close = `</${tag}>`
-  const openRe = new RegExp(`<${tag}[\\s/>]`, 'g')
-  let k = j + 1
-  let level = 1
-  while (k < src.length && level > 0) {
-    const nextClose = src.indexOf(close, k)
-    openRe.lastIndex = k
-    const nextOpen = openRe.exec(src)
-    if (nextClose < 0) break
-    if (nextOpen && nextOpen.index < nextClose) { level++; k = nextOpen.index + nextOpen[0].length }
-    else { level--; k = nextClose + close.length }
-  }
-  return src.slice(a, k)
-}
-
 type Site = { key: string; rel: string; line: number }
 
 const siteKey = (rel: string, expr: string) => `${rel}  disabled={${expr}}`
 
-const codeOf = (s: string): string => s
-  .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-  .replace(/\{\/\*[\s\S]*?\*\/\}/g, (m) => m.replace(/[^\n]/g, ' '))
-  .replace(/(^|[^:])\/\/[^\n]*/g, (m, p) => p + ' '.repeat(m.length - p.length))
-
 function unexplained(): Site[] {
   const out: Site[] = []
   for (const abs of walk(SRC)) {
-    const src = codeOf(readFileSync(abs, 'utf8'))
-    for (const m of src.matchAll(/disabled=\{([^}]{1,90})\}/g)) {
-      const expr = m[1].trim()
+    const src = readFileSync(abs, 'utf8')
+    for (const site of jsxTags(src)) {
+      const gate = site.attributes.get('disabled')
+      if (!gate?.startsWith('{')) continue
+      const expr = gate.slice(1, -1).trim()
       const ids = (expr.match(/[A-Za-z_$][\w$]*/g) ?? []).filter((x) => !['true', 'false', 'null', 'undefined', 'length'].includes(x))
       if (!ids.length || BUSY.test(expr)) continue
-      if (REASON.test(elementWithChildren(src, m.index!))) continue
+      if (REASON.test(site.element)) continue
       const rel = abs.replace(SRC + '/', '')
-      out.push({ key: siteKey(rel, expr), rel, line: src.slice(0, m.index!).split('\n').length })
+      out.push({ key: siteKey(rel, expr), rel, line: site.line })
     }
   }
   return out.sort((a, b) => a.key.localeCompare(b.key) || a.line - b.line)
@@ -111,7 +81,8 @@ describe('the disabled-reason census', () => {
   it('each classified site still has the shape it is excused for', () => {
     const code = (rel: string) => readFileSync(join(SRC, rel), 'utf8')
 
-    expect(code('shared/ui/Button.tsx'), 'the carrier really implements soft-off').toMatch(/softOff/)
+    expect(code('shared/ui/Button.tsx')).toMatch(/activateControl\(event, state.blocked, onClick\)/)
+    expect(controlAvailability(true, false, 'Choose a project').nativeDisabled).toBe(false)
 
     expect(code('features/knowledge/KnowledgeListPage.tsx'),
       'and its label really does explain the state').toMatch(/\(removed — insight kept\)/)
@@ -121,10 +92,10 @@ describe('the disabled-reason census', () => {
     expect(code('features/tasks/TaskDetail.tsx'),
       'and the read-only state is stated once for the section').toMatch(/read-only|readOnly/)
 
+    const pin = jsxTags(code('shared/ui/widget/WidgetFrame.tsx'), ['SquareIconButton']).find(site => site.attributes.get('disabled') === '{artifact.pinned}')
+    expect(pin?.attributes.get('loading')).toBe('{artifact.pinPending}')
     expect(code('shared/ui/widget/WidgetFrame.tsx'),
-      'pinned gates the press; pinPending stays the in-flight prop').toMatch(/disabled=\{pinned\}\s+loading=\{pinPending\}/)
-    expect(code('shared/ui/widget/WidgetFrame.tsx'),
-      'and the name really does state the gate').toMatch(/pinned \? 'Pinned to dashboard'/)
+      'and the name really does state the gate').toMatch(/artifact\.pinned \? 'Pinned to dashboard'/)
 
     expect(code('features/tasks/TaskForm.tsx'),
       'and the Project field it depends on is right above').toMatch(/<Field label="Project">/)

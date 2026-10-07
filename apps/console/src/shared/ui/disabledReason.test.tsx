@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { jsxTags } from '../testing/jsxContracts'
 import { Button } from './Button'
 
 
@@ -111,21 +112,10 @@ function gatedSubmits(): Array<{ file: string; line: number; tag: string }> {
   const out: Array<{ file: string; line: number; tag: string }> = []
   for (const abs of walk(SRC)) {
     const text = readFileSync(abs, 'utf8')
-    for (const m of text.matchAll(/<(?:Button|button|motion\.button)\b/g)) {
-      let depth = 0
-      for (let i = m.index! + m[0].length; i < text.length; i++) {
-        const ch = text[i]
-        if (ch === '{') depth++
-        else if (ch === '}') depth--
-        else if (ch === '>' && depth === 0) {
-          const tag = text.slice(m.index!, i + 1)
-          if (
-            /disabled=\{[^}]*!\w+[\w.]*\.trim\(\)|disabled=\{[^}]*length === 0|disabled=\{[^}]*!can[A-Z]\w*|unavailableWhen\(/.test(tag)
-          ) {
-            out.push({ file: abs.slice(SRC.length + 1), line: text.slice(0, m.index).split('\n').length, tag })
-          }
-          break
-        }
+    for (const site of jsxTags(text, ['Button', 'button', 'motion.button'])) {
+      const gate = site.attributes.get('disabled') ?? site.attributes.get('aria-disabled') ?? ''
+      if (/!\w+[\w.]*\.trim\(\)|length === 0|!can[A-Z]\w*/.test(gate) || /unavailableWhen\(/.test(site.tag)) {
+        out.push({ file: abs.slice(SRC.length + 1), line: site.line, tag: site.tag })
       }
     }
   }

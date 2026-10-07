@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { controlAvailability, activateControl } from './controlState'
+import { jsxTags } from '../testing/jsxContracts'
 
 
 const SRC = join(process.cwd(), "src")
@@ -14,17 +16,7 @@ const walk = (d: string): string[] =>
 const BUSY = /\b(busy|saving|sending|loading|installing|retrying|pending|working|submitting|launching|testing|promoting|consolidating|regen\w*|bulkBusy|levelBusy|deleting|creating|running|uploading|importing|exporting|refreshing|syncing|starting|stopping)\b/i
 
 function buttonTags(src: string): Array<{ tag: string; line: number }> {
-  const out: Array<{ tag: string; line: number }> = []
-  for (const m of src.matchAll(/<Button\b/g)) {
-    let depth = 0
-    for (let i = m.index! + m[0].length; i < src.length; i++) {
-      const ch = src[i]
-      if (ch === '{') depth++
-      else if (ch === '}') depth--
-      else if (ch === '>' && depth === 0) { out.push({ tag: src.slice(m.index!, i + 1), line: src.slice(0, m.index!).split('\n').length }); break }
-    }
-  }
-  return out
+  return jsxTags(src, ['Button']).map(({ tag, line }) => ({ tag, line }))
 }
 
 const EXEMPT: Record<string, string> = {
@@ -49,6 +41,15 @@ const offenders = walk(SRC).flatMap((f) => {
 })
 
 describe('a disabled Button that a user could unblock says how', () => {
+  it('reads only real JSX props, including nested callbacks and strings', () => {
+    const sites = jsxTags(`// <Button disabled={fake} />
+<Button aria-disabled={true} title="https://example.test/a" onClick={() => a < b} disabledReason={missing ? 'Choose > one' : undefined} />`, ['Button'])
+    expect(sites).toHaveLength(1)
+    expect(sites[0].attributes.has('disabled')).toBe(false)
+    expect(sites[0].attributes.get('aria-disabled')).toBe('{true}')
+    expect(sites[0].attributes.get('disabledReason')).toBe("{missing ? 'Choose > one' : undefined}")
+  })
+
   it('finds the population (not vacuously green)', () => {
     const all = walk(SRC).flatMap((f) => buttonTags(readFileSync(f, 'utf8')).filter(({ tag }) => /\bdisabled=\{/.test(tag)))
     expect(all.length, 'the matcher must find the disabled Buttons').toBeGreaterThanOrEqual(100)
@@ -62,9 +63,16 @@ describe('a disabled Button that a user could unblock says how', () => {
 
   it('🔴 THE PREMISE: a soft-off Button REFUSES the click, which is what makes a busy reason safe', () => {
     const btn = readFileSync(join(SRC, 'shared/ui/Button.tsx'), 'utf8')
-    expect(btn, 'soft-off must swap the handler for a refusal, not merely drop the native attribute')
-      .toMatch(/onClick=\{softOff \? \(e\) => e\.preventDefault\(\) : onClick\}/)
-    expect(btn, 'and soft-off is what a reason turns on').toMatch(/const softOff = off && !!disabledReason && !loading/)
+    expect(btn).toMatch(/controlAvailability\(disabled, loading, disabledReason\)/)
+    expect(btn).toMatch(/activateControl\(event, state.blocked, onClick\)/)
+    const state = controlAvailability(true, false, 'Choose a project')
+    expect(state).toEqual({ blocked: true, nativeDisabled: false, ariaDisabled: true, busy: undefined })
+    let prevented = false
+    let called = false
+    const event = { preventDefault: () => { prevented = true } } as Parameters<typeof activateControl>[0]
+    activateControl(event, state.blocked, () => { called = true })
+    expect(prevented).toBe(true)
+    expect(called).toBe(false)
     const un = readFileSync(join(SRC, 'shared/ui/unavailable.ts'), 'utf8')
     expect(un, "a raw <button> has no click guard, so its busy branch keeps the native attribute")
       .toMatch(/if \(opts\?\.busy\) return \{ disabled: true, 'aria-busy': true, title: opts\.title \}/)

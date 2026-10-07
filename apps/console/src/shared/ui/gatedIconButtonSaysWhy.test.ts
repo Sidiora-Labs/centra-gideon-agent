@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { controlAvailability } from './controlState'
+import { jsxTags } from '../testing/jsxContracts'
 
 // three are genuine unavailability (a license gate, `disabled={false}`, an already-pinned widget).
 
@@ -61,8 +63,13 @@ describe('a gated icon button whose gate the user can fix says so', () => {
   it('both icon primitives keep the tab stop, which is what makes a reason audible at all', () => {
     for (const rel of ['shared/ui/IconButton.tsx', 'shared/ui/SquareIconButton.tsx']) {
       const src = readFileSync(join(SRC, rel), 'utf8')
-      expect(src, `${rel} must map disabled to aria-disabled`).toMatch(/aria-disabled=\{disabled \|\| undefined\}/)
-      expect(src, `${rel} must not emit the native attribute`).not.toMatch(/<motion\.button[\s\S]{0,300}?\sdisabled=\{/)
+      expect(src).toMatch(/controlAvailability\(disabled, loading, disabledReason, true\)/)
+      const button = jsxTags(src, ['motion.button'])[0]
+      expect(button.attributes.get('aria-disabled')).toBe('{state.ariaDisabled}')
+      expect(button.attributes.has('disabled')).toBe(false)
+      expect(src).toMatch(/activateControl\(event, state.blocked, onClick\)/)
+      expect(controlAvailability(true, false, 'Choose a source', true)).toEqual({ blocked: true, nativeDisabled: false, ariaDisabled: true, busy: undefined })
+
     }
   })
 })

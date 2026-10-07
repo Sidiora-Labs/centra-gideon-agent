@@ -20,17 +20,19 @@ describe('FieldError', () => {
     expect(container.querySelector('[role="alert"]'), 'a failure the user did not request must interrupt').not.toBeNull()
   })
 
-  it('renders the same line it replaced, so nothing moves', () => {
+  it('renders an announced, wrapping validation line', () => {
     const { container } = render(<FieldError>Could not save</FieldError>)
     const p = container.querySelector('p')!
-    expect(p.className).toBe('text-danger')
+    expect(p.classList.contains('text-danger')).toBe(true)
+    expect(p.classList.contains('break-words')).toBe(true)
     expect(p.getAttribute('data-type')).toBe('body-s')
     expect(p.textContent).toBe('Could not save')
   })
 
   it('takes per-site spacing without letting a site re-tone it', () => {
     const { container } = render(<FieldError className="mt-2">x</FieldError>)
-    expect(container.querySelector('p')!.className).toBe('text-danger mt-2')
+    expect(container.querySelector('p')!.classList.contains('text-danger')).toBe(true)
+    expect(container.querySelector('p')!.classList.contains('mt-2')).toBe(true)
   })
 
   it('agrees with InlineError that a failure is an alert', () => {

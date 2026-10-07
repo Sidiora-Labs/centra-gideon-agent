@@ -4,7 +4,7 @@ import type { ScheduleJob, ScheduleKind, ScheduleExecMode } from '../../shared/d
 import { useAgentCatalog, useModelCatalog } from '../../shared/data/agents'
 import { Combobox, type ComboOption } from '../../shared/ui/Combobox'
 import { Toggle } from '../../shared/ui/Toggle'
-import { Field, TextInput, TextArea, Segmented, ChipInput } from '../../shared/ui/forms'
+import { Field, FieldError, TextInput, TextArea, Segmented, ChipInput } from '../../shared/ui/forms'
 import { SoonTag } from '../tasks/taskMeta'
 import {
   KINDS, EXEC_MODES, deriveKind, deriveMode, kindMeta, modeMeta,
@@ -267,7 +267,7 @@ function CronField({ value, onChange }: { value: string; onChange: (v: string) =
             className={`rounded-pill px-m h-7 text-[0.75rem] transition-colors ${value.trim() === p.expr ? 'bg-primary-container text-on-primary-container' : 'bg-surface-high text-on-surface-var hover:bg-surface-highest'}`}>{p.label}</button>
         ))}
       </div>
-      {invalidReason && <p className="text-danger text-[0.75rem]">{invalidReason}</p>}
+      {invalidReason && <FieldError>{invalidReason}</FieldError>}
     </div>
   )
 }

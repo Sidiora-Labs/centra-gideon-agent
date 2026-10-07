@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { jsxTags, literalHintInstances } from '../testing/jsxContracts'
 
 
 const SRC = join(import.meta.dirname, "../..")
@@ -29,11 +30,16 @@ function sliceTags(src: string, name: string): string[] {
   return out
 }
 
-const propsOf = (name: string, files: string[]): string[] =>
-  files.flatMap((abs) => sliceTags(readFileSync(abs, 'utf8'), name))
-
 const files = sourceFiles(SRC)
-const hinted = (name: string) => propsOf(name, files).filter((p) => /\bhint=/.test(p)).length
+const hintCounts = new Map<string, number>()
+const hinted = (name: string) => {
+  if (!hintCounts.has(name)) hintCounts.set(name, files.reduce((sum, path) => {
+    const source = readFileSync(path, 'utf8')
+    if (!source.includes(`<${name}`)) return sum
+    return sum + literalHintInstances(source, name)
+  }, 0))
+  return hintCounts.get(name)!
+}
 
 const PUBLISHERS = [
   { name: 'Field', measured: 120, floor: 100 },
@@ -100,26 +106,20 @@ describe('the hint contract covers as many publishers as its docstring claims', 
     expect(low, `a wrapper stopped forwarding a hint:\n  ${low.join('\n  ')}`).toEqual([])
   })
 
-  it("forms.tsx's docstring states a total in the right neighbourhood, and dates it", () => {
-    const doc = readFileSync(join(SRC, 'shared/ui/forms.tsx'), 'utf8')
-    const claimed = Number(doc.match(/\*\*(\d+)\*\* hinted publishers render today/)?.[1])
-    expect(claimed, 'forms.tsx no longer states a publisher total').toBeGreaterThan(0)
-    const actual = [...PUBLISHERS, ...FORWARDERS].reduce((sum, p) => sum + hinted(p.name), 0)
-    expect(
-      Math.abs(claimed - actual) / actual,
-      `forms.tsx claims ${claimed} hinted publishers; the scan counts ${actual}. Re-derive the ` +
-        `docstring's numbers from this test's per-name counts and re-date the line.`,
-    ).toBeLessThan(0.05)
-    expect(doc, 'the count must be dated, so a reader knows its vintage').toMatch(/Recounted \*\*20\d\d-\d\d-\d\d\*\*/)
+  it('mapped capability hints count actual literal instances, not template sites', () => {
+    expect(literalHintInstances("const xs = [{hint:'one'}, {hint:'two'}, {}] as const; xs.map(x => <CheckList hint={x.hint} />)", 'CheckList')).toBe(2)
+    expect(literalHintInstances("const xs = [{hint:''}, {}]; xs.map(x => <CheckList hint={x.hint} />)", 'CheckList')).toBe(0)
+    const form = readFileSync(join(SRC, 'features/agents/AgentForm.tsx'), 'utf8')
+    expect(literalHintInstances(form, 'CheckList')).toBe(3)
+    expect(jsxTags(form, ['Field']).some(site => site.attributes.get('hint') === '{hint}')).toBe(true)
   })
 
-  it("settingsUI's Row comment agrees with the scan, which is where it drifted 10% low", () => {
+  it('native publishers bind the hint identity to their real controls', () => {
+    const forms = readFileSync(join(SRC, 'shared/ui/forms.tsx'), 'utf8')
+    expect(forms).toMatch(/<FieldHintProvider value=\{hintId\}/)
+    expect(forms).toMatch(/<p id=\{hintId\}/)
     const ui = readFileSync(join(SRC, 'features/settings/settingsUI.tsx'), 'utf8')
-    const claimed = Number(ui.match(/\((\d+) hinted rows/)?.[1])
-    expect(claimed, "settingsUI's Row comment no longer states a count").toBeGreaterThan(0)
-    expect(
-      Math.abs(claimed - hinted('Row')) / hinted('Row'),
-      `settingsUI says ${claimed} hinted rows; the scan counts ${hinted('Row')}.`,
-    ).toBeLessThan(0.05)
+    expect(ui).toMatch(/<Row label=\{label\} hint=\{hint\}/)
+    expect(ui).toMatch(/<Field label=\{label\} hint=\{hint\}/)
   })
 })

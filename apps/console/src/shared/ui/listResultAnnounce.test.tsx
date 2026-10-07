@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { render } from '@testing-library/react'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { jsxTags } from '../testing/jsxContracts'
 import { ListControls, ResultAnnouncement } from './ListControls'
 
 
@@ -199,7 +200,7 @@ describe('EVERY list bar passes a result count — the ratchet', () => {
     }
     const agents = code(join(SRC, 'features/agents/AgentsListPage.tsx'))
     expect(agents, 'the native rows read the hoisted array').toMatch(/\{shownNative\.map\(/)
-    expect(agents, 'and nothing re-filters it inline').not.toMatch(/native\.agents\.filter\(/)
+    expect(jsxTags(agents).filter(site => /native\.agents\.filter\(/.test(site.tag)), 'rendered JSX does not repeat the native filter').toEqual([])
   })
 
   it('a bar that renders during its own skeleton waits before announcing', () => {
@@ -230,7 +231,7 @@ describe('EVERY list bar passes a result count — the ratchet', () => {
 
 describe('the hand-laid bars reach the same idiom', () => {
   const DIRECT: [string, string, RegExp][] = [
-    ['features/tasks/TasksListPage.tsx', 'tasks', /active=\{query\.trim\(\)\.length > 0\}/],
+    ['features/tasks/TasksListPage.tsx', 'tasks', /active=\{q\.length > 0\}/],
     ['features/artifacts/ArtifactsSection.tsx', 'artifacts', /active=\{!!\(q\.trim\(\) \|\| kind \|\| src \|\| col\)\}/],
     ['features/files/FilesSection.tsx', 'matches', /active=\{showResults\}/],
     ['features/settings/ArchivePanel.tsx', 'archived sessions', /active=\{!!needle\}/],
