@@ -83,6 +83,7 @@ describe('Deterministic voice matrix over actual canonical sources', () => {
     expect(screen.getByRole('region', { name: 'Voice sources' })).toHaveTextContent('First chapter: 60 words')
     expect(screen.getByRole('region', { name: 'Voice sources' })).toHaveTextContent('Second chapter: 75 words')
     change('Drift threshold', '0.5')
+    fireEvent.blur(screen.getByLabelText('Drift threshold'))
     change('Vocabulary groups', 'metal: key, iron')
     fireEvent.click(screen.getByRole('button', { name: 'Save voice configuration' }))
     await screen.findByText(/configuration revision 1/)
