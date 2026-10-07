@@ -1,3 +1,4 @@
+import { Button } from '../../shared/ui/Button'
 import { useEffect, useState } from 'react'
 import { ResultAnnouncement } from '../../shared/ui/ListControls'
 import { Archive, Search, FileText, Loader2 } from 'lucide-react'
@@ -64,13 +65,16 @@ function ArchiveRow({ a, open, onToggle }: { a: SessionArchive; open: boolean; o
     <div className="rounded-lg bg-surface-container px-4 py-2.5">
       {
 }
-      <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-3 text-left">
+      <Button variant="ghost" size="sm" type="button"
+            onClick={onToggle}
+            ariaExpanded={open}
+            className="flex w-full items-center gap-3 text-left">
         <FileText size={16} className="shrink-0 text-on-surface-low" />
         <div className="min-w-0 flex-1">
           <div data-type="body-s" className="truncate font-mono text-on-surface">{a.key}</div>
           <div data-type="caption" className="text-on-surface-low">{fmtMtime(a.mtime)} · {fmtSize(a.size)}</div>
         </div>
-      </button>
+      </Button>
       {open && (
         <div className="mt-2 border-t border-outline-variant/30 pt-2">
           {loading ? <div data-type="caption" className="py-2 text-on-surface-low"><Loader2 size={12} className="inline animate-spin" /> Loading…</div>

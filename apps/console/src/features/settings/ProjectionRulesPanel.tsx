@@ -1,12 +1,12 @@
+import { IconButton } from '../../shared/ui/IconButton'
 import { useEffect, useState } from 'react'
-import { unavailableWhen } from '../../shared/ui/unavailable'
 import { Scissors, Plus, X, AlertTriangle, Gauge, RotateCcw } from 'lucide-react'
 import { api, type ProjectionRule, type ProjectionStrategy, type ToolsSavings } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
 import { Button } from '../../shared/ui/Button'
 import { InlineError } from '../../shared/ui/InlineError'
 import { ListSkeleton } from '../../shared/ui/ListScaffold'
-import { NumberField, TextInput } from '../../shared/ui/forms'
+import { NumberField, TextInput, Select } from '../../shared/ui/forms'
 import { PanelHeader, Section } from './settingsUI'
 import { useStaleWriteGuard } from '../../shared/data/useStaleWriteGuard'
 import { sameDocument } from '../../shared/data/staleWrite'
@@ -145,11 +145,14 @@ function StrategyPicker({ value, disabled, onChange, forRule }: {
   forRule?: string
 }) {
   return (
-    <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value as ProjectionStrategy)}
-      aria-label={forRule ? `Strategy for ${forRule}` : 'Strategy for the new rule'}
-      data-type="body-s" className="min-w-0 max-w-full h-9 rounded-md bg-surface px-2 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary">
-      {STRATEGIES.map((s) => <option key={s.id} value={s.id}>{s.label} — {s.blurb}</option>)}
-    </select>
+    <Select value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e as ProjectionStrategy)}
+          ariaLabel={forRule ? `Strategy for ${forRule}` : 'Strategy for the new rule'}
+          className="min-w-0 max-w-full h-9 rounded-md bg-surface px-2 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+          size="md"
+          surface="high"
+          options={STRATEGIES.map(s => ({ value: s.id, label: `${s.label} — ${s.blurb}` }))} />
   )
 }
 
@@ -179,10 +182,15 @@ function RuleRow({ rule, disabled, onChange, onRemove }: {
 }
       <div className="flex flex-wrap items-center gap-2">
         <Scissors size={13} className="shrink-0 text-on-surface-low" />
-        <input value={shown.name} disabled={disabled} placeholder="rule name"
-          aria-label="Rule name"
-          onChange={(e) => edit({ name: e.target.value })} onKeyDown={commitOnEnter}
-          data-type="body-s" className="min-w-40 flex-1 h-9 rounded-md bg-surface px-2 text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+        <TextInput value={shown.name}
+          disabled={disabled}
+          placeholder="rule name"
+          ariaLabel="Rule name"
+          onChange={(e) => edit({ name: e })}
+          onKeyDown={commitOnEnter}
+          className="min-w-40 flex-1 h-9 rounded-md bg-surface px-2 text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+          size="md"
+          surface="base" />
         {
 }
         {
@@ -192,15 +200,21 @@ function RuleRow({ rule, disabled, onChange, onRemove }: {
             onChange={(s) => edit({ strategy: s })} />
           {
 }
-          <button type="button" disabled={disabled} onClick={onRemove}
-            aria-label={rule.name ? `Remove rule ${rule.name}` : 'Remove rule'}
-            className="ml-auto shrink-0 rounded-md p-1 text-on-surface-low hover:bg-surface-high hover:text-on-surface"><X size={15} /></button>
+          <IconButton icon={X} iconSize={15} size={23} label={rule.name ? `Remove rule ${rule.name}` : 'Remove rule'} disabled={disabled}
+            onClick={onRemove}
+            className="ml-auto shrink-0 rounded-md p-1 text-on-surface-low hover:bg-surface-high hover:text-on-surface" />
         </div>
       </div>
-      <input value={shown.match_regex} disabled={disabled} spellCheck={false} placeholder="match regex, e.g. ^\[MYAPP\]"
-        aria-label={rule.name ? `Match regex for ${rule.name}` : 'Match regex'}
-        onChange={(e) => edit({ match_regex: e.target.value })} onKeyDown={commitOnEnter}
-        data-type="body-s" className={inputCls} />
+      <TextInput value={shown.match_regex}
+          disabled={disabled}
+          spellCheck={false}
+          placeholder="match regex, e.g. ^\[MYAPP\]"
+          ariaLabel={rule.name ? `Match regex for ${rule.name}` : 'Match regex'}
+          onChange={(e) => edit({ match_regex: e })}
+          onKeyDown={commitOnEnter}
+          className={inputCls}
+          size="md"
+          surface="container" />
       {
 }
       {showOps ? (
@@ -253,20 +267,33 @@ function AddRule({ disabled, onAdd }: { disabled?: boolean; onAdd: (r: Projectio
 }
       <div className="flex flex-wrap items-center gap-2">
         <Plus size={13} className="shrink-0 text-on-surface-low" />
-        <input value={name} disabled={disabled} placeholder="new rule name"
-          aria-label="New rule name"
-          onChange={(e) => setName(e.target.value)}
-          data-type="body-s" className="min-w-40 flex-1 h-9 rounded-md bg-surface px-2 text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+        <TextInput value={name}
+          disabled={disabled}
+          placeholder="new rule name"
+          ariaLabel="New rule name"
+          onChange={(e) => setName(e)}
+          className="min-w-40 flex-1 h-9 rounded-md bg-surface px-2 text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+          size="md"
+          surface="base" />
         <StrategyPicker value={strat} disabled={disabled} onChange={setStrat} />
       </div>
       <div className="flex items-center gap-2">
-        <input value={rx} disabled={disabled} spellCheck={false} placeholder="match regex, e.g. ^\[MYAPP\]"
-          aria-label="Match regex for the new rule"
-          onChange={(e) => setRx(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add() }}
-          data-type="body-s" className="min-w-0 flex-1 h-9 rounded-md bg-surface px-2 font-mono text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
-        <button type="button" onClick={add} data-type="body-s"
-          {...unavailableWhen(!rx.trim(), 'Enter a pattern first', { busy: disabled })}
-          className="shrink-0 h-9 rounded-md bg-primary px-3 text-on-primary disabled:opacity-40 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">Add rule</button>
+        <TextInput value={rx}
+          disabled={disabled}
+          spellCheck={false}
+          placeholder="match regex, e.g. ^\[MYAPP\]"
+          ariaLabel="Match regex for the new rule"
+          onChange={(e) => setRx(e)}
+          onKeyDown={(e) => { if (e.key === 'Enter') add() }}
+          className="min-w-0 flex-1 h-9 rounded-md bg-surface px-2 font-mono text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+          size="md"
+          surface="base"
+          mono />
+        <Button size="sm" variant="primary" type="button"
+          onClick={add}
+          disabled={(!rx.trim()) || (disabled)}
+          disabledReason={(disabled) ? 'Wait for the current operation or settings revision before changing this control.' : 'Enter a pattern first'}
+          className="shrink-0 h-9 rounded-md bg-primary px-3 text-on-primary disabled:opacity-40 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">Add rule</Button>
       </div>
     </div>
   )

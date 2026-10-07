@@ -1,6 +1,7 @@
+import { IconButton } from '../../shared/ui/IconButton'
+import { Button } from '../../shared/ui/Button'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ResultAnnouncement } from '../../shared/ui/ListControls'
-import { unavailableWhen } from '../../shared/ui/unavailable'
 import { Download, Trash2, RefreshCw, Loader2, Check, AlertCircle, Info, X } from 'lucide-react'
 import { api, type OllamaLocalModel, type OllamaSearchResult, type OllamaModelInfo } from '../../shared/data/api'
 import { confirmDelete } from '../../shared/ui/dialog'
@@ -22,10 +23,10 @@ export function OllamaModelManager({ provider }: { provider: string }) {
 
 function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button onClick={onClick}
-      data-type="caption" className={`rounded-md px-2.5 py-1 ${active ? 'bg-surface-high text-on-surface' : 'text-on-surface-low hover:text-on-surface'}`}>
+    <Button variant="ghost" size="sm" onClick={onClick}
+            className={`rounded-md px-2.5 py-1 ${active ? 'bg-surface-high text-on-surface' : 'text-on-surface-low hover:text-on-surface'}`}>
       {children}
-    </button>
+    </Button>
   )
 }
 
@@ -47,7 +48,9 @@ function InstalledModels({ provider }: { provider: string }) {
     <div>
       <div className="mb-1.5 flex items-center justify-between">
         <span data-type="caption" className="text-on-surface-low uppercase tracking-wide">Installed ({models.length})</span>
-        <button onClick={reload} className="text-on-surface-low hover:text-on-surface" title="Refresh"><RefreshCw size={12} /></button>
+        <IconButton icon={RefreshCw} iconSize={12} size={20} label="Refresh" onClick={reload}
+            className="text-on-surface-low hover:text-on-surface"
+            title="Refresh" />
       </div>
       {err && <div data-type="caption" className="mb-2 flex items-center gap-1.5 text-danger"><AlertCircle size={12} /> {err}</div>}
       {models.length === 0 && !err ? (
@@ -86,8 +89,13 @@ function InstalledRow({ provider, model, onDeleted }: { provider: string; model:
       <div className="flex items-center gap-2">
         <span data-type="caption" className="min-w-0 flex-1 truncate font-mono text-on-surface">{model.name}</span>
         {meta && <span data-type="caption" className="shrink-0 text-on-surface-low tabular-nums">{meta}</span>}
-        <button onClick={inspect} className="shrink-0 text-on-surface-low hover:text-on-surface" title="Details"><Info size={13} /></button>
-        <button onClick={del} disabled={busy} className="shrink-0 text-on-surface-low hover:text-danger" title="Delete"><Trash2 size={13} /></button>
+        <IconButton icon={Info} iconSize={13} size={21} label="Details" onClick={inspect}
+            className="shrink-0 text-on-surface-low hover:text-on-surface"
+            title="Details" />
+        <IconButton icon={Trash2} iconSize={13} size={21} label="Delete" onClick={del}
+            loading={busy}
+            className="shrink-0 text-on-surface-low hover:text-danger"
+            title="Delete" />
       </div>
       {showInfo && info && <ModelInfoBlock info={info} />}
     </div>
@@ -142,11 +150,12 @@ function BrowseLibrary({ provider }: { provider: string }) {
           <ResultAnnouncement count={results?.length ?? 0} noun="models"
             active={!!q.trim() && !searching && results !== null} />
         </div>
-        <button onClick={search} data-type="caption"
-          {...unavailableWhen(!q.trim(), 'Type a model name first', { busy: searching })}
+        <Button size="sm" variant="ghost" onClick={search}
+          disabled={(!q.trim()) || (searching)}
+          disabledReason={(searching) ? 'Wait for the current operation or settings revision before changing this control.' : 'Type a model name first'}
           className="shrink-0 rounded-md bg-surface-container px-3 py-1 text-on-surface hover:bg-surface-high disabled:opacity-50 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed">
           {searching ? <Loader2 size={13} className="animate-spin" /> : 'Search'}
-        </button>
+        </Button>
       </div>
       {err && <div data-type="caption" className="mb-2 flex items-center gap-1.5 text-danger"><AlertCircle size={12} /> {err}</div>}
       {results === null ? (
@@ -207,18 +216,20 @@ function SearchRow({ provider, result }: { provider: string; result: OllamaSearc
       {state === 'done' ? (
         <Check size={15} className="shrink-0 text-primary" />
       ) : state === 'pulling' ? (
-        <button onClick={stop}
-          data-type="caption" className="inline-flex shrink-0 items-center gap-1 rounded-md bg-surface-container px-2 py-1 text-on-surface hover:bg-surface-high"
-          title="Stop download">
+        <Button variant="ghost" size="sm" onClick={stop}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md bg-surface-container px-2 py-1 text-on-surface hover:bg-surface-high"
+            title="Stop download">
           <X size={12} /> Stop
-        </button>
+        </Button>
       ) : (state === 'error' || state === 'cancelled') ? (
-        <button onClick={pull} className="shrink-0 text-on-surface-low hover:text-on-surface" title="Retry"><RefreshCw size={13} /></button>
+        <IconButton icon={RefreshCw} iconSize={13} size={21} label="Retry" onClick={pull}
+            className="shrink-0 text-on-surface-low hover:text-on-surface"
+            title="Retry" />
       ) : (
-        <button onClick={pull}
-          data-type="caption" className="inline-flex shrink-0 items-center gap-1 rounded-md bg-surface-container px-2 py-1 text-on-surface hover:bg-surface-high">
+        <Button variant="ghost" size="sm" onClick={pull}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md bg-surface-container px-2 py-1 text-on-surface hover:bg-surface-high">
           <Download size={12} /> Pull
-        </button>
+        </Button>
       )}
     </div>
   )

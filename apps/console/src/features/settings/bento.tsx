@@ -1,3 +1,4 @@
+import { Button } from '../../shared/ui/Button'
 import { type ReactNode, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowRight, Loader2, type LucideIcon } from 'lucide-react'
@@ -139,12 +140,16 @@ export function SegToggle<T extends string>({ value, options, onPick, ariaLabel 
   return (
     <div className="pointer-events-auto inline-flex rounded-pill bg-surface-high p-0.5" style={{ opacity: busy ? 0.7 : 1 }}>
       {options.map((o) => (
-        <button key={o.key} type="button" onClick={(e) => pick(e, o.key)}
-          aria-label={`${ariaLabel}: ${o.label}`} aria-pressed={o.key === value}
-          data-type="caption" className="rounded-pill px-2 h-6 -my-px transition-colors"
+        <Button variant="ghost" size="sm" key={o.key}
+          type="button"
+          onClick={(e) => pick(e, o.key)}
+          ariaLabel={`${ariaLabel}: ${o.label}`}
+          ariaPressed={o.key === value}
+          data-type="caption"
+          className="rounded-pill px-2 h-6 -my-px transition-colors"
           style={o.key === value ? { background: 'var(--color-surface-highest)', color: 'var(--color-on-surface)' } : { color: 'var(--color-on-surface-low)' }}>
           {o.label}
-        </button>
+        </Button>
       ))}
     </div>
   )

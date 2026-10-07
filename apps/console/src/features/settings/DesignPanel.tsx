@@ -1,3 +1,4 @@
+import { IconButton } from '../../shared/ui/IconButton'
 import { useState } from 'react'
 import { Eyebrow } from '../../shared/ui/Eyebrow'
 import { Sun, Moon, Monitor, Check, Plus, Trash2, ChevronDown, RotateCcw, Sliders, Boxes, Layout as LayoutIcon, PanelLeft, Type, Save } from 'lucide-react'
@@ -82,12 +83,16 @@ export function DesignPanel() {
             {MODES.map((m) => {
               const on = preference === m.key
               return (
-                <button key={m.key} onClick={() => setPreference(m.key)} aria-label={`Mode: ${m.label}`} aria-pressed={on}
-                  title={m.key === 'auto' ? "Follow the system's light/dark setting" : undefined}
-                  data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill px-m h-8 transition-colors"
-                  style={on ? { background: 'var(--color-surface-highest)', color: 'var(--color-on-surface)' } : { color: 'var(--color-on-surface-low)' }}>
+                <Button variant="ghost" size="sm" key={m.key}
+          onClick={() => setPreference(m.key)}
+          ariaLabel={`Mode: ${m.label}`}
+          ariaPressed={on}
+          title={m.key === 'auto' ? "Follow the system's light/dark setting" : undefined}
+          data-type="body-s"
+          className="inline-flex items-center gap-1.5 rounded-pill px-m h-8 transition-colors"
+          style={on ? { background: 'var(--color-surface-highest)', color: 'var(--color-on-surface)' } : { color: 'var(--color-on-surface-low)' }}>
                   <m.icon size={14} /> {m.label}
-                </button>
+                </Button>
               )
             })}
           </div>
@@ -113,10 +118,12 @@ export function DesignPanel() {
         <div className="mt-l">
           {
 }
-          <button onClick={() => setEditingColors((v) => !v)} aria-expanded={editingColors} data-type="body-s" className="flex items-center gap-s py-1 -my-1 text-on-surface-var">
+          <Button variant="ghost" size="sm" onClick={() => setEditingColors((v) => !v)}
+            ariaExpanded={editingColors}
+            className="flex items-center gap-s py-1 -my-1 text-on-surface-var">
             <ChevronDown size={16} className={`transition-transform ${editingColors ? 'rotate-180' : ''}`} />
             <Sliders size={15} /> Edit colors &amp; save a custom theme
-          </button>
+          </Button>
           {activeScheme === 'custom:unsaved' && !editingColors && (
             <p data-type="body-s" className="mt-1.5 text-on-surface-low">You've edited colors — open this to save them as a shareable theme.</p>
           )}
@@ -178,9 +185,11 @@ function SchemeTile({ scheme, dark, active, custom, onPick, onDelete }: { scheme
     <div className="group relative">
       {
 }
-      <button type="button" onClick={onPick} aria-pressed={active}
-        className="w-full flex flex-col gap-2 rounded-xl p-2.5 transition-all text-left focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
-        style={{ background: 'var(--color-surface-container)', outline: active ? '2px solid var(--color-primary)' : '1px solid var(--color-outline-variant)', outlineOffset: active ? '0' : '-1px' }}>
+      <Button variant="ghost" size="sm" type="button"
+          onClick={onPick}
+          ariaPressed={active}
+          className="w-full flex flex-col gap-2 rounded-xl p-2.5 transition-all text-left focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary"
+          style={{ background: 'var(--color-surface-container)', outline: active ? '2px solid var(--color-primary)' : '1px solid var(--color-outline-variant)', outlineOffset: active ? '0' : '-1px' }}>
         <div className="h-12 w-full rounded-lg grid place-items-center text-[1.5rem]" style={{ background: `linear-gradient(135deg, ${sw} 55%, ${swAlt} 55%)` }}>
           {emoji && <span aria-hidden>{emoji}</span>}
         </div>
@@ -189,10 +198,11 @@ function SchemeTile({ scheme, dark, active, custom, onPick, onDelete }: { scheme
           {active && <Check size={13} className="text-primary shrink-0" />}
           {custom && <Eyebrow as="span" className="ml-auto rounded-pill bg-surface-high px-1.5 shrink-0">saved</Eyebrow>}
         </div>
-      </button>
+      </Button>
       {onDelete && (
-        <button type="button" onClick={onDelete} title="Delete saved theme"
-          className="absolute top-1 right-1 size-6 grid place-items-center rounded-pill bg-surface-high text-on-surface-low opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity hover:text-danger"><Trash2 size={12} /></button>
+        <IconButton icon={Trash2} iconSize={12} size={20} label="Delete saved theme" onClick={onDelete}
+            title="Delete saved theme"
+            className="absolute top-1 right-1 size-6 grid place-items-center rounded-pill bg-surface-high text-on-surface-low opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity hover:text-danger" />
       )}
     </div>
   )
@@ -293,9 +303,11 @@ function ColorEditor({ onSave, activeTheme, base, currentColors, guard }: {
         <Field label={activeTheme ? 'Or save as a new theme' : 'Save these colors as a shareable theme'}>
           <div className="flex flex-wrap items-center gap-1.5 mb-s">
             {THEME_EMOJI_CHOICES.map((e) => (
-              <button key={e} type="button" onClick={() => setEmoji(e)}
-                className="size-8 grid place-items-center rounded-lg text-[1.0625rem] transition-colors"
-                style={emoji === e ? { background: 'color-mix(in srgb, var(--color-primary) 20%, transparent)', outline: '1.5px solid var(--color-primary)' } : { background: 'var(--color-surface-high)' }}>{e}</button>
+              <Button variant="ghost" size="sm" key={e}
+          type="button"
+          onClick={() => setEmoji(e)}
+          className="size-8 grid place-items-center rounded-lg text-[1.0625rem] transition-colors"
+          style={emoji === e ? { background: 'color-mix(in srgb, var(--color-primary) 20%, transparent)', outline: '1.5px solid var(--color-primary)' } : { background: 'var(--color-surface-high)' }}>{e}</Button>
             ))}
           </div>
           <div className="flex items-end gap-s">

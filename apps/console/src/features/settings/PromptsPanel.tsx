@@ -1,3 +1,4 @@
+import { Select } from '../../shared/ui/forms'
 import { useState } from 'react'
 import { api, type PromptBinding, type PromptItem, type PromptBindings } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
@@ -58,20 +59,14 @@ function BindingRow({ binding, available, saving, onPick }: {
         <div data-type="body-s" className="text-on-surface">{binding.label}</div>
         {binding.hint && <div data-type="body-s" className="mt-0.5 text-on-surface-low">{binding.hint}</div>}
       </div>
-      <select
-        value={binding.ref}
-        disabled={saving}
-        onChange={(e) => onPick(binding.use_case, e.target.value)}
-        aria-label={`Prompt for ${binding.label}`}
-        data-type="body-s" className="shrink-0 max-w-[55%] rounded-md bg-surface-high px-2 py-1.5 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
-      >
-        <option value="">Default ({defName})</option>
-        {
-}
-        {available.filter((p) => (p.kind ?? 'system') === 'system').map((p) => (
-          <option key={p.name} value={`native:${p.name}`}>{p.title || p.name}</option>
-        ))}
-      </select>
+      <div className="shrink-0 max-w-[55%]"><Select value={binding.ref}
+          disabled={saving}
+          onChange={(e) => onPick(binding.use_case, e)}
+          ariaLabel={`Prompt for ${binding.label}`}
+          className="shrink-0 max-w-[55%] rounded-md bg-surface-high px-2 py-1.5 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+          size="md"
+          surface="high"
+          options={[{ value: '', label: `Default (${defName})` }, ...available.filter(p => (p.kind ?? 'system') === 'system').map(p => ({ value: `native:${p.name}`, label: p.title || p.name }))]} /></div>
     </div>
   )
 }

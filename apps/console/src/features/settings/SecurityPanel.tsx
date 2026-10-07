@@ -1,8 +1,9 @@
+import { IconButton } from '../../shared/ui/IconButton'
 import { useStaleWriteGuard } from '../../shared/data/useStaleWriteGuard'
 import { rebaseList, rebaseRecord, type Revisioned } from '../../shared/data/staleWrite'
 import { HeldChange, StaleWriteNotice } from '../../shared/ui/StaleWriteNotice'
 import { useState } from 'react'
-import { FieldError } from '../../shared/ui/forms'
+import { FieldError, Checkbox, TextInput } from '../../shared/ui/forms'
 import { unavailableWhen, BUSY_REASON } from '../../shared/ui/unavailable'
 import {
   ShieldBan, ScanLine, FileCode2, EyeOff, Plus, X, Lock, Globe, MonitorOff, ShieldCheck, ShieldAlert,
@@ -465,9 +466,11 @@ function EgressPolicyEditor() {
           hosts={eg.deny_hosts} disabled={busy}
           onChange={(hosts) => save({ ...eg, deny_hosts: hosts })} />
         <label className="flex items-start gap-2.5 rounded-lg bg-surface-container px-3 py-2.5 cursor-pointer">
-          <input type="checkbox" checked={eg.allow_private} disabled={busy}
-            onChange={(e) => { void setAllowPrivate(e.target.checked) }}
-            className="mt-0.5 size-4 shrink-0 accent-primary" />
+          <Checkbox checked={eg.allow_private}
+          disabled={busy}
+          onChange={(e) => { void setAllowPrivate(e) }}
+          className="mt-0.5 size-4 shrink-0 accent-primary"
+          ariaLabel="Allow all private networks" />
           <span className="min-w-0">
             <span data-type="body-s" className="text-on-surface">Allow all private networks</span>
             <span data-type="body-s" className="block text-on-surface-low">Permit egress to any private/LAN address, not just the allow-list. Only on a fully trusted network — this removes SSRF protection for the whole LAN.</span>
@@ -510,10 +513,9 @@ function HostList({ label, hint, hosts, disabled, onChange }: {
         {hosts.map((h) => (
           <div key={h} className="flex items-center gap-2 rounded-lg bg-surface-container px-3 py-2">
             <code data-type="body-s" className="min-w-0 flex-1 truncate text-on-surface">{h}</code>
-            <button type="button" disabled={disabled} onClick={() => onChange(hosts.filter((x) => x !== h))}
-              className="shrink-0 rounded-md p-1 text-on-surface-low hover:bg-surface-high hover:text-on-surface" aria-label={`Remove ${h}`}>
-              <X size={15} />
-            </button>
+            <IconButton icon={X} iconSize={15} size={23} label={`Remove ${h}`} disabled={disabled}
+            onClick={() => onChange(hosts.filter((x) => x !== h))}
+            className="shrink-0 rounded-md p-1 text-on-surface-low hover:bg-surface-high hover:text-on-surface" />
           </div>
         ))}
         <div className="flex items-center gap-2">
@@ -526,11 +528,13 @@ function HostList({ label, hint, hosts, disabled, onChange }: {
             onKeyDown={(e) => { if (e.key === 'Enter') add() }}
             placeholder="e.g. nas.local"
             data-type="body-s" className="min-w-0 flex-1 rounded-lg bg-surface-container px-3 py-2 text-on-surface outline-none placeholder:text-on-surface-low focus:ring-2 focus:ring-inset focus:ring-primary" />
-          <button type="button" onClick={add} data-type="body-s"
-            {...unavailableWhen(!draft.trim(), 'Enter a host first', { busy: disabled })}
-            className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-on-primary disabled:opacity-50 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed">
+          <Button size="sm" variant="primary" type="button"
+          onClick={add}
+          disabled={(!draft.trim()) || (disabled)}
+          disabledReason={(disabled) ? 'Wait for the current operation or settings revision before changing this control.' : 'Enter a host first'}
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-on-primary disabled:opacity-50 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed">
             <Plus size={15} /> Add
-          </button>
+          </Button>
         </div>
         {
 }
@@ -638,28 +642,30 @@ function DeniedCommandsEditor({ builtin, user, baseline, userAdditions, onChange
             {shown.map((p) => (
               <div key={p} className="flex items-center gap-2 rounded-lg bg-surface-container px-3 py-2">
                 <code data-type="body-s" className="min-w-0 flex-1 truncate text-on-surface">{p}</code>
-                <button type="button" disabled={busy || !document?.revision} onClick={() => save(shown.filter((x) => x !== p))}
-                  className="shrink-0 rounded-md p-1 text-on-surface-low hover:bg-surface-high hover:text-on-surface" aria-label={`Remove ${p}`}>
-                  <X size={15} />
-                </button>
+                <IconButton icon={X} iconSize={15} size={23} label={`Remove ${p}`} disabled={busy || !document?.revision}
+            onClick={() => save(shown.filter((x) => x !== p))}
+            className="shrink-0 rounded-md p-1 text-on-surface-low hover:bg-surface-high hover:text-on-surface" />
               </div>
             ))}
             <div className="flex items-center gap-2">
               {
 }
-              <input
-                disabled={busy || !document?.revision} value={draft}
-                aria-label="Add a shell denylist pattern (regex)"
-                onChange={(e) => { setDraft(e.target.value); setErr('') }}
-                onKeyDown={(e) => { if (e.key === 'Enter') add() }}
-                placeholder="e.g. my-secret-tool .*"
-                data-type="body-s" className="min-w-0 flex-1 rounded-lg bg-surface-container px-3 py-2 text-on-surface outline-none placeholder:text-on-surface-low focus:ring-2 focus:ring-inset focus:ring-primary"
-              />
-              <button type="button" onClick={add} data-type="body-s"
-                {...unavailableWhen(!draft.trim(), 'Enter a pattern first', { busy: busy || !document?.revision })}
-                className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-on-primary disabled:opacity-50 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed">
+              <TextInput disabled={busy || !document?.revision}
+          value={draft}
+          ariaLabel="Add a shell denylist pattern (regex)"
+          onChange={(e) => { setDraft(e); setErr('') }}
+          onKeyDown={(e) => { if (e.key === 'Enter') add() }}
+          placeholder="e.g. my-secret-tool .*"
+          className="min-w-0 flex-1 rounded-lg bg-surface-container px-3 py-2 text-on-surface outline-none placeholder:text-on-surface-low focus:ring-2 focus:ring-inset focus:ring-primary"
+          size="md"
+          surface="container" />
+              <Button size="sm" variant="primary" type="button"
+          onClick={add}
+          disabled={(!draft.trim()) || (busy || !document?.revision)}
+          disabledReason={(busy || !document?.revision) ? 'Wait for the current operation or settings revision before changing this control.' : 'Enter a pattern first'}
+          className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-primary px-3 py-2 text-on-primary disabled:opacity-50 aria-disabled:opacity-50 aria-disabled:cursor-not-allowed">
                 <Plus size={15} /> Add
-              </button>
+              </Button>
             </div>
             {err && <FieldError>{err}</FieldError>}
           </div>

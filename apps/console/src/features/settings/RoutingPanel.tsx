@@ -7,7 +7,6 @@ import { Button } from '../../shared/ui/Button'
 import { StatusPill } from '../../shared/ui/StatusPill'
 import { Segmented } from '../../shared/ui/Segmented'
 import { Field, FieldError, Select } from '../../shared/ui/forms'
-import { unavailableWhen } from '../../shared/ui/unavailable'
 import { PanelHeader, Section } from './settingsUI'
 
 
@@ -365,20 +364,22 @@ function RoutingPolicySection({ useCase, queryClass }: { useCase: string; queryC
                     <span data-type="caption" className="text-on-surface-low">{local ? 'local' : 'cloud'}</span>
                     {
 }
-                    <button type="button"
-                      {...unavailableWhen(i === 0, 'Already tried first', { busy })}
-                      onClick={() => move(i, -1)}
-                      className="grid size-7 place-items-center rounded-md text-on-surface-var hover:bg-surface-high aria-disabled:opacity-40 disabled:opacity-40"
-                      aria-label={`Move ${ref} earlier`}>
+                    <Button size="sm" variant="ghost" type="button"
+          disabled={(i === 0) || (busy)}
+          disabledReason={(busy) ? 'Wait for the current operation or settings revision before changing this control.' : 'Already tried first'}
+          onClick={() => move(i, -1)}
+          className="grid size-7 place-items-center rounded-md text-on-surface-var hover:bg-surface-high aria-disabled:opacity-40 disabled:opacity-40"
+          ariaLabel={`Move ${ref} earlier`}>
                       <ArrowUp size={13} aria-hidden />
-                    </button>
-                    <button type="button"
-                      {...unavailableWhen(i === shown.length - 1, 'Already tried last', { busy })}
-                      onClick={() => move(i, 1)}
-                      className="grid size-7 place-items-center rounded-md text-on-surface-var hover:bg-surface-high aria-disabled:opacity-40 disabled:opacity-40"
-                      aria-label={`Move ${ref} later`}>
+                    </Button>
+                    <Button size="sm" variant="ghost" type="button"
+          disabled={(i === shown.length - 1) || (busy)}
+          disabledReason={(busy) ? 'Wait for the current operation or settings revision before changing this control.' : 'Already tried last'}
+          onClick={() => move(i, 1)}
+          className="grid size-7 place-items-center rounded-md text-on-surface-var hover:bg-surface-high aria-disabled:opacity-40 disabled:opacity-40"
+          ariaLabel={`Move ${ref} later`}>
                       <ArrowDown size={13} aria-hidden />
-                    </button>
+                    </Button>
                   </li>
                 )
               })}

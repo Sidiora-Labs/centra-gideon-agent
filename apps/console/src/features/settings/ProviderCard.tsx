@@ -1,3 +1,4 @@
+import { Button } from '../../shared/ui/Button'
 import { channelPerson } from './channelPerson'
 import { useState } from 'react'
 import { ChevronDown, KeyRound, AlertTriangle, CheckCircle2, Clock, TerminalSquare, RefreshCw, Beaker, Plug, PlugZap, Loader2 } from 'lucide-react'
@@ -59,10 +60,12 @@ export function ProviderCard({ ext, runtime, channel, open, onOpenChange, onChan
           </SquareIconButton>
         )}
         {runtime && runtime.state === 'needs_login' && runtime.login_command && onSignIn && (
-          <button type="button" onClick={() => onSignIn(runtime)} aria-label={`Sign in: ${who}`}
-            data-type="caption" className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-surface-high px-2.5 py-1 text-on-surface hover:bg-surface-highest">
+          <Button variant="ghost" size="sm" type="button"
+            onClick={() => onSignIn(runtime)}
+            ariaLabel={`Sign in: ${who}`}
+            className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-surface-high px-2.5 py-1 text-on-surface hover:bg-surface-highest">
             <KeyRound size={12} /> Sign in
-          </button>
+          </Button>
         )}
         {
 }
@@ -138,19 +141,28 @@ function ChannelRuntimeRow({ channel, onChanged }: { channel: ChannelRuntime; on
       {(detail ?? channel.health.detail) && <span data-type="caption" className="text-on-surface-low truncate max-w-[60%]">{detail ?? channel.health.detail}</span>}
       <div className="ml-auto flex items-center gap-1.5">
         { }
-        <button type="button" onClick={() => act('test')} disabled={!!busy} aria-label={`Test: ${channel.name}`}
-          data-type="caption" className="inline-flex items-center gap-1 rounded-md bg-surface-high px-2 py-1 text-on-surface-var hover:text-on-surface disabled:opacity-50">
+        <Button variant="ghost" size="sm" type="button"
+            onClick={() => act('test')}
+            disabled={!!busy}
+            ariaLabel={`Test: ${channel.name}`}
+            className="inline-flex items-center gap-1 rounded-md bg-surface-high px-2 py-1 text-on-surface-var hover:text-on-surface disabled:opacity-50">
           {busy === 'test' ? <Loader2 size={11} className="animate-spin" /> : <Beaker size={11} />} Test
-        </button>
+        </Button>
         {channel.connected
-          ? <button type="button" onClick={() => act('disconnect')} disabled={!!busy} aria-label={`Disconnect: ${channel.name}`}
-              data-type="caption" className="inline-flex items-center gap-1 rounded-md bg-surface-high px-2 py-1 text-on-surface-var hover:text-danger disabled:opacity-50">
+          ? <Button variant="ghost" size="sm" type="button"
+            onClick={() => act('disconnect')}
+            disabled={!!busy}
+            ariaLabel={`Disconnect: ${channel.name}`}
+            className="inline-flex items-center gap-1 rounded-md bg-surface-high px-2 py-1 text-on-surface-var hover:text-danger disabled:opacity-50">
               {busy === 'disconnect' ? <Loader2 size={11} className="animate-spin" /> : <Plug size={11} />} Disconnect
-            </button>
-          : <button type="button" onClick={() => act('connect')} disabled={!!busy} aria-label={`Connect: ${channel.name}`}
-              data-type="caption" className="inline-flex items-center gap-1 rounded-md bg-surface-high px-2 py-1 text-on-surface-var hover:text-primary disabled:opacity-50">
+            </Button>
+          : <Button variant="ghost" size="sm" type="button"
+            onClick={() => act('connect')}
+            disabled={!!busy}
+            ariaLabel={`Connect: ${channel.name}`}
+            className="inline-flex items-center gap-1 rounded-md bg-surface-high px-2 py-1 text-on-surface-var hover:text-primary disabled:opacity-50">
               {busy === 'connect' ? <Loader2 size={11} className="animate-spin" /> : <PlugZap size={11} />} Connect
-            </button>}
+            </Button>}
       </div>
     </div>
   )

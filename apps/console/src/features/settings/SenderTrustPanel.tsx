@@ -1,3 +1,4 @@
+import { Select } from '../../shared/ui/forms'
 import { useState } from 'react'
 import { MessageCircle, ShieldCheck, KeyRound, UserCheck } from 'lucide-react'
 import { api } from '../../shared/data/api'
@@ -161,14 +162,24 @@ function ProviderSection({ p, revoking, onRevoke, refresh }: {
       <div className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1" data-type="caption"><span>Direct messages</span>
-            <select aria-label={`${label} direct message trust`} disabled={busy} value={p.policies.dm} onChange={event => void updatePolicy('dm', event.currentTarget.value)} className="min-h-9 rounded-md border border-outline-variant bg-surface px-2 text-on-surface">
-              <option value="pairing">Pairing required</option><option value="owner_only">Owner only</option><option value="open">Anyone may message</option>
-            </select>
+            <Select ariaLabel={`${label} direct message trust`}
+          disabled={busy}
+          value={p.policies.dm}
+          onChange={event => void updatePolicy('dm', event)}
+          className="min-h-9 rounded-md border border-outline-variant bg-surface px-2 text-on-surface"
+          size="md"
+          surface="high"
+          options={[{ value: 'pairing', label: 'Pairing required' }, { value: 'owner_only', label: 'Owner only' }, { value: 'open', label: 'Anyone may message' }]} />
           </label>
           {groups && <label className="flex flex-col gap-1" data-type="caption"><span>Groups</span>
-            <select aria-label={`${label} group trust`} disabled={busy} value={p.policies.group} onChange={event => void updatePolicy('group', event.currentTarget.value)} className="min-h-9 rounded-md border border-outline-variant bg-surface px-2 text-on-surface">
-              <option value="tracked_only">Tracked groups only</option><option value="off">Ignore group messages</option>
-            </select>
+            <Select ariaLabel={`${label} group trust`}
+          disabled={busy}
+          value={p.policies.group}
+          onChange={event => void updatePolicy('group', event)}
+          className="min-h-9 rounded-md border border-outline-variant bg-surface px-2 text-on-surface"
+          size="md"
+          surface="high"
+          options={[{ value: 'tracked_only', label: 'Tracked groups only' }, { value: 'off', label: 'Ignore group messages' }]} />
           </label>}
         </div>
         <div className="flex flex-wrap items-center gap-3">

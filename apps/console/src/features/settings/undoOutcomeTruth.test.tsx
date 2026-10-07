@@ -13,15 +13,15 @@ describe('native undo outcome copy',()=>{
   render(<UndoList ladder={ladder({},true)} onChange={()=>{}}/>);expect(screen.getByText('Nothing is waiting to be undone.')).toBeTruthy();expect(screen.queryByText(/no action has run/)).toBeNull()
  })
  it('undoing an action at its floor does not claim future approval changed',async()=>{
-  mocks.undo.mockResolvedValue({ok:true,demoted:true});render(<UndoList ladder={ladder()} onChange={()=>{}}/>);expect(screen.queryByText(/stops.*doing this/)).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Undo'}));await waitFor(()=>expect(mocks.notify).toHaveBeenCalledWith('Undone.','success'))
+  mocks.undo.mockResolvedValue({ok:true,demoted:true});render(<UndoList ladder={ladder()} onChange={()=>{}}/>);expect(screen.queryByText(/stops.*doing this/)).toBeNull();fireEvent.click(screen.getByRole('button',{name:'Undo Example action'}));await waitFor(()=>expect(mocks.notify).toHaveBeenCalledWith('Undone.','success'))
  })
  it('a promoted action names its actual floor rather than promising all actions ask',async()=>{
-  mocks.undo.mockResolvedValue({ok:true,demoted:true});render(<UndoList ladder={ladder({granted_rung:'autonomous'})} onChange={()=>{}}/>);fireEvent.click(screen.getByRole('button',{name:'Undo'}));await waitFor(()=>expect(mocks.notify).toHaveBeenCalledWith('Undone. action.example is back at runs with undo.','success'))
+  mocks.undo.mockResolvedValue({ok:true,demoted:true});render(<UndoList ladder={ladder({granted_rung:'autonomous'})} onChange={()=>{}}/>);fireEvent.click(screen.getByRole('button',{name:'Undo Example action'}));await waitFor(()=>expect(mocks.notify).toHaveBeenCalledWith('Undone. action.example is back at runs with undo.','success'))
  })
  it('an in-band refusal never renders a successful undo',async()=>{
-  mocks.undo.mockResolvedValue({ok:false,detail:'Provider refused'});const refresh=vi.fn();render(<UndoList ladder={ladder()} onChange={refresh}/>);fireEvent.click(screen.getByRole('button',{name:'Undo'}));await waitFor(()=>expect(mocks.notify).toHaveBeenCalledWith("Couldn't undo: Provider refused",'error'));expect(mocks.notify.mock.calls.some(call=>call[1]==='success')).toBe(false);expect(refresh).toHaveBeenCalledTimes(1)
+  mocks.undo.mockResolvedValue({ok:false,detail:'Provider refused'});const refresh=vi.fn();render(<UndoList ladder={ladder()} onChange={refresh}/>);fireEvent.click(screen.getByRole('button',{name:'Undo Example action'}));await waitFor(()=>expect(mocks.notify).toHaveBeenCalledWith("Couldn't undo: Provider refused",'error'));expect(mocks.notify.mock.calls.some(call=>call[1]==='success')).toBe(false);expect(refresh).toHaveBeenCalledTimes(1)
  })
  it('an uncertain provider failure keeps the undo available after refresh',async()=>{
-  mocks.undo.mockRejectedValue(new Error('Undo outcome is not confirmed'));const refresh=vi.fn();render(<UndoList ladder={ladder()} onChange={refresh}/>);fireEvent.click(screen.getByRole('button',{name:'Undo'}));await waitFor(()=>expect(refresh).toHaveBeenCalledTimes(1));expect(screen.getByRole('button',{name:'Undo'})).toBeTruthy();expect(mocks.notify.mock.calls.some(call=>call[1]==='success')).toBe(false)
+  mocks.undo.mockRejectedValue(new Error('Undo outcome is not confirmed'));const refresh=vi.fn();render(<UndoList ladder={ladder()} onChange={refresh}/>);fireEvent.click(screen.getByRole('button',{name:'Undo Example action'}));await waitFor(()=>expect(refresh).toHaveBeenCalledTimes(1));expect(screen.getByRole('button',{name:'Undo Example action'})).toBeTruthy();expect(mocks.notify.mock.calls.some(call=>call[1]==='success')).toBe(false)
  })
 })

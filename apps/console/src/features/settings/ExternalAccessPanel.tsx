@@ -1,3 +1,4 @@
+import { TextInput } from '../../shared/ui/forms'
 import { useState } from 'react'
 import { AlertTriangle, KeyRound, Plug2, ShieldOff, Trash2 } from 'lucide-react'
 import { api, type ExternalAccessClient, type ExternalAccessSurface } from '../../shared/data/api'
@@ -258,8 +259,12 @@ export function ExternalAccessPanel() {
         }}>
           <label data-type="body-s" className="flex flex-col gap-1">
             OpenAI-compatible client name
-            <input aria-label="OpenAI-compatible client name" value={newClientLabel} onChange={(event) => setNewClientLabel(event.target.value)}
-              className="h-9 rounded-md bg-surface-high px-3 text-on-surface" />
+            <TextInput ariaLabel="OpenAI-compatible client name"
+          value={newClientLabel}
+          onChange={(event) => setNewClientLabel(event)}
+          className="h-9 rounded-md bg-surface-high px-3 text-on-surface"
+          size="md"
+          surface="high" />
           </label>
           <Toggle on={keepConversation} onChange={setKeepConversation} disabled={busy === 'create-client'} label="One conversation per user" />
           <p data-type="caption" className="text-on-surface-low">Off: each request is answered alone. On: requests with the same user value continue a conversation.</p>

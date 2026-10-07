@@ -1,3 +1,5 @@
+import { Button } from '../../shared/ui/Button'
+import { IconButton } from '../../shared/ui/IconButton'
 import { useId, useState, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { AlertTriangle, Plus, X } from 'lucide-react'
@@ -7,7 +9,7 @@ import { spring, physics } from '../../shared/theme/motion'
 import { fvs } from '../../shared/theme/fontWeight'
 import { Toggle } from '../../shared/ui/Toggle'
 import { Surface } from '../../shared/ui/Surface'
-import { FieldHintProvider, FieldLabelProvider, NumberField } from '../../shared/ui/forms'
+import { FieldHintProvider, FieldLabelProvider, NumberField, TextInput } from '../../shared/ui/forms'
 import { confirm, type ConfirmOptions } from '../../shared/ui/dialog'
 
 
@@ -94,16 +96,20 @@ export function SegPills<T extends string>({ value, onChange, options, ariaLabel
       {options.map((o) => {
         const on = o.key === value
         return (
-          <button key={o.key} type="button" onClick={() => onChange(o.key)}
-            aria-label={`${ariaLabel}: ${o.label}`} aria-pressed={on}
-            data-type="body-s" className="relative rounded-pill px-3 h-7 transition-colors"
-            style={{ color: on ? 'var(--color-on-surface)' : 'var(--color-on-surface-low)' }}>
+          <Button variant="ghost" size="sm" key={o.key}
+          type="button"
+          onClick={() => onChange(o.key)}
+          ariaLabel={`${ariaLabel}: ${o.label}`}
+          ariaPressed={on}
+          data-type="body-s"
+          className="relative rounded-pill px-3 h-7 transition-colors"
+          style={{ color: on ? 'var(--color-on-surface)' : 'var(--color-on-surface-low)' }}>
             {
 }
             {on && <motion.span layoutId={indicatorId} transition={spring.spatialFast}
               className="absolute inset-0 rounded-pill" style={{ background: 'var(--color-surface-highest)' }} />}
             <span className="relative">{o.label}</span>
-          </button>
+          </Button>
         )
       })}
     </div>
@@ -198,15 +204,20 @@ export function StrListField({ label, hint, cfg, field, patch, placeholder = 'Ad
         {list.map((v) => (
           <span key={v} data-type="caption" className="inline-flex items-center gap-1 rounded-pill bg-surface-high px-2.5 py-1 text-on-surface font-mono">
             {v}
-            <button type="button" onClick={() => commit(list.filter((x) => x !== v))} aria-label={`Remove ${v}`} className="text-on-surface-low hover:text-on-surface"><X size={12} /></button>
+            <IconButton icon={X} iconSize={12} size={20} label={`Remove ${v}`} onClick={() => commit(list.filter((x) => x !== v))}
+            className="text-on-surface-low hover:text-on-surface" />
           </span>
         ))}
         {
 }
-        <input value={adding} onChange={(e) => setAdding(e.target.value)} placeholder={placeholder}
-          aria-label={`Add to ${label.toLowerCase()}`}
+        <TextInput value={adding}
+          onChange={(e) => setAdding(e)}
+          placeholder={placeholder}
+          ariaLabel={`Add to ${label.toLowerCase()}`}
           onKeyDown={(e) => { if (e.key === 'Enter' && adding.trim()) add() }}
-          data-type="caption" className="h-8 w-40 rounded-md bg-surface-high px-2 text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+          className="h-8 w-40 rounded-md bg-surface-high px-2 text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+          size="md"
+          surface="high" />
         {adding.trim() && (
           <SquareIconButton icon={Plus} iconSize={15} label={`Add ${label.toLowerCase()}`} onClick={add} />
         )}

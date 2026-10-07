@@ -1,12 +1,12 @@
+import { Button } from '../../shared/ui/Button'
 import { useEffect, useRef, useState } from 'react'
 import { notify } from '../../app/shell/appSdk'
-import { unavailableWhen } from '../../shared/ui/unavailable'
 import { CheckCircle2, AlertTriangle, ArrowRight, Plus, Trash2, RefreshCw, Check, X, Wand2 } from 'lucide-react'
 import { api, type LexiconTerm, type LexiconCorrection } from '../../shared/data/api'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
 import { PanelHeader, Section, RowGroup, Row, Field, Toggle, SavedToast, ToggleRow } from './settingsUI'
 import { FormSkeleton, ListSkeleton, LoadError } from '../../shared/ui/ListScaffold'
-import { ChipInput } from '../../shared/ui/forms'
+import { ChipInput, TextInput, Select } from '../../shared/ui/forms'
 import { SquareIconButton } from '../../shared/ui/SquareIconButton'
 import { TextLink } from '../../shared/ui/TextLink'
 import { fvs } from '../../shared/theme/fontWeight'
@@ -83,9 +83,13 @@ export function VoicePanel({ go, query }: { go?: (id: string) => void; query?: R
               )}
               {isRemoteVoice && !isGeminiVoice && (
                 <Field label="Voice persona" hint="The hosted voice used by remote TTS models.">
-                  <select value={speechVoice} onChange={(e) => save({ speech_voice: e.target.value })} data-type="body-s" className={selectCls}>
-                    {SPEECH_VOICES.map((v) => <option key={v} value={v}>{v}</option>)}
-                  </select>
+                  <Select value={speechVoice}
+          onChange={(e) => save({ speech_voice: e })}
+          className={selectCls}
+          ariaLabel="Speech voice"
+          size="md"
+          surface="high"
+          options={SPEECH_VOICES.map(v => ({ value: v, label: v }))} />
                 </Field>
               )}
             </>
@@ -352,21 +356,28 @@ export function VocabularySection({ scrollTo }: { scrollTo: boolean }) {
         {!data ? <ListSkeleton rows={5} /> : (
           <>
             <div className="mb-3 flex items-center gap-2">
-              <input
-                value={adding} onChange={(e) => setAdding(e.target.value)}
-                aria-label="Add a vocabulary term"
-                onKeyDown={(e) => { if (e.key === 'Enter') addTerm() }}
-                placeholder="Add a term (e.g. Kubernetes, K8s)…"
-                data-type="body-s" className="flex-1 rounded-md border border-outline-variant/50 bg-surface-container px-3 py-2 outline-none focus:border-primary" />
-              <button type="button" onClick={addTerm} data-type="body-s"
-                {...unavailableWhen(!adding.trim(), 'Enter a term first', { busy })}
-                className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-on-primary disabled:opacity-40 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">
+              <TextInput value={adding}
+          onChange={(e) => setAdding(e)}
+          ariaLabel="Add a vocabulary term"
+          onKeyDown={(e) => { if (e.key === 'Enter') addTerm() }}
+          placeholder="Add a term (e.g. Kubernetes, K8s)…"
+          className="flex-1 rounded-md border border-outline-variant/50 bg-surface-container px-3 py-2 outline-none focus:border-primary"
+          size="md"
+          surface="container" />
+              <Button size="sm" variant="primary" type="button"
+          onClick={addTerm}
+          disabled={(!adding.trim()) || (busy)}
+          disabledReason={(busy) ? 'Wait for the current operation or settings revision before changing this control.' : 'Enter a term first'}
+          className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-3 text-on-primary disabled:opacity-40 aria-disabled:opacity-40 aria-disabled:cursor-not-allowed">
                 <Plus size={15} /> Add
-              </button>
-              <button type="button" onClick={rebuild} disabled={busy} title="Resync from the knowledge graph"
-                data-type="body-s" className="inline-flex h-9 items-center gap-1.5 rounded-md border border-outline-variant/50 px-3 text-on-surface-low hover:text-on-surface disabled:opacity-40">
+              </Button>
+              <Button variant="ghost" size="sm" type="button"
+            onClick={rebuild}
+            disabled={busy}
+            title="Resync from the knowledge graph"
+            className="inline-flex h-9 items-center gap-1.5 rounded-md border border-outline-variant/50 px-3 text-on-surface-low hover:text-on-surface disabled:opacity-40">
                 <RefreshCw size={15} className={busy ? 'animate-spin' : ''} /> Rebuild
-              </button>
+              </Button>
             </div>
             <p data-type="caption" className="mb-2 text-on-surface-low">{data.total} in your lexicon.</p>
             {data.terms.length === 0 ? (
@@ -414,11 +425,13 @@ function TermRow({ term, onChanged }: { term: LexiconTerm; onChanged: () => void
         {term.aliases.length > 0 && <span data-type="caption" className="ml-1.5 text-on-surface-low">({term.aliases.join(', ')})</span>}
       </span>
       <span data-type="caption" className={`rounded px-1.5 py-0.5 ${badge.cls}`}>{badge.label}</span>
-      <button type="button" disabled={busy} title={term.enabled ? 'Disable (prune)' : 'Enable'}
-        onClick={() => act(() => api.lexiconSetTermEnabled(term.id, !term.enabled))}
-        className="inline-flex h-7 w-7 items-center justify-center rounded text-on-surface-low hover:text-on-surface disabled:opacity-40">
+      <Button variant="ghost" size="sm" type="button"
+            disabled={busy}
+            title={term.enabled ? 'Disable (prune)' : 'Enable'}
+            onClick={() => act(() => api.lexiconSetTermEnabled(term.id, !term.enabled))}
+            className="inline-flex h-7 w-7 items-center justify-center rounded text-on-surface-low hover:text-on-surface disabled:opacity-40">
         {term.enabled ? <X size={14} /> : <Check size={14} />}
-      </button>
+      </Button>
       {
 }
       <SquareIconButton icon={Trash2} tone="danger" label="Delete" loading={busy}
@@ -446,14 +459,19 @@ function CorrectionRow({ corr, onChanged }: { corr: LexiconCorrection; onChanged
         <span className="text-on-surface">{corr.meant}</span>
         <span data-type="caption" className="ml-2 text-on-surface-low">×{corr.count}</span>
       </span>
-      <button type="button" onClick={toggle} disabled={busy}
-        title={corr.auto_apply ? 'Auto-applied — click to make it a suggestion' : 'Always fix this automatically'}
-        data-type="caption" className={`inline-flex h-7 items-center gap-1 rounded px-2 transition-colors disabled:opacity-40 ${
+      <Button variant="ghost" size="sm" type="button"
+            onClick={toggle}
+            disabled={busy}
+            title={corr.auto_apply ? 'Auto-applied — click to make it a suggestion' : 'Always fix this automatically'}
+            className={`inline-flex h-7 items-center gap-1 rounded px-2 transition-colors disabled:opacity-40 ${
           corr.auto_apply ? 'bg-ok/15' : 'border border-outline-variant/50 text-on-surface-low hover:text-on-surface'}`}>
         <Wand2 size={12} /> {corr.auto_apply ? 'Always' : 'Suggest'}
-      </button>
-      <button type="button" onClick={remove} disabled={busy} aria-label={`Delete correction ${corr.heard} to ${corr.meant}`}
-        className="inline-flex h-7 items-center gap-1 rounded px-2 text-danger hover:bg-danger/10 disabled:opacity-40"><Trash2 size={13} /> Delete</button>
+      </Button>
+      <Button variant="ghost" size="sm" type="button"
+            onClick={remove}
+            disabled={busy}
+            ariaLabel={`Delete correction ${corr.heard} to ${corr.meant}`}
+            className="inline-flex h-7 items-center gap-1 rounded px-2 text-danger hover:bg-danger/10 disabled:opacity-40"><Trash2 size={13} /> Delete</Button>
       {error && <p role="alert" className="basis-full text-danger">{error}</p>}
     </div>
   )

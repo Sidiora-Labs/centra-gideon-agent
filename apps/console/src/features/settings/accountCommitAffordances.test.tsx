@@ -57,7 +57,7 @@ describe('the sign-in username is committed by a button that exists', () => {
 
   it('nothing here invents a username-only writer', () => {
     const src = stripped()
-    expect(src, 'still exactly one credential writer').toMatch(/api\.setLoginPassword\(userDraft\.trim\(\), pwDraft\)/)
+    expect(src, 'still exactly one credential writer').toMatch(/api\.setLoginPassword\(userDraft\.trim\(\), pwDraft, state\.credential_configured \? currentPassword : undefined, state\.credential_configured && state\.totp_enabled \? currentCode : undefined\)/)
     expect((src.match(/setLoginPassword\(/g) || []).length, 'and only one call site').toBe(1)
   })
 })

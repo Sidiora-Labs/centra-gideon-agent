@@ -22,7 +22,7 @@ import { confirm, confirmDelete } from '../../shared/ui/dialog'
 import { Button } from '../../shared/ui/Button'
 import { Eyebrow } from '../../shared/ui/Eyebrow'
 import { ListSkeleton, FormSkeleton, LoadError, EmptyState } from '../../shared/ui/ListScaffold'
-import { TextInput, Select, ChipInput, NumberField, FieldError } from '../../shared/ui/forms'
+import { TextInput, Select, ChipInput, NumberField, FieldError, TextArea } from '../../shared/ui/forms'
 import { Segmented } from '../../shared/ui/Segmented'
 import { SearchField } from '../../shared/ui/SearchField'
 import { SquareIconButton } from '../../shared/ui/SquareIconButton'
@@ -84,14 +84,19 @@ export function MemoryPanel({ query, setQuery }: Pick<RouteProps, 'query' | 'set
         {TOP_TABS.map((t) => {
           const on = t.id === tab
           return (
-            <button key={t.id} type="button" role="tab" aria-selected={on} tabIndex={on ? 0 : -1}
-              onClick={() => setTab(t.id)}
-              data-type="body-s" className="-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 transition-colors"
-              style={on
+            <Button variant="ghost" size="sm" key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={on}
+          tabIndex={on ? 0 : -1}
+          onClick={() => setTab(t.id)}
+          data-type="body-s"
+          className="-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 transition-colors"
+          style={on
                 ? { borderColor: 'var(--color-primary)', color: 'var(--color-primary-emphasis)' }
                 : { borderColor: 'transparent', color: 'var(--color-on-surface-low)' }}>
               <t.icon size={14} /> {t.label}
-            </button>
+            </Button>
           )
         })}
       </div>
@@ -355,11 +360,15 @@ function MemoryStudio({ onChanged, initialSel }: { onChanged: () => void; initia
               const on = kindFilter === k
               const meta = k === 'all' ? null : STUDIO_KIND_META[k]
               return (
-                <button key={k} type="button" aria-pressed={on} onClick={() => setKindFilter(k)}
-                  data-type="caption" className="inline-flex items-center gap-1 rounded-pill px-2 h-6 transition-colors"
-                  style={on ? accentChip : { background: 'var(--color-surface-high)', color: 'var(--color-on-surface-low)' }}>
+                <Button variant="ghost" size="sm" key={k}
+          type="button"
+          ariaPressed={on}
+          onClick={() => setKindFilter(k)}
+          data-type="caption"
+          className="inline-flex items-center gap-1 rounded-pill px-2 h-6 transition-colors"
+          style={on ? accentChip : { background: 'var(--color-surface-high)', color: 'var(--color-on-surface-low)' }}>
                   {meta && <meta.icon size={11} />}{k === 'all' ? 'All' : meta!.label}<span className="tabular-nums">{counts[k]}</span>
-                </button>
+                </Button>
               )
             })}
           </div>
@@ -452,9 +461,11 @@ function MemoryStudio({ onChanged, initialSel }: { onChanged: () => void; initia
           <div data-type="caption" className="absolute right-3 top-3 flex items-center gap-2 rounded-pill bg-surface-high/90 px-2 py-1 backdrop-blur">
             <span className="text-on-surface-low">Focus · hops</span>
             {[1, 2, 3].map((d) => (
-              <button key={d} type="button" onClick={() => setHopDepth(d)}
-                className="grid size-5 place-items-center rounded tabular-nums"
-                style={hopDepth === d ? { background: 'var(--color-primary)', color: 'var(--color-on-primary)' } : { color: 'var(--color-on-surface-low)' }}>{d}</button>
+              <Button variant="ghost" size="sm" key={d}
+          type="button"
+          onClick={() => setHopDepth(d)}
+          className="grid size-5 place-items-center rounded tabular-nums"
+          style={hopDepth === d ? { background: 'var(--color-primary)', color: 'var(--color-on-primary)' } : { color: 'var(--color-on-surface-low)' }}>{d}</Button>
             ))}
             <TextLink onClick={() => setSelUid(null)} className="ml-1">↺ show all</TextLink>
           </div>
@@ -467,7 +478,9 @@ function MemoryStudio({ onChanged, initialSel }: { onChanged: () => void; initia
           <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
             <div className="flex items-center justify-between">
               <span data-type="label-s" className="text-on-surface">{ADD_MODE_TITLE[addMode]}</span>
-              <button type="button" onClick={() => setAddMode(null)} data-type="caption" className="text-on-surface-low hover:text-on-surface">Cancel</button>
+              <Button variant="ghost" size="sm" type="button"
+            onClick={() => setAddMode(null)}
+            className="text-on-surface-low hover:text-on-surface">Cancel</Button>
             </div>
             {addMode === 'fact' && <AddSemanticForm onDone={(created) => { setAddMode(null); if (created) reloadAll() }} />}
             {addMode === 'lesson' && <AddLessonForm onDone={(created) => { setAddMode(null); if (created) reloadAll() }} />}
@@ -591,9 +604,16 @@ function FactValueEditor({ fact, onSaved }: { fact: SemanticEntry; onSaved: () =
     <Eyebrow>Value</Eyebrow>
     <pre aria-label="Saved fact value" data-type="caption" className="whitespace-pre-wrap rounded-lg bg-surface-high px-3 py-2 text-on-surface">{value || 'No value'}</pre>
     {editing ? <>
-      <textarea value={draft} onChange={(e) => change(e.target.value)} disabled={busy}
-        aria-label="Fact value" rows={6} spellCheck={false} data-type="caption"
-        className="w-full resize-y rounded-lg bg-surface-high px-3 py-2 font-mono text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+      <TextArea value={draft}
+          onChange={(e) => change(e)}
+          disabled={busy}
+          ariaLabel="Fact value"
+          rows={6}
+          spellCheck={false}
+          className="w-full resize-y rounded-lg bg-surface-high px-3 py-2 font-mono text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+          size="md"
+          surface="high"
+          mono />
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={save} loading={busy} loadingLabel="Saving…" disabled={busy || draft === base}
           disabledReason={draft === base ? 'No changes to save' : undefined}><Save size={14} /> Save fact</Button>
@@ -894,10 +914,15 @@ function AddLessonForm({ onDone }: { onDone: (created: boolean) => void }) {
     <div className="flex flex-col gap-2">
       {
 }
-      <textarea value={rule} onChange={(e) => setRule(e.target.value)} rows={4} autoFocus
-        aria-label="Lesson rule"
-        placeholder="e.g. Always run the test suite before saying a fix works."
-        data-type="body-s" className="w-full resize-y rounded-lg bg-surface-high px-3 py-2 text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+      <TextArea value={rule}
+          onChange={(e) => setRule(e)}
+          rows={4}
+          autoFocus
+          ariaLabel="Lesson rule"
+          placeholder="e.g. Always run the test suite before saying a fix works."
+          className="w-full resize-y rounded-lg bg-surface-high px-3 py-2 text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+          size="md"
+          surface="high" />
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={submit} loading={saving} loadingLabel="Saving…" disabled={!rule.trim() || saving}
           disabledReason={!rule.trim() ? 'Write the lesson first' : undefined}>Save lesson</Button>
@@ -928,12 +953,22 @@ function AddSemanticForm({ onDone }: { onDone: (created: boolean) => void }) {
     <div className="mb-3 rounded-lg border border-outline-variant/40 bg-surface p-3">
       {
 }
-      <input value={key} onChange={(e) => setKey(e.target.value)} aria-label="Fact key"
-        placeholder="key (e.g. pref.theme, user.timezone)"
-        data-type="body-s" className="mb-2 h-9 w-full rounded-md bg-surface-high px-3 font-mono text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
-      <textarea value={value} onChange={(e) => setValue(e.target.value)} aria-label="Fact value"
-        placeholder="value" rows={2}
-        data-type="body-s" className="mb-2 w-full rounded-md bg-surface-high px-3 py-2 text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+      <TextInput value={key}
+          onChange={(e) => setKey(e)}
+          ariaLabel="Fact key"
+          placeholder="key (e.g. pref.theme, user.timezone)"
+          className="mb-2 h-9 w-full rounded-md bg-surface-high px-3 font-mono text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+          size="md"
+          surface="high"
+          mono />
+      <TextArea value={value}
+          onChange={(e) => setValue(e)}
+          ariaLabel="Fact value"
+          placeholder="value"
+          rows={2}
+          className="mb-2 w-full rounded-md bg-surface-high px-3 py-2 text-on-surface placeholder:text-on-surface-low outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+          size="md"
+          surface="high" />
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={submit} loading={saving} disabled={saving || !key || !value.trim()}
           disabledReason={!key ? 'Choose a key first' : !value.trim() ? 'Enter a value first' : undefined}>Save</Button>
@@ -1002,10 +1037,12 @@ function AuditRow({ ev, onUndone }: { ev: MemoryEvent; onUndone: () => void }) {
       {ev.undone_at && <span data-type="caption" className="shrink-0 rounded bg-surface-high px-1.5 text-on-surface-low">undone</span>}
       {ev.created_at && <span data-type="caption" className="shrink-0 text-on-surface-low">{fmtDate(ev.created_at)}</span>}
       {canUndo && (
-        <button onClick={undo} disabled={busy} title="Undo this memory change"
-          data-type="caption" className="shrink-0 rounded px-1.5 py-0.5 text-on-surface-low hover:text-primary disabled:opacity-50">
+        <Button variant="ghost" size="sm" onClick={undo}
+            disabled={busy}
+            title="Undo this memory change"
+            className="shrink-0 rounded px-1.5 py-0.5 text-on-surface-low hover:text-primary disabled:opacity-50">
           {busy ? '…' : 'undo'}
-        </button>
+        </Button>
       )}
     </div>
   )
@@ -1779,13 +1816,16 @@ function DigestRow({ digest }: { digest: DailyDigest }) {
   const [open, setOpen] = useState(false)
   return (
     <div className="rounded-lg bg-surface-container px-3 py-2">
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="w-full text-left">
+      <Button variant="ghost" size="sm" type="button"
+            onClick={() => setOpen((o) => !o)}
+            ariaExpanded={open}
+            className="w-full text-left">
         <div className="flex items-center gap-2">
           <span data-type="body-s" className="font-mono text-on-surface">{digest.day}</span>
           <span data-type="caption" className="text-on-surface-low">daily digest</span>
         </div>
         <div data-type="caption" className={`mt-0.5 text-on-surface-low ${open ? 'whitespace-pre-wrap' : 'truncate'}`}>{digest.text}</div>
-      </button>
+      </Button>
     </div>
   )
 }

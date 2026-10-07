@@ -135,10 +135,14 @@ export function AuditPanel() {
             const sent = f.values.join(',')
             const active = (filters.outcome ?? '') === sent
             return (
-              <button key={f.key || 'all'} type="button" onClick={() => setFilter('outcome', sent)} aria-pressed={active}
-                title={f.values.length ? `Outcomes: ${f.values.join(', ')}` : undefined}
-                data-type="body-s" className="rounded-pill px-3 h-7 transition-colors"
-                style={active ? { background: 'var(--color-surface-highest)', color: 'var(--color-on-surface)' } : { color: 'var(--color-on-surface-low)' }}>{f.label}</button>
+              <Button variant="ghost" size="sm" key={f.key || 'all'}
+          type="button"
+          onClick={() => setFilter('outcome', sent)}
+          ariaPressed={active}
+          title={f.values.length ? `Outcomes: ${f.values.join(', ')}` : undefined}
+          data-type="body-s"
+          className="rounded-pill px-3 h-7 transition-colors"
+          style={active ? { background: 'var(--color-surface-highest)', color: 'var(--color-on-surface)' } : { color: 'var(--color-on-surface-low)' }}>{f.label}</Button>
             )
           })}
         </div>
@@ -244,14 +248,17 @@ function EventRow({ ev }: { ev: SelEvent }) {
     <div className="rounded-md px-3 py-1.5" style={tampered
       ? { background: 'color-mix(in srgb, var(--color-danger) 16%, var(--color-surface-container))' }
       : { background: 'var(--color-surface-container)' }}>
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} data-type="caption" className="flex w-full items-center gap-2 text-left">
+      <Button variant="ghost" size="sm" type="button"
+            onClick={() => setOpen((o) => !o)}
+            ariaExpanded={open}
+            className="flex w-full items-center gap-2 text-left">
         <span data-type="caption" className="w-14 shrink-0 font-mono" style={{ color: tone }}>{ev.outcome || '—'}</span>
         <span data-type="caption" className="shrink-0 rounded bg-surface-high px-1.5 text-on-surface-low">{ev.event_type}</span>
         <span className="min-w-0 flex-1 truncate text-on-surface">{ev.operation || ev.resources || '—'}</span>
         { }
         {tampered && <ShieldAlert size={13} className="shrink-0" style={{ color: 'var(--color-danger)' }} aria-label="Integrity check failed — this record was altered" />}
         <span data-type="caption" className="shrink-0 text-on-surface-low">{fmtTime(ev.timestamp)}</span>
-      </button>
+      </Button>
       {open && (
         <>
           {tampered && (

@@ -1,3 +1,4 @@
+import { Button } from '../../shared/ui/Button'
 import { useEffect } from 'react'
 import {
   Palette, Plug, Bell, Cpu, Shield, ShieldAlert, Database, User, MessageSquare, Bot, Inbox,
@@ -134,8 +135,10 @@ export function SettingsPage({ sub, navigate, query, setQuery }: RouteProps) {
             {
 }
             <span className="hidden shrink-0 items-center gap-1 sm:inline-flex">
-              <button type="button" onClick={() => go('')}
-                className="text-on-surface-low text-[1.0625rem] transition-colors hover:text-on-surface" style={fvs(470)}>Settings</button>
+              <Button variant="ghost" size="sm" type="button"
+          onClick={() => go('')}
+          className="text-on-surface-low text-[1.0625rem] transition-colors hover:text-on-surface"
+          style={fvs(470)}>Settings</Button>
               <ChevronRight size={16} className="shrink-0 text-on-surface-low/60" />
             </span>
             <span className="flex items-center gap-1.5 min-w-0 text-on-surface text-[1.0625rem]" style={fvs(470)}>

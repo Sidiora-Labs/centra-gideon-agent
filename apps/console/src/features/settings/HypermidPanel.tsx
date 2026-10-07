@@ -1,3 +1,4 @@
+import { Button } from '../../shared/ui/Button'
 import { useState } from 'react'
 import { HypermidOverview } from '../hypermid/HypermidOverview'
 import { CredentialVault } from '../hypermid/CredentialVault'
@@ -16,11 +17,14 @@ export function HypermidPanel() {
   const [view, setView] = useState<'inspect' | 'configure' | 'connections' | 'security' | 'operations' | 'lifecycle' | 'diagnostics' | 'remote'>('inspect')
   return <div className="hypermid-surface">
     <div role="tablist" aria-label="Hypermid area" className="mb-xl inline-flex max-w-full flex-wrap rounded-2xl bg-surface-container p-1">
-      {([['inspect', 'Inspect'], ['configure', 'Configure'], ['connections', 'Connections'], ['security', 'Security'], ['operations', 'Operations'], ['lifecycle', 'Lifecycle'], ['diagnostics', 'Health & logs'], ['remote', 'Remote access']] as const).map(([id, label]) => <button key={id} type="button" role="tab"
-        aria-selected={view === id} onClick={() => setView(id)}
-        className="min-h-11 rounded-pill px-m text-sm text-on-surface-low aria-selected:bg-surface-highest aria-selected:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+      {([['inspect', 'Inspect'], ['configure', 'Configure'], ['connections', 'Connections'], ['security', 'Security'], ['operations', 'Operations'], ['lifecycle', 'Lifecycle'], ['diagnostics', 'Health & logs'], ['remote', 'Remote access']] as const).map(([id, label]) => <Button variant="ghost" size="sm" key={id}
+          type="button"
+          role="tab"
+          aria-selected={view === id}
+          onClick={() => setView(id)}
+          className="min-h-11 rounded-pill px-m text-sm text-on-surface-low aria-selected:bg-surface-highest aria-selected:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
         {label}
-      </button>)}
+      </Button>)}
     </div>
     {view === 'inspect' ? <HypermidOverview /> : view === 'remote' ? <RemoteAccess /> : view === 'connections' ? <Connections /> : view === 'security' ? <Security /> : view === 'operations' ? <Operations /> : view === 'lifecycle' ? <Lifecycle /> : view === 'diagnostics' ? <div>
       <div className="mb-l"><h1 data-type="title-l" className="text-on-surface">Hypermid health</h1>

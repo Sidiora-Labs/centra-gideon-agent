@@ -1,3 +1,4 @@
+import { Button } from '../../shared/ui/Button'
 import { useState } from 'react'
 import { Check, Globe, Newspaper, LineChart, FileText, Zap, type LucideIcon } from 'lucide-react'
 import { api, type SearchProviderInfo } from '../../shared/data/api'
@@ -93,10 +94,13 @@ function UseCaseRow({ useCase, activeProviders, providers, onChanged }: {
           {eligible.map((p) => {
             const on = activeProviders.includes(p.name)
             return (
-              <button key={p.name} type="button" onClick={() => toggle(p.name)} disabled={saving}
-                aria-pressed={on}
-                className="flex items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-surface-high"
-                style={on ? { background: 'color-mix(in srgb, var(--color-primary) 12%, transparent)' } : undefined}>
+              <Button variant="ghost" size="sm" key={p.name}
+          type="button"
+          onClick={() => toggle(p.name)}
+          disabled={saving}
+          ariaPressed={on}
+          className="flex items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-surface-high"
+          style={on ? { background: 'color-mix(in srgb, var(--color-primary) 12%, transparent)' } : undefined}>
                 <span className="grid size-4 shrink-0 place-items-center rounded-full border"
                   style={on ? { background: 'var(--color-primary)', borderColor: 'var(--color-primary)' } : { borderColor: 'var(--color-outline-variant)' }}>
                   {on && <Check size={10} strokeWidth={3} className="text-on-primary" />}
@@ -109,7 +113,7 @@ function UseCaseRow({ useCase, activeProviders, providers, onChanged }: {
                     : { background: 'var(--color-surface-high)', color: 'var(--color-on-surface-low)' }}>
                   {p.available ? 'ready' : 'not configured'}
                 </span>
-              </button>
+              </Button>
             )
           })}
         </div>

@@ -1,3 +1,4 @@
+import { TextInput } from '../../shared/ui/forms'
 import { useEffect, useState } from 'react'
 import { api, type NotificationSettings, type NotificationRulesDoc } from '../../shared/data/api'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
@@ -77,7 +78,11 @@ export function NotificationsPanel() {
 
 function TimeInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <input type="time" value={value} onChange={(e) => { if (e.target.value) onChange(e.target.value) }}
-      data-type="body-s" className="h-9 rounded-md bg-surface-container px-2.5 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary" />
+    <TextInput type="time"
+          value={value}
+          onChange={(e) => { if (e) onChange(e) }}
+          className="h-9 rounded-md bg-surface-container px-2.5 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+          size="md"
+          surface="container" />
   )
 }

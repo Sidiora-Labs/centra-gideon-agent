@@ -83,7 +83,7 @@ describe('one reachable model-management flow', () => {
 
   it('turns a settings-home tile id into that same route', () => {
     const page = codeOf('features/settings/SettingsPage.tsx')
-    expect(page).toContain('navigate?.(id ? `settings/${id}` : \'settings\')')
+    expect(page).toContain('navigate?.(id === \'hypermid\' ? \'hypermid\' : id ? `settings/${id}` : \'settings\')')
     const widgets = codeOf('features/settings/settingsWidgets.tsx')
     const tiles = [...widgets.matchAll(/id: '([a-z-]+)', group: '[^']*', label: 'Models'/g)]
     expect(tiles).toHaveLength(1)

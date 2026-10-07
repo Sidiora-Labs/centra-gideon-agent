@@ -1,3 +1,5 @@
+import { IconButton } from '../../shared/ui/IconButton'
+import { Button } from '../../shared/ui/Button'
 import { LoadError } from '../../shared/ui/ListScaffold'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ResultAnnouncement } from '../../shared/ui/ListControls'
@@ -109,12 +111,16 @@ export function DiagnosticsPanel() {
               {LEVELS.map((l) => {
                 const on = level === l
                 return (
-                  <button key={l} aria-label={`Backend log level: ${l}`} aria-pressed={on}
-                    onClick={() => changeLevel(l)} disabled={levelBusy || !!levelErr || !level}
-                    data-type="body-s" className="rounded-pill px-m h-8 transition-colors disabled:opacity-60"
-                    style={on ? { background: 'var(--color-surface-highest)', color: 'var(--color-on-surface)' } : { color: 'var(--color-on-surface-low)' }}>
+                  <Button variant="ghost" size="sm" key={l}
+          ariaLabel={`Backend log level: ${l}`}
+          ariaPressed={on}
+          onClick={() => changeLevel(l)}
+          disabled={levelBusy || !!levelErr || !level}
+          data-type="body-s"
+          className="rounded-pill px-m h-8 transition-colors disabled:opacity-60"
+          style={on ? { background: 'var(--color-surface-highest)', color: 'var(--color-on-surface)' } : { color: 'var(--color-on-surface-low)' }}>
                     {l}
-                  </button>
+                  </Button>
                 )
               })}
             </div>
@@ -143,28 +149,34 @@ export function DiagnosticsPanel() {
               {LEVELS.map((l) => {
                 const on = minLevel === l
                 return (
-                  <button key={l} aria-label={`Show ${l} and above`} aria-pressed={on}
-                    onClick={() => setMinLevel(l)} title={`Show ${l} and above`}
-                    data-type="caption" className="rounded-pill px-2.5 h-7 transition-colors"
-                    style={on ? { background: 'var(--color-surface-highest)', color: 'var(--color-on-surface)' } : { color: 'var(--color-on-surface-low)' }}>
+                  <Button variant="ghost" size="sm" key={l}
+          ariaLabel={`Show ${l} and above`}
+          ariaPressed={on}
+          onClick={() => setMinLevel(l)}
+          title={`Show ${l} and above`}
+          data-type="caption"
+          className="rounded-pill px-2.5 h-7 transition-colors"
+          style={on ? { background: 'var(--color-surface-highest)', color: 'var(--color-on-surface)' } : { color: 'var(--color-on-surface-low)' }}>
                     {l}
-                  </button>
+                  </Button>
                 )
               })}
             </div>
-            <button onClick={() => setAutoscroll((v) => !v)} aria-pressed={autoscroll} title={autoscroll ? 'Autoscroll on' : 'Autoscroll off'}
-              className="inline-flex items-center justify-center size-8 rounded-lg transition-colors"
-              style={autoscroll ? accentChip : { background: 'var(--color-surface-high)', color: 'var(--color-on-surface-low)' }}>
+            <Button variant="ghost" size="sm" onClick={() => setAutoscroll((v) => !v)}
+          ariaPressed={autoscroll}
+          title={autoscroll ? 'Autoscroll on' : 'Autoscroll off'}
+          className="inline-flex items-center justify-center size-8 rounded-lg transition-colors"
+          style={autoscroll ? accentChip : { background: 'var(--color-surface-high)', color: 'var(--color-on-surface-low)' }}>
               <ArrowDownToLine size={15} />
-            </button>
-            <button onClick={() => setPaused((v) => !v)} title={paused ? 'Resume' : 'Pause'}
-              className="inline-flex items-center justify-center size-8 rounded-lg bg-surface-high text-on-surface-var transition-colors hover:bg-surface-highest">
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setPaused((v) => !v)}
+            title={paused ? 'Resume' : 'Pause'}
+            className="inline-flex items-center justify-center size-8 rounded-lg bg-surface-high text-on-surface-var transition-colors hover:bg-surface-highest">
               {paused ? <Play size={15} /> : <Pause size={15} />}
-            </button>
-            <button onClick={() => setEntries([])} title="Clear"
-              className="inline-flex items-center justify-center size-8 rounded-lg bg-surface-high text-on-surface-var transition-colors hover:text-danger">
-              <Trash2 size={15} />
-            </button>
+            </Button>
+            <IconButton icon={Trash2} iconSize={15} size={23} label="Clear" onClick={() => setEntries([])}
+            title="Clear"
+            className="inline-flex items-center justify-center size-8 rounded-lg bg-surface-high text-on-surface-var transition-colors hover:text-danger" />
           </div>
         }
       >

@@ -11,30 +11,30 @@ const code = (f: string) =>
 
 describe('the four panels that had unnamed controls', () => {
   it('SecurityPanel host inputs name themselves from the list they add to', () => {
-    expect(code('SecurityPanel.tsx')).toMatch(/aria-label=\{`Add a host to \$\{label\.toLowerCase\(\)\}`\}/)
+    expect(code('SecurityPanel.tsx')).toMatch(/aria-?[Ll]abel=\{`Add a host to \$\{label\.toLowerCase\(\)\}`\}/)
   })
 
   it('SecurityPanel denylist input says what typing there DOES', () => {
-    expect(code('SecurityPanel.tsx')).toMatch(/aria-label="Add a shell denylist pattern \(regex\)"/)
+    expect(code('SecurityPanel.tsx')).toMatch(/aria-?[Ll]abel="Add a shell denylist pattern \(regex\)"/)
   })
 
   it('the shared StrListField input names itself from its Field label', () => {
-    expect(code('settingsUI.tsx')).toMatch(/aria-label=\{`Add to \$\{label\.toLowerCase\(\)\}`\}/)
+    expect(code('settingsUI.tsx')).toMatch(/aria-?[Ll]abel=\{`Add to \$\{label\.toLowerCase\(\)\}`\}/)
     expect(code('AgentDefaultsPanel.tsx')).not.toMatch(/function StrListField/)
   })
 
   it('VoicePanel vocabulary input is named', () => {
-    expect(code('VoicePanel.tsx')).toMatch(/aria-label="Add a vocabulary term"/)
+    expect(code('VoicePanel.tsx')).toMatch(/aria-?[Ll]abel="Add a vocabulary term"/)
   })
 
   it('ProjectionRulesPanel names all six controls, scoped per row', () => {
     const src = code('ProjectionRulesPanel.tsx')
-    expect(src).toMatch(/aria-label="Rule name"/)
-    expect(src).toMatch(/aria-label="New rule name"/)
-    expect(src).toMatch(/aria-label=\{rule\.name \? `Match regex for \$\{rule\.name\}` : 'Match regex'\}/)
-    expect(src).toMatch(/aria-label="Match regex for the new rule"/)
-    expect(src).toMatch(/aria-label=\{forRule \? `Strategy for \$\{forRule\}` : 'Strategy for the new rule'\}/)
-    expect(src).toMatch(/aria-label=\{rule\.name \? `Remove rule \$\{rule\.name\}` : 'Remove rule'\}/)
+    expect(src).toMatch(/aria-?[Ll]abel="Rule name"/)
+    expect(src).toMatch(/aria-?[Ll]abel="New rule name"/)
+    expect(src).toMatch(/aria-?[Ll]abel=\{rule\.name \? `Match regex for \$\{rule\.name\}` : 'Match regex'\}/)
+    expect(src).toMatch(/aria-?[Ll]abel="Match regex for the new rule"/)
+    expect(src).toMatch(/aria-?[Ll]abel=\{forRule \? `Strategy for \$\{forRule\}` : 'Strategy for the new rule'\}/)
+    expect(src).toMatch(/label=\{rule\.name \? `Remove rule \$\{rule\.name\}` : 'Remove rule'\}/)
   })
 })
 
@@ -49,7 +49,7 @@ describe('a component that renders more than once must not carry a constant name
     const src = code('SecurityPanel.tsx')
     const uses = [...src.matchAll(/<HostList\s+label="([^"]+)"/g)].map((m) => m[1])
     expect(uses).toEqual(['Allowed hosts', 'Denied hosts'])
-    expect(/aria-label="Add a host"/.test(src), 'a constant here would announce both identically').toBe(false)
+    expect(/aria-?[Ll]abel="Add a host"/.test(src), 'a constant here would announce both identically').toBe(false)
   })
 })
 
@@ -57,16 +57,16 @@ describe('what a SOURCE rail can and cannot decide here', () => {
 
   it('no fixed control silently loses its name (the panels driven this cycle)', () => {
     const MUST_KEEP: Array<[string, RegExp]> = [
-      ['SecurityPanel.tsx', /aria-label=\{`Add a host to \$\{label\.toLowerCase\(\)\}`\}/],
-      ['SecurityPanel.tsx', /aria-label="Add a shell denylist pattern \(regex\)"/],
-      ['settingsUI.tsx', /aria-label=\{`Add to \$\{label\.toLowerCase\(\)\}`\}/],
-      ['VoicePanel.tsx', /aria-label="Add a vocabulary term"/],
-      ['MemoryPanel.tsx', /aria-label="Lesson rule"/],
-      ['MemoryPanel.tsx', /aria-label="Fact key"/],
-      ['MemoryPanel.tsx', /aria-label="Fact value"/],
-      ['ProjectionRulesPanel.tsx', /aria-label="Rule name"/],
-      ['ProjectionRulesPanel.tsx', /aria-label="New rule name"/],
-      ['ProjectionRulesPanel.tsx', /aria-label="Match regex for the new rule"/],
+      ['SecurityPanel.tsx', /aria-?[Ll]abel=\{`Add a host to \$\{label\.toLowerCase\(\)\}`\}/],
+      ['SecurityPanel.tsx', /aria-?[Ll]abel="Add a shell denylist pattern \(regex\)"/],
+      ['settingsUI.tsx', /aria-?[Ll]abel=\{`Add to \$\{label\.toLowerCase\(\)\}`\}/],
+      ['VoicePanel.tsx', /aria-?[Ll]abel="Add a vocabulary term"/],
+      ['MemoryPanel.tsx', /aria-?[Ll]abel="Lesson rule"/],
+      ['MemoryPanel.tsx', /aria-?[Ll]abel="Fact key"/],
+      ['MemoryPanel.tsx', /aria-?[Ll]abel="Fact value"/],
+      ['ProjectionRulesPanel.tsx', /aria-?[Ll]abel="Rule name"/],
+      ['ProjectionRulesPanel.tsx', /aria-?[Ll]abel="New rule name"/],
+      ['ProjectionRulesPanel.tsx', /aria-?[Ll]abel="Match regex for the new rule"/],
     ]
     const missing = MUST_KEEP.filter(([f, re]) => !re.test(code(f))).map(([f, re]) => `${f} ${re}`)
     expect(missing, `these names were measured on the live DOM and must not regress:\n  ${missing.join('\n  ')}`).toEqual([])

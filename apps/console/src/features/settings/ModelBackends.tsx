@@ -12,7 +12,7 @@ import { Button } from '../../shared/ui/Button'
 import { SquareIconButton } from '../../shared/ui/SquareIconButton'
 import { Skeleton, LoadingStatus } from '../../shared/ui/ListScaffold'
 import { InlineError } from '../../shared/ui/InlineError'
-import { TextInput } from '../../shared/ui/forms'
+import { TextInput, Select } from '../../shared/ui/forms'
 import { OllamaModelManager } from './OllamaModelManager'
 import { fvs } from '../../shared/theme/fontWeight'
 import { reportingWrite } from '../../app/shell/reportingWrite'
@@ -193,9 +193,13 @@ export function SchemaField({ field, name, value, onChange }: {
     return (
       <label className="flex flex-col gap-1">
         <span data-type="caption" className="text-on-surface-low">{label}</span>
-        <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} data-type="body-s" className={inputCls + ' cursor-pointer'}>
-          {enumVals.map((v) => <option key={String(v)} value={String(v)}>{String(v)}</option>)}
-        </select>
+        <Select ariaLabel={label}
+          value={value}
+          onChange={(e) => onChange(e)}
+          className={inputCls + ' cursor-pointer'}
+          size="md"
+          surface="high"
+          options={enumVals.map(v => ({ value: String(v), label: String(v) }))} />
         {meta.help && <span data-type="caption" className="text-on-surface-low">{meta.help}</span>}
       </label>
     )
@@ -206,11 +210,17 @@ export function SchemaField({ field, name, value, onChange }: {
     <label className="flex flex-col gap-1">
       <span data-type="caption" className="text-on-surface-low">{label}</span>
       <div className="relative">
-        <input aria-label={label} type={numeric ? 'number' : sensitive && !show ? 'password' : 'text'} value={value}
-          min={numeric ? field.minimum : undefined} max={numeric ? field.maximum : undefined}
+        <TextInput ariaLabel={label}
+          type={numeric ? 'number' : sensitive && !show ? 'password' : 'text'}
+          value={value}
+          min={numeric ? field.minimum : undefined}
+          max={numeric ? field.maximum : undefined}
           step={numeric ? field.type === 'integer' ? 1 : 'any' : undefined}
-          onChange={(e) => onChange(e.target.value)} placeholder={meta.help || label}
-          data-type="body-s" className={inputCls + (sensitive ? ' pr-10' : '')} />
+          onChange={(e) => onChange(e)}
+          placeholder={meta.help || label}
+          className={inputCls + (sensitive ? ' pr-10' : '')}
+          size="md"
+          surface="container" />
         {sensitive && (
           <span className="absolute right-1.5 top-1/2 -translate-y-1/2">
             <SquareIconButton label={show ? 'Hide' : 'Show'} onClick={() => setShow((s) => !s)}>
@@ -278,11 +288,13 @@ function AddInstanceForm({ onDone }: { onDone: (created: boolean) => void }) {
     <div className="rounded-lg border border-outline-variant/40 bg-surface p-4">
       <div data-type="label-s" className="mb-3 text-on-surface" style={fvs(600)}>Add model provider instance</div>
       <div className="grid grid-cols-2 gap-2">
-        <select aria-label="Provider type" value={typeIdx}
-          onChange={(e) => { const i = Number(e.target.value); setTypeIdx(i); setValues(seedFor(types[i])); setError('') }}
-          data-type="body-s" className={inputCls + ' cursor-pointer'}>
-          {types.map((t, i) => <option key={t.type} value={i}>{t.label}</option>)}
-        </select>
+        <Select ariaLabel="Provider type"
+          value={String(typeIdx)}
+          onChange={(e) => { const i = Number(e); setTypeIdx(i); setValues(seedFor(types[i])); setError('') }}
+          className={inputCls + ' cursor-pointer'}
+          size="md"
+          surface="high"
+          options={types.map((t, i) => ({ value: String(i), label: t.label }))} />
         <TextInput ariaLabel="Instance name" value={name} onChange={setName} placeholder="Instance name (e.g. my-bedrock)" size="md" surface="high" />
       </div>
       <div className="mt-2 flex flex-col gap-2">

@@ -1,3 +1,4 @@
+import { TextArea, Select } from '../../shared/ui/forms'
 import { useCallback, useEffect, useState } from 'react'
 import { Globe, FolderGit2, Lock } from 'lucide-react'
 import { api, type AlwaysOnItem, type AlwaysOnResponse, type ProjectItem } from '../../shared/data/api'
@@ -95,15 +96,13 @@ export function AlwaysOnConventions() {
         iconTone="muted"
         hint="Documents a project-bound session inlines into every turn. The overview is current state and editable here; the ledgers are append-only history."
         right={
-          <select
-            value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
-            aria-label="Show project instructions for"
-            data-type="body-s" className="rounded-md bg-surface-high px-2 py-1.5 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
-          >
-            <option value="">Choose a project…</option>
-            {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          <Select value={projectId}
+          onChange={(e) => setProjectId(e)}
+          ariaLabel="Show project instructions for"
+          className="rounded-md bg-surface-high px-2 py-1.5 text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+          size="md"
+          surface="high"
+          options={[{ value: '', label: 'Choose a project…' }, ...projects.map(p => ({ value: p.id, label: p.name }))]} />
         }
       >
         {projectsErr ? <LoadError what="projects" error={projectsErr} onRetry={loadProjects} /> : instructions.length === 0 ? (
@@ -127,14 +126,15 @@ export function AlwaysOnConventions() {
                     ) : (
                       <>
                         <label className="sr-only" htmlFor={`always-on-editor-${item.id}`}>{item.name}</label>
-                        <textarea
-                          id={`always-on-editor-${item.id}`}
-                          value={draft}
-                          onChange={(e) => setDraft(e.target.value)}
-                          rows={10}
-                          spellCheck={false}
-                          data-type="body-s" className="w-full rounded-md bg-surface-high px-3 py-2 font-mono text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
-                        />
+                        <TextArea id={`always-on-editor-${item.id}`}
+          value={draft}
+          onChange={(e) => setDraft(e)}
+          rows={10}
+          spellCheck={false}
+          className="w-full rounded-md bg-surface-high px-3 py-2 font-mono text-on-surface outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
+          size="md"
+          surface="high"
+          mono />
                         <div className="mt-2 flex items-center gap-2">
                           <Button size="sm" loading={saving} disabled={saving} onClick={() => save(item)}>
                             {saving ? 'Saving…' : 'Save'}

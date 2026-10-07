@@ -1,3 +1,4 @@
+import { Select } from '../../shared/ui/forms'
 import { useState } from 'react'
 import { MessageCircle } from 'lucide-react'
 import { api } from '../../shared/data/api'
@@ -36,17 +37,14 @@ export function ApprovalChannelSection() {
     <Section title="Approval channel" icon={MessageCircle} iconTone="muted" hint="Prompts stay in the channel where a conversation started. This choice applies when there is no channel origin; an unavailable explicit choice is not rerouted to another chat.">
       <label className="flex flex-col gap-2" data-type="body-s">
         <span className="text-on-surface">Default channel for approvals</span>
-        <select
-          aria-label="Default channel for approvals"
+        <Select ariaLabel="Default channel for approvals"
           className="min-h-10 rounded-md border border-outline-variant bg-surface px-3 text-on-surface"
           value={selected}
           disabled={busy}
-          onChange={event => void save(event.currentTarget.value)}
-        >
-          <option value="">Use the originating channel, then an available owner channel</option>
-          {selected && !options.some(channel => channel.name === selected) ? <option value={selected}>{selected} (currently unavailable)</option> : null}
-          {options.map(channel => <option key={channel.name} value={channel.name}>{channel.display_name || channel.name}{channel.connected ? '' : ' (offline)'}</option>)}
-        </select>
+          onChange={event => void save(event)}
+          size="md"
+          surface="high"
+          options={[{ value: '', label: 'Use the originating channel, then an available owner channel' }, ...(selected && !options.some(channel => channel.name === selected) ? [{ value: selected, label: `${selected} (currently unavailable)` }] : []), ...options.map(channel => ({ value: channel.name, label: `${channel.display_name || channel.name}${channel.connected ? '' : ' (offline)'}` }))]} />
       </label>
     </Section>
   )

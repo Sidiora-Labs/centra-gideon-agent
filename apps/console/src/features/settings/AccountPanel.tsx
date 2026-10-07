@@ -76,13 +76,17 @@ export function AccountPanel() {
 }
             {
 }
-            <button type="button" onClick={dirty ? save : undefined} aria-disabled={!dirty || undefined}
-              aria-label="Save: Your name"
-              title={!dirty ? 'No changes to save' : undefined}
-              data-type="body-s" className="inline-flex items-center gap-1 rounded-md px-3 h-9 disabled:opacity-40 aria-disabled:opacity-40"
-              style={{ background: dirty ? 'var(--color-primary)' : 'var(--color-surface-high)', color: dirty ? 'var(--color-on-primary)' : 'var(--color-on-surface-low)' }}>
+            <Button variant="ghost" size="sm" type="button"
+          onClick={dirty ? save : undefined}
+          disabled={!dirty}
+          disabledReason="No changes to save"
+          ariaLabel="Save: Your name"
+          title={!dirty ? 'No changes to save' : undefined}
+          data-type="body-s"
+          className="inline-flex items-center gap-1 rounded-md px-3 h-9 disabled:opacity-40 aria-disabled:opacity-40"
+          style={{ background: dirty ? 'var(--color-primary)' : 'var(--color-surface-high)', color: dirty ? 'var(--color-on-primary)' : 'var(--color-on-surface-low)' }}>
               {saved ? <Check size={14} /> : null} {saved ? 'Saved' : 'Save'}
-            </button>
+            </Button>
           </div>
         </Field>
         <Field label="Username" hint="A short handle stamped onto things you create (tasks, comments) so contributions stay attributable later. Lowercase letters, digits, - and _ — anything else is normalized. It's a label, not a login. Leave it empty to keep records unattributed.">
@@ -102,20 +106,25 @@ export function AccountPanel() {
         <Field label="Assistant name" hint="What the assistant calls itself in prompts and greetings ({{bot_name}}). Empty uses the default, Gideon.">
           <div className="flex items-center gap-s">
             <div className="flex-1" style={{ maxWidth: 280 }}><TextInput value={botDraft} onChange={setBotDraft} placeholder="Gideon" /></div>
-            <button type="button" onClick={botDirty ? saveBot : undefined} aria-disabled={!botDirty || undefined}
-              aria-label="Save: Assistant name"
-              title={!botDirty ? 'No changes to save' : undefined}
-              data-type="body-s" className="inline-flex items-center gap-1 rounded-md px-3 h-9 disabled:opacity-40 aria-disabled:opacity-40"
-              style={{ background: botDirty ? 'var(--color-primary)' : 'var(--color-surface-high)', color: botDirty ? 'var(--color-on-primary)' : 'var(--color-on-surface-low)' }}>
+            <Button variant="ghost" size="sm" type="button"
+          onClick={botDirty ? saveBot : undefined}
+          disabled={!botDirty}
+          disabledReason="No changes to save"
+          ariaLabel="Save: Assistant name"
+          title={!botDirty ? 'No changes to save' : undefined}
+          data-type="body-s"
+          className="inline-flex items-center gap-1 rounded-md px-3 h-9 disabled:opacity-40 aria-disabled:opacity-40"
+          style={{ background: botDirty ? 'var(--color-primary)' : 'var(--color-surface-high)', color: botDirty ? 'var(--color-on-primary)' : 'var(--color-on-surface-low)' }}>
               {botSaved ? <Check size={14} /> : null} {botSaved ? 'Saved' : 'Save'}
-            </button>
+            </Button>
           </div>
         </Field>
         <Row label="Restart onboarding" hint="Clears your name and re-runs the first-run setup flow.">
-          <button type="button" onClick={async () => { if (!await confirm({ title: 'Restart onboarding?', body: 'This clears your name and shows the setup flow again.', confirmLabel: 'Restart' })) return; try { await clearName() } catch (error) { notify(`Couldn't restart onboarding: ${String((error as Error)?.message || error)}`, 'error') } }}
-            data-type="body-s" className="inline-flex items-center gap-1.5 rounded-md px-3 h-9 text-on-surface-var hover:bg-surface-high transition-colors">
+          <Button variant="ghost" size="sm" type="button"
+            onClick={async () => { if (!await confirm({ title: 'Restart onboarding?', body: 'This clears your name and shows the setup flow again.', confirmLabel: 'Restart' })) return; try { await clearName() } catch (error) { notify(`Couldn't restart onboarding: ${String((error as Error)?.message || error)}`, 'error') } }}
+            className="inline-flex items-center gap-1.5 rounded-md px-3 h-9 text-on-surface-var hover:bg-surface-high transition-colors">
             <RotateCcw size={14} /> Restart
-          </button>
+          </Button>
         </Row>
       </Section>
 

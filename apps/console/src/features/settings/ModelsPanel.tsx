@@ -742,14 +742,16 @@ function UseCaseRow({ useCase, activeModels, revision, allModels, providers, cat
               <div
                 className="flex items-center gap-2.5 rounded-md pr-3 transition-colors hover:bg-surface-high"
                 style={on ? { background: 'color-mix(in srgb, var(--color-primary) 12%, transparent)' } : undefined}>
-                <button type="button" onClick={() => toggle(ref)} disabled={saving || stale.conflict !== null}
-                  className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-3 py-2 text-left">
+                <Button variant="ghost" size="sm" type="button"
+            onClick={() => toggle(ref)}
+            disabled={saving || stale.conflict !== null}
+            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-3 py-2 text-left">
                   <span className="grid size-4 shrink-0 place-items-center rounded border"
                     style={on ? { background: 'var(--color-primary)', borderColor: 'var(--color-primary)' } : { borderColor: 'var(--color-outline-variant)' }}>
                     {on && <Check size={10} strokeWidth={3} className="text-on-primary" />}
                   </span>
                   <span data-type="body-s" className="min-w-0 flex-1 truncate text-on-surface font-mono">{m.name}</span>
-                </button>
+                </Button>
                 <OffMachineChip runsHere={m.runs_here} />
                 {on && !m.capabilities.includes(CHAT_SUBCATEGORIES.has(useCase) ? 'chat' : useCase) && (
                   <StatusPill tone="warn" title={`This model is listed for ${m.capabilities.join(', ') || 'no supported job'}.`}>cannot do this</StatusPill>
