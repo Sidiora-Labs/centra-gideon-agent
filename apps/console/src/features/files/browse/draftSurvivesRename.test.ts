@@ -16,7 +16,8 @@ describe('useFileTabs.close reports consent so hosts can purge exactly then', ()
   beforeEach(() => vi.mocked(confirm).mockClear())
 
   it('returns true for a clean tab (closed, no prompt)', async () => {
-    const { result } = renderHook(() => useFileTabs(freshScope()))
+    const scope = freshScope()
+    const { result } = renderHook(() => useFileTabs(scope))
     act(() => result.current.open(entry('a.md')))
     let closed = false
     await act(async () => { closed = await result.current.close('a.md') })
@@ -25,7 +26,8 @@ describe('useFileTabs.close reports consent so hosts can purge exactly then', ()
   })
 
   it('returns true when the user confirms the discard', async () => {
-    const { result } = renderHook(() => useFileTabs(freshScope()))
+    const scope = freshScope()
+    const { result } = renderHook(() => useFileTabs(scope))
     act(() => { result.current.open(entry('a.md')); result.current.markDirty('a.md', true) })
     let closed = false
     await act(async () => { closed = await result.current.close('a.md') })
@@ -34,7 +36,8 @@ describe('useFileTabs.close reports consent so hosts can purge exactly then', ()
 
   it('returns false when the user cancels — the draft must NOT be purged then', async () => {
     vi.mocked(confirm).mockResolvedValueOnce(false)
-    const { result } = renderHook(() => useFileTabs(freshScope()))
+    const scope = freshScope()
+    const { result } = renderHook(() => useFileTabs(scope))
     act(() => { result.current.open(entry('a.md')); result.current.markDirty('a.md', true) })
     let closed = true
     await act(async () => { closed = await result.current.close('a.md') })

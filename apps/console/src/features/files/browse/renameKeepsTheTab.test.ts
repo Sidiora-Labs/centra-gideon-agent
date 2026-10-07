@@ -10,7 +10,8 @@ const freshScope = () => `rename-test-${++seq}`
 
 describe('renamePath', () => {
   it('re-points the tab, its name, and the active path', () => {
-    const { result } = renderHook(() => useFileTabs(freshScope()))
+    const scope = freshScope()
+    const { result } = renderHook(() => useFileTabs(scope))
     act(() => result.current.open(entry('notes/q3-final.md')))
     expect(result.current.tabs.map((t) => t.path)).toEqual(['notes/q3-final.md'])
 
@@ -23,7 +24,8 @@ describe('renamePath', () => {
   })
 
   it('carries the dirty flag to the new path rather than leaving it on the old', () => {
-    const { result } = renderHook(() => useFileTabs(freshScope()))
+    const scope = freshScope()
+    const { result } = renderHook(() => useFileTabs(scope))
     act(() => result.current.open(entry('a.md')))
     act(() => result.current.markDirty('a.md', true))
 
@@ -34,7 +36,8 @@ describe('renamePath', () => {
   })
 
   it('moves every tab under a renamed DIRECTORY', () => {
-    const { result } = renderHook(() => useFileTabs(freshScope()))
+    const scope = freshScope()
+    const { result } = renderHook(() => useFileTabs(scope))
     act(() => {
       result.current.open(entry('notes/a.md'))
       result.current.open(entry('notes/deep/b.md'))
@@ -49,7 +52,8 @@ describe('renamePath', () => {
   })
 
   it('does not claim a SIBLING whose name merely starts the same way', () => {
-    const { result } = renderHook(() => useFileTabs(freshScope()))
+    const scope = freshScope()
+    const { result } = renderHook(() => useFileTabs(scope))
     act(() => {
       result.current.open(entry('notes/a.md'))
       result.current.open(entry('notes-archive/b.md'))
@@ -63,7 +67,8 @@ describe('renamePath', () => {
   })
 
   it('leaves everything alone when nothing matches', () => {
-    const { result } = renderHook(() => useFileTabs(freshScope()))
+    const scope = freshScope()
+    const { result } = renderHook(() => useFileTabs(scope))
     act(() => result.current.open(entry('a.md')))
     const before = result.current.tabs
 
@@ -73,7 +78,8 @@ describe('renamePath', () => {
   })
 
   it('ignores a no-op or an empty path', () => {
-    const { result } = renderHook(() => useFileTabs(freshScope()))
+    const scope = freshScope()
+    const { result } = renderHook(() => useFileTabs(scope))
     act(() => result.current.open(entry('a.md')))
 
     act(() => result.current.renamePath('a.md', 'a.md'))
@@ -87,7 +93,8 @@ describe('renamePath', () => {
 
 describe('tabsUnder', () => {
   it('reports the tabs a rename or delete of a path would affect', () => {
-    const { result } = renderHook(() => useFileTabs(freshScope()))
+    const scope = freshScope()
+    const { result } = renderHook(() => useFileTabs(scope))
     act(() => {
       result.current.open(entry('notes/a.md'))
       result.current.open(entry('notes/deep/b.md'))
