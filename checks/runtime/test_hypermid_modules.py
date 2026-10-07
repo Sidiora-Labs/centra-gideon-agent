@@ -6,7 +6,8 @@ import sys
 import pytest
 
 from gideon.hypermid.foundation import Id, Scope
-from gideon.hypermid.modules import HypermidModuleSupervisor, ToolModuleSpec
+from gideon.hypermid.modules import HypermidModuleSupervisor
+from gideon.sdk.hypermid import ToolModuleSpec
 
 
 @pytest.mark.asyncio
