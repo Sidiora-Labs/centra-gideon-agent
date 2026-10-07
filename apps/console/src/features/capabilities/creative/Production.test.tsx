@@ -10,26 +10,45 @@ let server: ChildProcess
 let apiRoot: string
 let home: string
 const repository = resolve(process.cwd(), '../..')
+const originalFetch = globalThis.fetch
 
 beforeAll(async () => {
   home = mkdtempSync(`${tmpdir()}/gideon-production-ui-`)
-  server = spawn(process.env.GIDEON_TEST_PYTHON || '/tmp/gideon-runtime-venv/bin/python',
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, PYTHONPATH: resolve(repository, 'runtime'), GIDEON_HOME: home }
+  delete childEnv.GIDEON_DEV_NO_AUTH
+  server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3',
     [resolve(repository, 'checks/runtime/capabilities/creative/production_server.py'), home],
-    { env: { ...process.env, PYTHONPATH: resolve(repository, 'runtime'), GIDEON_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] })
-  apiRoot = await new Promise<string>((done, reject) => {
+    { cwd: repository, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] })
+  const ready = await new Promise<{ url: string; token: string }>((done, reject) => {
     let output = ''; let errors = ''
     server.stderr?.on('data', chunk => { errors += chunk.toString() })
     server.once('error', reject)
     server.once('exit', code => reject(new Error(`Production server exited ${code}: ${errors}`)))
     server.stdout?.on('data', chunk => {
       output += chunk.toString()
-      const port = output.split('\n').find(line => /^\d+$/.test(line.trim()))
-      if (port) done(`http://127.0.0.1:${port.trim()}/api/capabilities/creative/series`)
+      const line = output.split('\n').find(value => value.startsWith('{"url":'))
+      if (line) {
+        try {
+          const value = JSON.parse(line) as { url: string; token: string }
+          if (typeof value.url === 'string' && typeof value.token === 'string') done(value)
+        } catch { /* Wait for complete native readiness. */ }
+      }
     })
   })
+  apiRoot = ready.url + '/api/capabilities/creative/series'
+  expect((await originalFetch(apiRoot)).status).toBe(403)
+  globalThis.fetch = (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), ready.url)
+    if (url.origin !== ready.url) return originalFetch(input, init)
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+    headers.set('Authorization', `Bearer ${ready.token}`)
+    headers.set('Origin', ready.url)
+    return originalFetch(url, { ...init, headers })
+  }
 })
 afterEach(cleanup)
 afterAll(async () => {
+  globalThis.fetch = originalFetch
   if (server && server.exitCode === null) {
     const ended = new Promise<void>(done => server.once('exit', () => done()))
     server.kill('SIGTERM'); await ended
@@ -111,10 +130,22 @@ describe('bounded series production', () => {
   it('rejects invalid model-attempt bounds before a run is created', async () => {
     const { series } = await seed('bounds')
     render(<Production id={series.id} revision={series.revision} apiRoot={apiRoot} />)
-    fireEvent.change(await screen.findByLabelText('Maximum model attempts'), { target: { value: '4' } })
-    expect(screen.getByRole('button', { name: 'Start production run' })).toBeDisabled()
-    fireEvent.change(screen.getByLabelText('Maximum model attempts'), { target: { value: '0' } })
-    expect(screen.getByRole('button', { name: 'Start production run' })).toBeDisabled()
+    const attempts = await screen.findByLabelText('Maximum model attempts') as HTMLInputElement
+    fireEvent.change(attempts, { target: { value: '4' } })
+    expect(attempts.validity.rangeOverflow).toBe(true)
+    fireEvent.blur(attempts)
+    expect(attempts).toHaveValue(3)
+    fireEvent.change(attempts, { target: { value: '0' } })
+    expect(attempts.validity.rangeUnderflow).toBe(true)
+    fireEvent.blur(attempts)
+    expect(attempts).toHaveValue(1)
+    for (const maximum of [4, 0]) {
+      const refused = await fetch(`${apiRoot}/${series.id}/production`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: `invalid-bound-${maximum}`, series_revision: series.revision, mode: 'authored', max_attempts: maximum }),
+      })
+      expect(refused.status).toBe(400)
+    }
     const state = await (await fetch(`${apiRoot}/${series.id}/production`)).json()
     expect(state.items).toEqual([])
   })

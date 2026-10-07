@@ -6,6 +6,7 @@ if not __package__:
 
 import asyncio
 import json
+import signal
 
 from checks.runtime.capabilities.workspace.test_provider_terminal import (
     ProviderTerminal,
@@ -26,8 +27,10 @@ async def main():
         ),
         flush=True,
     )
+    stopped = asyncio.Event()
+    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stopped.set)
     try:
-        await asyncio.Event().wait()
+        await stopped.wait()
     finally:
         await fixture.asyncTearDown()
 

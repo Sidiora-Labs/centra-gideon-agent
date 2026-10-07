@@ -22,9 +22,12 @@ let backendErrors = ''
 const diagnostics = mkdtempSync(resolve(tmpdir(), 'workspace08-ui-diagnostics-'))
 const root = resolve(process.cwd(), '../..')
 const cache = mkdtempSync(resolve(tmpdir(), 'workspace-provider-vite-'))
+const home = mkdtempSync(resolve(tmpdir(), 'gideon-provider-home-'))
 
 beforeAll(async () => {
-  backend = spawn('/tmp/gideon-runtime-venv/bin/python', [resolve(root, 'checks/runtime/capabilities/workspace/provider_ui_server.py')], { env: { ...process.env, PYTHONPATH: resolve(root, 'runtime') }, stdio: ['ignore', 'pipe', 'pipe'] })
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: home }
+  delete childEnv.GIDEON_DEV_NO_AUTH
+  backend = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', [resolve(root, 'checks/runtime/capabilities/workspace/provider_ui_server.py')], { cwd: root, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] })
   const ready = await new Promise<{ url: string; repo: string; token: string }>((accept, reject) => {
     let output = '', errors = ''
     backend.stderr!.on('data', chunk => { errors += chunk; backendErrors += chunk })
@@ -35,6 +38,7 @@ beforeAll(async () => {
       if (line) accept(JSON.parse(line))
     })
   })
+  expect((await fetch(`${ready.url}/api/capabilities/workspace`)).status).toBe(403)
   repo = ready.repo; token = ready.token
   server = await createServer({
     configFile: false, cacheDir: cache, root: process.cwd(),
@@ -68,7 +72,11 @@ afterAll(async () => {
   }
   await browser?.close()
   await server?.close()
-  backend?.kill()
+  if (backend && backend.exitCode === null) {
+    const stopped = new Promise<void>(done => backend.once('exit', () => done()))
+    backend.kill('SIGTERM'); await stopped
+  }
+  rmSync(home, { recursive: true, force: true })
   rmSync(cache, { recursive: true, force: true })
 })
 
