@@ -11,13 +11,13 @@ import sys
 import time
 from typing import Any
 
-from gideon.interfaces.cli import run as cli_run
-from gideon.engine import home_gateway
-from gideon.security.approval_brief import RISK_LABELS
-from gideon.interfaces.cli.run import RunError
 from gideon.core.config import loader as config_loader
 from gideon.core.constants import DATA_WARNING
+from gideon.engine import home_gateway
 from gideon.engine.gateway_base import GatewayBaseUnresolved
+from gideon.interfaces.cli import run as cli_run
+from gideon.interfaces.cli.run import RunError
+from gideon.security.approval_brief import RISK_LABELS
 
 #: What ends the interactive chat, besides Ctrl-D.
 _EXIT_WORDS = frozenset({"exit", "quit", "/exit", "/quit", ":q"})
@@ -67,10 +67,16 @@ def _chat_main(args) -> int:
 
     try:
         from gideon.interfaces.cli.server import resolve_client_port
+
         port = resolve_client_port(getattr(args, "port", None))
         if not cli_run.probe_gateway(port):
             raise RunError(_no_gateway(port))
-    except (RunError, GatewayBaseUnresolved, home_gateway.HomeGatewayMismatch, home_gateway.NoGatewayRunning) as exc:
+    except (
+        RunError,
+        GatewayBaseUnresolved,
+        home_gateway.HomeGatewayMismatch,
+        home_gateway.NoGatewayRunning,
+    ) as exc:
         print(f"gideon chat: {exc}", file=sys.stderr)
         return 1
     model = getattr(args, "model", None) or ""
@@ -103,6 +109,7 @@ def _failed(sign_in: _SignIn, exc: RunError) -> None:
 
 def _no_gateway(port: int) -> str:
     from gideon.operations.service import controller
+
     try:
         installed = controller.this_homes_service() is not None
     except Exception:
@@ -126,7 +133,10 @@ class _SignIn:
         if not self._token or time.monotonic() - self._minted >= _REFRESH_AFTER_SECS:
             try:
                 self._token = cli_run.mint_local_token(self.port)
-            except (home_gateway.HomeGatewayMismatch, home_gateway.NoGatewayRunning) as error:
+            except (
+                home_gateway.HomeGatewayMismatch,
+                home_gateway.NoGatewayRunning,
+            ) as error:
                 raise RunError(str(error)) from error
             self._minted = time.monotonic()
         return self._token
@@ -136,7 +146,10 @@ def _open_chat(sign_in: _SignIn, model: str) -> str:
     """Open a chat in the gateway, as the dashboard's New chat does, and return its key. *model*
     is the model for this chat; empty, the chat model bound in Settings → Models."""
     created = cli_run._api(
-        sign_in.port, sign_in.token(), "/api/chat/sessions", {"model": model} if model else {}
+        sign_in.port,
+        sign_in.token(),
+        "/api/chat/sessions",
+        {"model": model} if model else {},
     )
     key = str(created.get("key") or "")
     if not key:
@@ -192,7 +205,9 @@ async def _converse(sign_in: _SignIn, turn: _Turn, message: str) -> None:
     ended there: the call it was waiting on is cancelled and never runs.
     """
     port = sign_in.port
-    async with cli_run._turn_socket(port, sign_in.token(), turn.session_key, message) as (http, ws):
+    async with cli_run._turn_socket(
+        port, sign_in.token(), turn.session_key, message
+    ) as (http, ws):
         try:
             await cli_run._read_turn(ws, turn, None)
         except asyncio.CancelledError:
@@ -260,7 +275,11 @@ class _Turn(cli_run._Collector):
     def _row(self, role: str, text: str) -> None:
         """A row the gateway added to the chat: a reply that did not stream (a slash command's),
         a notice, or an error."""
-        if role not in ("assistant", "notice", "error") or not text or (role, text) in self._shown:
+        if (
+            role not in ("assistant", "notice", "error")
+            or not text
+            or (role, text) in self._shown
+        ):
             return
         self._shown.add((role, text))
         if role == "assistant":
@@ -287,7 +306,9 @@ class _Turn(cli_run._Collector):
         """Say how the turn ended when it did not complete and none of its rows said why."""
         if self.outcome == "stopped":
             self.note("The turn was stopped before it finished.")
-        elif self.outcome != "complete" and not any(r == "error" for r, _ in self._shown):
+        elif self.outcome != "complete" and not any(
+            r == "error" for r, _ in self._shown
+        ):
             self.note("The turn did not finish, and the gateway gave no reason.")
 
 
@@ -297,7 +318,9 @@ def _asks(entry: dict[str, Any]) -> str:
     is answered."""
     tool = str(entry.get("tool") or "A tool call")
     risk = RISK_LABELS.get(str(entry.get("risk") or ""), "").lower()
-    lines = [f"{tool} is waiting for your decision" + (f" (risk: {risk})." if risk else ".")]
+    lines = [
+        f"{tool} is waiting for your decision" + (f" (risk: {risk})." if risk else ".")
+    ]
     for detail in (entry.get("tool_purpose"), entry.get("tool_input")):
         text = " ".join(str(detail or "").split())
         if len(text) > 200:
@@ -314,7 +337,8 @@ def _asks(entry: dict[str, Any]) -> str:
 
 def _ended(tool: str, frame: dict[str, Any]) -> str:
     """How an approval ended, from its ``approval_resolved`` frame: "Approved: write_file.", and why
-    when nobody answered it ("Expired: write_file (nobody answered within 5 minutes).")."""
+    when nobody answered it ("Expired: write_file (nobody answered within 5 minutes).").
+    """
     word = _ENDED.get(str(frame.get("outcome") or ""), "Ended")
     why = str(frame.get("ended") or "")
     return f"{word}: {tool or 'the call'}" + (f" ({why})" if why else "") + "."

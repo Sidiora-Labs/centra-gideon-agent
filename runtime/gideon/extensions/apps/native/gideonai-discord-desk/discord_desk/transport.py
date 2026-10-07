@@ -57,7 +57,11 @@ if _APP_DIR not in _sys.path:
 # only keeps this app's dir on sys.path while it execs this module, so a
 # ``from discord_desk.X import`` inside a method would run LATER, off the path,
 # and fail. Binding them here, during exec, captures them for the process life.
-from discord_desk.api import DISCORD_DESK_MAX_TEXT, DiscordDeskApi, DiscordDeskHttpApi  # noqa: E402
+from discord_desk.api import (  # noqa: E402
+    DISCORD_DESK_MAX_TEXT,
+    DiscordDeskApi,
+    DiscordDeskHttpApi,
+)
 from discord_desk.delivery import DiscordDeskDelivery, split_message  # noqa: E402
 from discord_desk.gateway import DEFAULT_GATEWAY_URL, DiscordDeskGateway  # noqa: E402
 from discord_desk.inbound_tap import publish as publish_inbound  # noqa: E402
@@ -68,7 +72,6 @@ from discord_desk.settings import (  # noqa: E402
     reload_settings,
 )
 from discord_desk.writes import SendRefused, live_writes_disabled  # noqa: E402
-
 
 logger = logging.getLogger(__name__)
 

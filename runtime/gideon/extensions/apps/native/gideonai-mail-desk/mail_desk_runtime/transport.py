@@ -70,7 +70,11 @@ if _APP_DIR not in _sys.path:
 # ``from mail_desk_runtime.X import`` inside a method would run LATER, off the path, and
 # fail. Binding them here, during exec, captures them for the process life.
 from mail_desk_runtime.delivery import MailDeskDelivery, ThreadStore  # noqa: E402
-from mail_desk_runtime.imap_client import Imap4Client, ImapClient, ImapError  # noqa: E402
+from mail_desk_runtime.imap_client import (  # noqa: E402
+    Imap4Client,
+    ImapClient,
+    ImapError,
+)
 from mail_desk_runtime.imap_client import probe_login as imap_probe  # noqa: E402
 from mail_desk_runtime.inbound_tap import publish as publish_inbound  # noqa: E402
 from mail_desk_runtime.mime import parse_inbound, strip_quoted_reply  # noqa: E402
@@ -85,7 +89,6 @@ from mail_desk_runtime.settings import (  # noqa: E402
 from mail_desk_runtime.smtp_client import SmtplibSender  # noqa: E402
 from mail_desk_runtime.smtp_client import probe_login as smtp_probe  # noqa: E402
 from mail_desk_runtime.writes import SendRefused, live_writes_disabled  # noqa: E402
-
 
 logger = logging.getLogger(__name__)
 

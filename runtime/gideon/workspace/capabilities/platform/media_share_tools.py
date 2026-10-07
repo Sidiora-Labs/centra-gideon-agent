@@ -3,7 +3,12 @@ import json
 from jsonschema import ValidationError, validate
 
 from gideon.core.config.loader import config_dir
-from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers.base import (
+    RiskLevel,
+    ToolDefinition,
+    ToolProvider,
+    ToolResult,
+)
 from gideon.workspace.artifacts.registry import get_provider
 
 from .media_shares import MediaShareError, MediaShares

@@ -66,7 +66,6 @@ if _APP_DIR not in _sys.path:
 
 from mail_desk_runtime.inbound_tap import subscribe, unsubscribe  # noqa: E402
 
-
 logger = logging.getLogger(__name__)
 
 #: The registered source name, and therefore the middle segment of every namespaced event

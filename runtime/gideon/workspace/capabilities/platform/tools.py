@@ -6,10 +6,18 @@ import sqlite3
 from jsonschema import ValidationError, validate
 
 from gideon.integrations.mcp_core import get_current_session_key
-from gideon.workspace.capabilities.platform.compositions import PresetLockedError, ViewNotFoundError
-from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers.base import (
+    RiskLevel,
+    ToolDefinition,
+    ToolProvider,
+    ToolResult,
+)
 from gideon.workspace.capabilities.platform.catalog import current_catalog
 from gideon.workspace.capabilities.platform.comparisons import view as comparison_view
+from gideon.workspace.capabilities.platform.compositions import (
+    PresetLockedError,
+    ViewNotFoundError,
+)
 from gideon.workspace.capabilities.platform.connections import projection
 from gideon.workspace.capabilities.platform.gsd import inspect as gsd_inspect
 from gideon.workspace.capabilities.platform.gsd import request_phase
@@ -280,13 +288,17 @@ class PlatformTools(ToolProvider):
 
                 result = view_275(**arguments)
             elif tool_name == "platform_dashboard_compositions":
-                from gideon.workspace.capabilities.platform.compositions import composition_state
+                from gideon.workspace.capabilities.platform.compositions import (
+                    composition_state,
+                )
 
                 result = composition_state()
             elif tool_name == "platform_dashboard_select":
                 if not get_current_session_key():
                     raise ValueError("Authenticated dashboard selector required")
-                from gideon.workspace.capabilities.platform.compositions import set_composition
+                from gideon.workspace.capabilities.platform.compositions import (
+                    set_composition,
+                )
 
                 result = set_composition(
                     arguments["view_id"],
@@ -338,10 +350,10 @@ class PlatformTools(ToolProvider):
             elif tool_name == "platform_maintenance_control":
                 if not get_current_session_key():
                     raise ValueError("Authenticated maintenance controller required")
+                from gideon.workspace.capabilities.platform.maintenance import control
                 from gideon.workspace.capabilities.platform.maintenance_runtime import (
                     supervisor,
                 )
-                from gideon.workspace.capabilities.platform.maintenance import control
 
                 result = await control(
                     arguments["id"], arguments["action"], supervisor()

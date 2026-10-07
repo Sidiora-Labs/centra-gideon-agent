@@ -1,17 +1,17 @@
 """Public compatibility exports for canonical app-proxy authentication."""
 
 from gideon.security.app_proxy_signatures import (  # noqa: F401 — compatibility exports
+    _DEFAULT_EXEMPT,
+    APP_SECRET_ENV,
     PROXY_SIGNATURE_HEADER,
     PROXY_SIGNATURE_WINDOW_SECS,
-    APP_SECRET_ENV,
-    _DEFAULT_EXEMPT,
-    build_signing_string,
-    _hmac_hex,
-    sign_proxy_request,
-    _verify,
     _deny,
-    require_proxy_signature,
+    _hmac_hex,
+    _verify,
+    build_signing_string,
     fence_untrusted,
+    require_proxy_signature,
+    sign_proxy_request,
 )
 
 __all__ = [

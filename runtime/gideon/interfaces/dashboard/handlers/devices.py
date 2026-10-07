@@ -42,7 +42,17 @@ from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
 from gideon.interfaces.dashboard.handlers.page_shell import page_document
 from gideon.interfaces.dashboard.origin import check_origin
-from gideon.interfaces.dashboard.session_store import DeviceInfo, attach_device, device_sessions, end_session, forget_session, nonces_for_session, sanitize_device_kind, sanitize_device_name, session_id
+from gideon.interfaces.dashboard.session_store import (
+    DeviceInfo,
+    attach_device,
+    device_sessions,
+    end_session,
+    forget_session,
+    nonces_for_session,
+    sanitize_device_kind,
+    sanitize_device_name,
+    session_id,
+)
 from gideon.interfaces.dashboard.token_auth import (
     DEFAULT_BROWSER_SESSION_TTL_SECS,
     generate_token,

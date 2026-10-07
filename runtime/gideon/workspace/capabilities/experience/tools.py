@@ -3,7 +3,12 @@
 import json
 from typing import Any
 
-from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers.base import (
+    RiskLevel,
+    ToolDefinition,
+    ToolProvider,
+    ToolResult,
+)
 
 from .ambient import AmbientDisplay
 from .avatar import AvatarStore

@@ -27,7 +27,6 @@ from pathlib import Path
 from typing import TypedDict, Unpack
 
 import pytest
-
 from mail_desk_fakes import FakeImapServer, FakeSmtpServer, FakeState, build_message
 from mail_desk_runtime import inbound_tap
 from mail_desk_runtime.delivery import MailDeskDelivery, ThreadStore

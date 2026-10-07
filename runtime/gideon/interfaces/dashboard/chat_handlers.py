@@ -699,9 +699,7 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
         d.update(_app_origin_fields(getattr(s, "created_by_app", ""), app_destinations))
         link_thread = None
         try:
-            link_thread, _ = state.sessions.get_channel_link(
-                _history_key_for(s.key)
-            )
+            link_thread, _ = state.sessions.get_channel_link(_history_key_for(s.key))
         except Exception:
             link_thread = None
         if link_thread:
@@ -732,9 +730,7 @@ async def api_chat_sessions(request: web.Request) -> web.Response:
             else:
                 name = raw_key
             try:
-                link_thread, _ = state.sessions.get_channel_link(
-                    _history_key_for(name)
-                )
+                link_thread, _ = state.sessions.get_channel_link(_history_key_for(name))
             except Exception:
                 link_thread = None
             if (

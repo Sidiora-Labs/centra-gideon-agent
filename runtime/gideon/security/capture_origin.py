@@ -105,8 +105,8 @@ def owner_word_capture(
 ) -> VerifiedCapture | None:
     from dataclasses import replace
 
-    from gideon.security.session_signing import load_or_create_key
     from gideon.security.session_credentials import current_work
+    from gideon.security.session_signing import load_or_create_key
 
     work = current_work()
     if log is None or row is None or work is None or work.memory_mode != "persistent":
@@ -163,8 +163,8 @@ def owner_word_capture(
 def validate_capture(capture) -> VerifiedCapture | None:
     from gideon.cognition.history import ConversationLog
     from gideon.core.config.loader import config_dir
-    from gideon.security.session_signing import KEY_BYTES, key_path
     from gideon.security.session_credentials import current_work
+    from gideon.security.session_signing import KEY_BYTES, key_path
 
     if (
         not isinstance(capture, VerifiedCapture)

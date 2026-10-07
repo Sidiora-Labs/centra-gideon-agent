@@ -29,7 +29,6 @@ from gideon.security.security import (
     redact_exfiltration_urls,
     redact_for_display,
 )
-
 from gideon.security.session_credentials import memory_tool_endpoint
 
 logger = logging.getLogger(__name__)

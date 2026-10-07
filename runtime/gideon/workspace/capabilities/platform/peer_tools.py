@@ -2,7 +2,12 @@ import json
 
 from jsonschema import ValidationError, validate
 
-from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers.base import (
+    RiskLevel,
+    ToolDefinition,
+    ToolProvider,
+    ToolResult,
+)
 from gideon.workspace.capabilities.platform.peers import PeerError, PeerStore
 
 SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}

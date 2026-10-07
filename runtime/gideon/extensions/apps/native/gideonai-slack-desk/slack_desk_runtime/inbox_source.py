@@ -40,8 +40,10 @@ _APP_DIR = str(_Path(__file__).resolve().parents[1])
 if _APP_DIR not in _sys.path:
     _sys.path.insert(0, _APP_DIR)
 
-from slack_desk_runtime.client import RealSlackDeskClient, SlackDeskClientOps  # noqa: E402
-
+from slack_desk_runtime.client import (  # noqa: E402
+    RealSlackDeskClient,
+    SlackDeskClientOps,
+)
 
 logger = logging.getLogger(__name__)
 

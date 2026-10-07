@@ -3,7 +3,12 @@
 import json
 
 from gideon.core.config.loader import config_dir
-from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers.base import (
+    RiskLevel,
+    ToolDefinition,
+    ToolProvider,
+    ToolResult,
+)
 from gideon.workspace.capabilities.music.store import DomainError
 
 from .store import IntegrationApps

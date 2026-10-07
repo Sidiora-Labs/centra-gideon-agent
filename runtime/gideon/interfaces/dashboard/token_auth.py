@@ -36,15 +36,18 @@ from aiohttp import web
 
 from gideon.core.config.loader import _DEFAULT_PORT
 from gideon.interfaces.dashboard.origin import is_loopback, is_private_network
-from gideon.security.auth.lifetimes import DEFAULT_BROWSER_SESSION_TTL_SECS as _DEFAULT_BROWSER_SESSION_TTL_SECS
-from gideon.security.auth.lifetimes import MAX_SESSION_TTL_SECS, cap_legacy_expiry, parse_lifetime
-from gideon.security.auth.lifetimes import parse_config_duration as parse_config_duration
-from gideon.security.auth import revocation
+from gideon.security.auth import lifetimes, revocation
+from gideon.security.auth.lifetimes import (
+    MAX_SESSION_TTL_SECS,
+    cap_legacy_expiry,
+    parse_lifetime,
+)
 from gideon.security.sel import sel as _sel_fn
 from gideon.workspace.artifacts.deploy import SERVED_PATH, redacted_serve_path
 
 # Public compatibility export consumed by dashboard handlers and lifecycle.
-DEFAULT_BROWSER_SESSION_TTL_SECS = _DEFAULT_BROWSER_SESSION_TTL_SECS
+DEFAULT_BROWSER_SESSION_TTL_SECS = lifetimes.DEFAULT_BROWSER_SESSION_TTL_SECS
+parse_config_duration = lifetimes.parse_config_duration
 
 logger = logging.getLogger(__name__)
 
@@ -851,6 +854,7 @@ def revoke_all_sessions() -> None:
     `test_token_rejected_when_no_nonces_registered`, which is exactly the assertion that
     should notice.
     """
+
     def clear_durable() -> None:
         from gideon.interfaces.dashboard.session_store import clear_sessions
 

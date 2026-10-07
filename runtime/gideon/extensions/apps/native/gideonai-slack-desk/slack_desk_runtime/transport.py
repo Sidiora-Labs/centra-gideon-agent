@@ -46,7 +46,6 @@ from slack_desk_runtime.runtime import SlackDeskRuntime  # noqa: E402
 from slack_desk_runtime.settings import load_tokens  # noqa: E402
 from slack_desk_runtime.writes import SendRefused, live_writes_disabled  # noqa: E402
 
-
 # NOT ``__name__``: the app loader execs this ENTRY module under a synthetic name
 # (``_gid_app_gideonai_slack_desk__slack_desk_runtime_transport``), so ``__name__`` produced a
 # logger outside the ``slack_desk_runtime`` root this app declares in ``app.json``

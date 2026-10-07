@@ -3,7 +3,12 @@
 import json
 
 from gideon.core.config.loader import config_dir
-from gideon.integrations.tool_providers.base import RiskLevel, ToolDefinition, ToolProvider, ToolResult
+from gideon.integrations.tool_providers.base import (
+    RiskLevel,
+    ToolDefinition,
+    ToolProvider,
+    ToolResult,
+)
 
 from .direction import DirectionStore
 from .store import CatalogError

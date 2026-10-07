@@ -16,7 +16,6 @@ import json
 from typing import TypedDict, Unpack
 
 import pytest
-
 from mail_desk_fakes import FakeImapServer, FakeSmtpServer, FakeState, build_message
 from mail_desk_runtime.delivery import MailDeskDelivery, ThreadStore
 from mail_desk_runtime.settings import CRED_IMAP_PASS, reload_settings

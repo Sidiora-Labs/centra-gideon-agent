@@ -231,6 +231,7 @@ async def _handle_agent(
 ) -> None:
     """Switch agent directly if valid name given, otherwise show selector."""
     from pathlib import Path
+
     from slack_desk_runtime.handler import (
         _get_default_agent,
         _resolve_agent_name,
@@ -466,8 +467,8 @@ def _get_agent_names() -> list[str]:
     When a read is blocked by ``is_sensitive_path()``, a SEL audit event
     (``sensitive_path_blocked``) is emitted so the attempt is observable.
     """
-    from pathlib import Path
     import json
+    from pathlib import Path
 
     from gideon.sdk.channel import safe_read_file
 
@@ -545,8 +546,8 @@ async def _handle_sessions(
     orch: "SlackDeskRuntime", caller_id: str, args: str, respond: Callable
 ) -> None:
     """List last 10 sessions as task_card blocks with resume buttons."""
-    from pathlib import Path
     import json
+    from pathlib import Path
 
     sess_dir = Path.home() / ".gideon" / "sessions"
     if not sess_dir.exists():

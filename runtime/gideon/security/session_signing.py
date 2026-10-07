@@ -60,5 +60,3 @@ def _ensure_owner_only(path: Path) -> None:
             logger.warning("session key had mode %o — tightened to 0600", mode)
     except OSError:
         logger.debug("could not verify session key permissions", exc_info=True)
-
-
