@@ -23,6 +23,7 @@ const ENVELOPES: Record<string, unknown> = {
   dashboardConfig: { user_name: 'Ada' },
   agents: { agents: [] },
   skillProposals: { proposals: [], lastReview: null },
+  localInferenceWaits: { waits: [] } satisfies Awaited<ReturnType<typeof import('../../shared/data/api').api.localInferenceWaits>>,
 }
 vi.mock('../../shared/data/api', async (orig) => {
   const real = await orig<typeof import('../../shared/data/api')>()
@@ -184,7 +185,7 @@ describe('the visible Search launcher', () => {
     const user = userEvent.setup()
     renderApp()
     await user.click(within(rail()).getByRole('button', { name: 'Search' }))
-    const search = await screen.findByLabelText('Search pages and actions')
+    const search = await screen.findByLabelText('Search pages, actions and content')
     await user.type(search, 'Manage apps')
     await user.click(await screen.findByRole('option', { name: /^Manage apps/ }))
     await waitFor(() => expect(location.hash).toBe('#/apps/manage'))
@@ -224,7 +225,7 @@ describe('a hidden surface is hidden from the RAIL, never from the app', () => {
     await waitFor(() => expect(railLinks()).not.toContain('Tools'))
 
     await user.keyboard('{Meta>}k{/Meta}')
-    const search = await screen.findByLabelText('Search pages and actions')
+    const search = await screen.findByLabelText('Search pages, actions and content')
     await user.type(search, 'Tools')
     const hit = await screen.findByRole('option', { name: /^Tools/ })
     await user.click(hit)
