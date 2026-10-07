@@ -1,3 +1,4 @@
+import { Modal } from '../../shared/ui/Modal'
 import { useState } from 'react'
 import { AgentStatus } from '../../shared/vendor/assistant-ui/elements/agent-status'
 import { AgentCard } from '../../shared/vendor/assistant-ui/elements/agent-card'
@@ -145,12 +146,8 @@ export function McpServerResult({ server, allowManage, onSaved }: { server: McpS
 export function McpConfigDialog({ servers, allowManage, onSaved, onClose }: {
   servers: McpServer[]; allowManage: boolean; onSaved: () => void; onClose: () => void
 }) {
-  return <div role="dialog" aria-label="MCP configuration">
-    <header className="flex items-center justify-between gap-2">
-      <h2>MCP configuration</h2>
-      <button type="button" onClick={onClose}>Close</button>
-    </header>
+  return <Modal title="MCP configuration" onClose={onClose}>
     {servers.length ? servers.map(server => <McpServerResult key={server.name} server={server} allowManage={allowManage} onSaved={onSaved} />)
       : <p role="status">No MCP servers are configured.</p>}
-  </div>
+  </Modal>
 }
