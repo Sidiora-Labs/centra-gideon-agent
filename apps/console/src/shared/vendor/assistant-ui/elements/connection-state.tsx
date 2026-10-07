@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { CheckIcon, CloudOffIcon, Loader2Icon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -42,13 +44,9 @@ export function ConnectionState({
           <span className="min-w-0 flex-1 text-[13px]">
             Connection lost. The run kept going on the server.
           </span>
-          <button
-            type="button"
-            onClick={onRetry}
-            className="text-foreground/70 hover:bg-foreground/[0.06] hover:text-foreground/95 shrink-0 rounded-full px-2.5 py-1 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
-          >
+          <Button type="button" onClick={onRetry} className="text-foreground/70 hover:bg-foreground/[0.06] hover:text-foreground/95 shrink-0 rounded-full px-2.5 py-1 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]" variant="ghost" size="sm" style={{ height: 'auto', paddingInline: '0.625rem', paddingBlock: '0.25rem' }}>
             Reconnect
-          </button>
+          </Button>
         </>
       )}
 

@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { RefreshCwIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -47,8 +49,7 @@ export function ImageGeneration({
           {generating ? <><ShimmerLabel className="relative">{statusLabel ?? "Generating"}</ShimmerLabel>
             {showPrompt && statusLabel && prompt ? <> · {prompt}</> : null}</> : showPrompt ? prompt : null}
         </p>
-        {!generating && onRegenerate && <button type="button" aria-label="Regenerate image" onClick={onRegenerate}
-          className={cn(ghostButton, "size-6 shrink-0")}><RefreshCwIcon className="size-3" /></button>}
+        {!generating && onRegenerate && <Button type="button" ariaLabel="Regenerate image" onClick={onRegenerate} className={cn(ghostButton, "size-6 shrink-0")} variant="ghost" size="xs" style={{ width: '1.5rem', height: '1.5rem', padding: 0 }}><RefreshCwIcon className="size-3" /></Button>}
       </div>}
     </div>
   );

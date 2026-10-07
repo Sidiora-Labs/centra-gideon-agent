@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { BrainIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -51,14 +53,9 @@ export function MemoryChips({
           >
             {chip.text}
             {onForget && (
-              <button
-                type="button"
-                aria-label={`Forget "${chip.text}"`}
-                onClick={() => onForget(chip.id)}
-                className={cn(ghostButton, "size-4")}
-              >
+              <Button type="button" ariaLabel={`Forget "${chip.text}"`} onClick={() => onForget(chip.id)} className={cn(ghostButton, "size-4")} variant="ghost" size="xs" style={{ width: '1rem', height: '1rem', padding: 0 }}>
                 <XIcon className="size-2.5" />
-              </button>
+              </Button>
             )}
           </span>
         ))}

@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { ArrowUpIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -113,21 +115,13 @@ export function ChatPanelComposer({
       {...props}
     >
       <span className="text-foreground/35 text-[13px]">{placeholder}</span>
-      <button
-        type="button"
-        aria-label="Send"
-        onClick={onSend}
-        aria-disabled={(!onSend) || undefined}
-        aria-description={(!onSend) ? "Sending is unavailable in this view." : undefined}
-        title={(!onSend) ? "Sending is unavailable in this view." : undefined}
-        className={cn(
+      <Button type="button" ariaLabel="Send" onClick={onSend} disabledReason={(!onSend) ? "Sending is unavailable in this view." : undefined} title={(!onSend) ? "Sending is unavailable in this view." : undefined} className={cn(
           "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
           inkButton,
           "flex size-7 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-40",
-        )}
-      >
+        )} disabled={(!onSend) || undefined} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
         <ArrowUpIcon className="size-3.5" />
-      </button>
+      </Button>
     </div>
   );
 }

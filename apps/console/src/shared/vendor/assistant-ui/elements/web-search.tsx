@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { SearchIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -91,10 +93,9 @@ export function WebSearch({
               className="fade-in slide-in-from-bottom-1 animate-in fill-mode-both hover:bg-foreground/[0.03] -mx-2.5 flex items-center gap-2.5 rounded-xl px-2.5 py-1.5 transition-colors duration-300"
             >
               {onSelect ? (
-                <button type="button" onClick={() => onSelect(result)} aria-label={`Select ${result.title}`}
-                  className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 text-start focus-visible:outline-2 focus-visible:outline-offset-2">
+                <Button type="button" onClick={() => onSelect(result)} ariaLabel={`Select ${result.title}`} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 text-start focus-visible:outline-2 focus-visible:outline-offset-2" variant="ghost" size="sm" style={{ height: 'auto', paddingInline: '0' }}>
                   {content}
-                </button>
+                </Button>
               ) : <span className="flex min-w-0 flex-1 items-center gap-2.5">{content}</span>}
               {url && <a href={url} target="_blank" rel="noopener noreferrer"
                 onClick={onOpen ? () => onOpen(result) : undefined} aria-label={`Open ${result.title} in new tab`}

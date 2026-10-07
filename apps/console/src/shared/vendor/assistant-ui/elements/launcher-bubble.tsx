@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { MessageCircleIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -94,17 +96,12 @@ export function LauncherBubble({
           <div className="flex flex-col gap-1.5">
             {prompts.map((prompt) =>
               onPick ? (
-                <button
-                  key={prompt}
-                  type="button"
-                  onClick={() => onPick(prompt)}
-                  className={cn(
+                <Button key={prompt} type="button" onClick={() => onPick(prompt)} className={cn(
                     field,
                     "hover:bg-foreground/[0.07] text-foreground/70 rounded-xl px-3 py-2 text-start text-[13px] transition-colors",
-                  )}
-                >
+                  )} variant="ghost" size="sm" style={{ height: 'auto', paddingInline: '0.75rem', paddingBlock: '0.5rem' }}>
                   {prompt}
-                </button>
+                </Button>
               ) : (
                 <span
                   key={prompt}
@@ -120,33 +117,23 @@ export function LauncherBubble({
           </div>
 
           {onStart && (
-            <button
-              type="button"
-              onClick={onStart}
-              className={cn(
+            <Button type="button" onClick={onStart} className={cn(
                 inkButton,
                 "flex h-8 items-center justify-center rounded-full text-xs font-medium",
-              )}
-            >
+              )} variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0' }}>
               Start a conversation
-            </button>
+            </Button>
           )}
         </div>
       )}
 
       {onToggle && (
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-label={open ? "Close the assistant" : "Open the assistant"}
-          onClick={onToggle}
-          className={cn(
+        <Button type="button" ariaExpanded={open} ariaLabel={open ? "Close the assistant" : "Open the assistant"} onClick={onToggle} className={cn(
             inkButton,
             "relative flex size-12 shrink-0 items-center justify-center rounded-full",
-          )}
-        >
+          )} variant="ghost" size="sm" style={{ width: '3rem', height: '3rem', padding: 0 }}>
           {bubble}
-        </button>
+        </Button>
       )}
 
       {!onToggle && !open && (

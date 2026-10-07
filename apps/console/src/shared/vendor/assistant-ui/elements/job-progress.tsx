@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { CheckIcon, Loader2Icon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -85,14 +87,9 @@ export function JobProgress({
           {finished ? "done" : eta}
         </span>}
         {!finished && onCancel && (
-          <button
-            type="button"
-            aria-label="Cancel the job"
-            onClick={onCancel}
-            className={cn(ghostButton, "size-6 shrink-0")}
-          >
+          <Button type="button" ariaLabel="Cancel the job" onClick={onCancel} className={cn(ghostButton, "size-6 shrink-0")} variant="ghost" size="xs" style={{ width: '1.5rem', height: '1.5rem', padding: 0 }}>
             <XIcon className="size-3.5" />
-          </button>
+          </Button>
         )}
       </div>
 

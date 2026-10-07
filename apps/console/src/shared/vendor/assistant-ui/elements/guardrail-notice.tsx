@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { ShieldIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -57,14 +59,9 @@ export function GuardrailNotice({
           <span className={cn(mono, "text-foreground/30")}>try instead</span>
           {recordedAlternatives.map((alternative) =>
             onPick ? (
-              <button
-                key={alternative}
-                type="button"
-                onClick={() => onPick(alternative)}
-                className="hover:bg-foreground/[0.04] text-foreground/70 hover:text-foreground/95 -mx-1.5 rounded-lg px-1.5 py-1 text-start text-[13px] transition-colors"
-              >
+              <Button key={alternative} type="button" onClick={() => onPick(alternative)} className="hover:bg-foreground/[0.04] text-foreground/70 hover:text-foreground/95 -mx-1.5 rounded-lg px-1.5 py-1 text-start text-[13px] transition-colors" variant="ghost" size="sm" style={{ height: 'auto', paddingInline: '0.375rem', paddingBlock: '0.25rem' }}>
                 {alternative}
-              </button>
+              </Button>
             ) : (
               <span
                 key={alternative}

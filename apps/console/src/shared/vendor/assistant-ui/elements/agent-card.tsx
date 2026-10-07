@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { BotIcon, CheckIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -107,20 +109,13 @@ export function AgentCard({
         <span className={cn(mono, "text-foreground/30 shrink-0")}>{model}</span>
       </div>}
 
-      {(onConnect || connected) && <button
-        type="button"
-        onClick={connected ? undefined : onConnect}
-        aria-disabled={(connected) || undefined}
-        aria-description={(connected) ? "Already connected." : undefined}
-        title={(connected) ? "Already connected." : undefined}
-        className={cn(
+      {(onConnect || connected) && <Button type="button" onClick={connected ? undefined : onConnect} disabledReason={(connected) ? "Already connected." : undefined} title={(connected) ? "Already connected." : undefined} className={cn(
           "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
           connected
             ? cn(field, "text-foreground/55")
             : cn(inkButton, "justify-center"),
           "flex h-8 items-center justify-center gap-1.5 rounded-full px-3.5 text-xs font-medium disabled:pointer-events-none",
-        )}
-      >
+        )} disabled={(connected) || undefined} variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.875rem' }}>
         {connected ? (
           <>
             <CheckIcon className="size-3.5 text-emerald-500" />
@@ -129,7 +124,7 @@ export function AgentCard({
         ) : (
           "Connect"
         )}
-      </button>}
+      </Button>}
     </div>
   );
 }

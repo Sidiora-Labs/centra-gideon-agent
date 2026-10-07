@@ -1,5 +1,8 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
+import { QuietButton } from "../../../ui/QuietButton";
 import type { ComponentProps } from "react";
 import { ChevronRightIcon, PlugIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -105,14 +108,9 @@ export function McpServerPanel({
         return (
           <div key={server.id} className="flex flex-col">
             {onToggle ? (
-              <button
-                type="button"
-                aria-expanded={expanded}
-                onClick={() => onToggle(server.id)}
-                className={rowClassName}
-              >
+              <QuietButton ariaExpanded={expanded} onClick={() => onToggle(server.id)} className={cn(rowClassName, "h-auto")}>
                 {row}
-              </button>
+              </QuietButton>
             ) : (
               <div className={rowClassName}>{row}</div>
             )}
@@ -127,13 +125,9 @@ export function McpServerPanel({
                     · {LABEL[server.status]}
                   </span>
                   {server.status === "needs-auth" && onAuthorize && (
-                    <button
-                      type="button"
-                      onClick={() => onAuthorize(server.id)}
-                      className="ms-auto rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 transition-[background-color,scale] duration-150 hover:bg-amber-500/25 active:scale-[0.96] dark:text-amber-300"
-                    >
+                    <Button type="button" onClick={() => onAuthorize(server.id)} className="ms-auto rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 transition-[background-color,scale] duration-150 hover:bg-amber-500/25 active:scale-[0.96] dark:text-amber-300" variant="ghost" size="sm" style={{ height: 'auto', paddingInline: '0.5rem', paddingBlock: '0.125rem' }}>
                       Authorize
-                    </button>
+                    </Button>
                   )}
                 </div>
                 <div className="flex flex-wrap gap-1">

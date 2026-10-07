@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { CircleAlertIcon, RefreshCwIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -63,14 +65,10 @@ export function ErrorState({
           {detail}
         </p>
       </div>
-      {onRetry && <button
-        type="button"
-        onClick={onRetry}
-        className="ms-auto flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-500/10 dark:text-red-400"
-      >
+      {onRetry && <Button type="button" onClick={onRetry} className="ms-auto flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-500/10 dark:text-red-400" variant="ghost" size="sm" style={{ height: 'auto', paddingInline: '0.75rem', paddingBlock: '0.25rem' }}>
         <RefreshCwIcon className="size-3" />
         Retry
-      </button>}
+      </Button>}
     </div>
   );
 }

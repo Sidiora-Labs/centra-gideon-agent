@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { PauseIcon, PlayIcon, Volume2Icon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -73,18 +75,13 @@ export function ReadAloud({
       </p>}
 
       <div className="flex items-center gap-2.5">
-        <button
-          type="button"
-          aria-label={playing ? "Pause" : "Play"}
-          onClick={onToggle}
-          className={cn(ghostButton, "bg-foreground/[0.06] size-8 shrink-0")}
-        >
+        <Button type="button" ariaLabel={playing ? "Pause" : "Play"} onClick={onToggle} className={cn(ghostButton, "bg-foreground/[0.06] size-8 shrink-0")} variant="ghost" size="sm" style={{ width: '2rem', height: '2rem', padding: 0 }}>
           {playing ? (
             <PauseIcon className="size-3.5" />
           ) : (
             <PlayIcon className="size-3.5 translate-x-px" />
           )}
-        </button>
+        </Button>
 
         {progress !== undefined && <span
           role="progressbar"
@@ -105,18 +102,13 @@ export function ReadAloud({
           {elapsed} / {duration}
         </span>}
 
-        {rate !== undefined && <button
-          type="button"
-          aria-label={`Playback speed, currently ${rate} times`}
-          onClick={onRateChange}
-          className={cn(
+        {rate !== undefined && <Button type="button" ariaLabel={`Playback speed, currently ${rate} times`} onClick={onRateChange} className={cn(
             field,
             mono,
             "text-foreground/55 hover:text-foreground/90 shrink-0 rounded-full px-2 py-1 tabular-nums transition-colors",
-          )}
-        >
+          )} variant="ghost" size="sm" style={{ height: 'auto', paddingInline: '0.5rem', paddingBlock: '0.25rem' }}>
           {rate}×
-        </button>}
+        </Button>}
 
         <Volume2Icon className="text-foreground/25 size-3.5 shrink-0" />
       </div>

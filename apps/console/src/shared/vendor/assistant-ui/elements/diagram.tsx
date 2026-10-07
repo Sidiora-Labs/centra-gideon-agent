@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { MaximizeIcon, MinusIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -51,41 +53,21 @@ export function Diagram({
         <span className={cn(mono, "text-foreground/30 shrink-0 tabular-nums")}>
           {Math.round(zoom * 100)}%
         </span>
-        {onZoomOut && <button
-          type="button"
-          aria-label="Zoom out"
-          onClick={onZoomOut}
-          className={cn(ghostButton, "size-7 shrink-0")}
-        >
+        {onZoomOut && <Button type="button" ariaLabel="Zoom out" onClick={onZoomOut} className={cn(ghostButton, "size-7 shrink-0")} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
           <MinusIcon className="size-3.5" />
-        </button>}
-        {onZoomIn && <button
-          type="button"
-          aria-label="Zoom in"
-          onClick={onZoomIn}
-          className={cn(ghostButton, "size-7 shrink-0")}
-        >
+        </Button>}
+        {onZoomIn && <Button type="button" ariaLabel="Zoom in" onClick={onZoomIn} className={cn(ghostButton, "size-7 shrink-0")} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
           <PlusIcon className="size-3.5" />
-        </button>}
-        {onReset && <button
-          type="button"
-          aria-label="Reset the view"
-          onClick={onReset}
-          className={cn(ghostButton, "size-7 shrink-0")}
-        >
+        </Button>}
+        {onReset && <Button type="button" ariaLabel="Reset the view" onClick={onReset} className={cn(ghostButton, "size-7 shrink-0")} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
           <RotateCcwIcon className="size-3.5" />
-        </button>}
-        {onExpand && <button
-          type="button"
-          aria-label="Open full screen"
-          onClick={onExpand}
-          className={cn(
+        </Button>}
+        {onExpand && <Button type="button" ariaLabel="Open full screen" onClick={onExpand} className={cn(
             ghostButton,
             "size-7 shrink-0 disabled:pointer-events-none disabled:opacity-40",
-          )}
-        >
+          )} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
           <MaximizeIcon className="size-3.5" />
-        </button>}
+        </Button>}
       </div>
 
       <div className="border-foreground/[0.07] flex min-h-[10rem] items-center justify-center overflow-hidden border-t p-4">

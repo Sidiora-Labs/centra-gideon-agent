@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { ExternalLinkIcon, RotateCwIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -40,19 +42,14 @@ export function WebPreview({
       {...props}
     >
       <div className="flex items-center gap-1.5 px-2.5 py-2">
-        {onReload && <button
-          type="button"
-          aria-label="Reload the preview"
-          onClick={onReload}
-          className={cn(ghostButton, "size-7 shrink-0")}
-        >
+        {onReload && <Button type="button" ariaLabel="Reload the preview" onClick={onReload} className={cn(ghostButton, "size-7 shrink-0")} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
           <RotateCwIcon
             className={cn(
               "size-3.5",
               loading && "animate-spin motion-reduce:animate-none",
             )}
           />
-        </button>}
+        </Button>}
 
         <span
           className={cn(
@@ -65,14 +62,9 @@ export function WebPreview({
           </span>
         </span>
 
-        {onOpenExternal && <button
-          type="button"
-          aria-label="Open the preview in a new tab"
-          onClick={onOpenExternal}
-          className={cn(ghostButton, "size-7 shrink-0")}
-        >
+        {onOpenExternal && <Button type="button" ariaLabel="Open the preview in a new tab" onClick={onOpenExternal} className={cn(ghostButton, "size-7 shrink-0")} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
           <ExternalLinkIcon className="size-3.5" />
-        </button>}
+        </Button>}
       </div>
 
       <div className="border-foreground/[0.07] relative min-h-[9rem] border-t">

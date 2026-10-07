@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps, ReactNode } from "react";
 import { CheckIcon, CopyIcon, FileTextIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -121,28 +123,18 @@ export function CanvasSplitHeader({
         )}
       </span>}
       {actions}
-      {onCopy && <button
-        type="button"
-        aria-label={`Copy ${title}`}
-        onClick={onCopy}
-        className={cn(
+      {onCopy && <Button type="button" ariaLabel={`Copy ${title}`} onClick={onCopy} className={cn(
           ghostButton,
           "size-7 shrink-0 disabled:pointer-events-none disabled:opacity-40",
-        )}
-      >
+        )} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
         <CopyIcon className="size-3.5" />
-      </button>}
-      {onClose && <button
-        type="button"
-        aria-label="Close the canvas"
-        onClick={onClose}
-        className={cn(
+      </Button>}
+      {onClose && <Button type="button" ariaLabel="Close the canvas" onClick={onClose} className={cn(
           ghostButton,
           "size-7 shrink-0 disabled:pointer-events-none disabled:opacity-40",
-        )}
-      >
+        )} variant="ghost" size="xs" style={{ width: '1.75rem', height: '1.75rem', padding: 0 }}>
         <XIcon className="size-3.5" />
-      </button>}
+      </Button>}
     </div>
   );
 }

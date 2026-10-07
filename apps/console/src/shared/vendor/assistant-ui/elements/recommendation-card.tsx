@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import type { ReactNode } from "react";
 import { CheckIcon } from "lucide-react";
@@ -72,23 +74,15 @@ export function RecommendationCard({
               </span>
             </div>}
             <div className="flex items-center gap-2">
-              {onAlternatives && <button
-                type="button"
-                onClick={onAlternatives}
-                className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
-              >
+              {onAlternatives && <Button type="button" onClick={onAlternatives} className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]" variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.875rem' }}>
                 Alternatives
-              </button>}
-              {onAccept && <button
-                type="button"
-                onClick={onAccept}
-                className={cn(
+              </Button>}
+              {onAccept && <Button type="button" onClick={onAccept} className={cn(
                   inkButton,
                   "flex h-8 items-center rounded-full px-3.5 text-xs font-medium",
-                )}
-              >
+                )} variant="ghost" size="sm" style={{ height: '2rem', paddingInline: '0.875rem' }}>
                 Accept
-              </button>}
+              </Button>}
             </div>
           </>
         ) : (

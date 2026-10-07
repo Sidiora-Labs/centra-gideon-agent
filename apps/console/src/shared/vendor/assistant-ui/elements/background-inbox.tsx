@@ -1,5 +1,7 @@
 "use client";
 
+
+import { QuietButton } from "../../../ui/QuietButton";
 import type { ComponentProps } from "react";
 import { CheckIcon, Loader2Icon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -101,15 +103,9 @@ export function BackgroundInbox({
         );
 
         return onCollect ? (
-          <button
-            key={run.id}
-            type="button"
-            disabled={run.state === "running"}
-            onClick={() => onCollect(run.id)}
-            className={className}
-          >
+          <QuietButton key={run.id} onClick={() => onCollect(run.id)} className={cn(className, "h-auto")} disabled={run.state === "running"} disabledReason={run.state === "running" ? "This run is still in progress" : undefined}>
             {content}
-          </button>
+          </QuietButton>
         ) : (
           <div key={run.id} className={className}>
             {content}

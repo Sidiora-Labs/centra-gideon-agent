@@ -1,5 +1,7 @@
 "use client";
 
+
+import { Button } from "../../../ui/Button";
 import type { ComponentProps } from "react";
 import { cn } from "../lib/utils";
 import { inkButton, mono, paper } from "./surfaces";
@@ -85,16 +87,12 @@ export function QuotaBanner({
         <span className={cn(mono, "text-foreground/30 tabular-nums")}>
           {used} of {limit} used
         </span>
-        {onUpgrade && <button
-          type="button"
-          onClick={onUpgrade}
-          className={cn(
+        {onUpgrade && <Button type="button" onClick={onUpgrade} className={cn(
             inkButton,
             "ms-auto flex h-7 items-center rounded-full px-3 text-xs font-medium",
-          )}
-        >
+          )} variant="ghost" size="xs" style={{ height: '1.75rem', paddingInline: '0.75rem' }}>
           {upgradeLabel}
-        </button>}
+        </Button>}
       </div>
     </div>
   );
