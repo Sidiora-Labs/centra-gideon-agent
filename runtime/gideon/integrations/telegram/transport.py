@@ -23,7 +23,6 @@ from gideon.integrations.channel_transports.base import (
     ChannelMessage,
     ChannelTransportProvider,
 )
-from gideon.integrations.channel_trust import is_allowed_sender
 
 from .api import TelegramAPI, TelegramError
 from .delivery import TelegramDelivery, thread_options
@@ -135,7 +134,7 @@ def normalize(message):
             sender.get("id") or (message.get("sender_chat") or {}).get("id") or ""
         ),
         thread_id=f"telegram:{cid}:{topic}",
-        message_id=f"{cid}:{message.get('message_id','')}",
+        message_id=f"{cid}:{message.get('message_id', '')}",
         ts=float(message.get("date", 0)),
         attachments=attachments,
         metadata={
@@ -231,7 +230,7 @@ class TelegramTransport(ChannelTransportProvider):
         api = TelegramAPI(token)
         try:
             me = await api.call("getMe")
-            return {"ok": True, "detail": f"Connected as @{me.get('username','bot')}"}
+            return {"ok": True, "detail": f"Connected as @{me.get('username', 'bot')}"}
         except TelegramError as exc:
             return {"ok": False, "detail": str(exc)}
         finally:
@@ -408,7 +407,7 @@ class TelegramTransport(ChannelTransportProvider):
                     await self.api.call("setMyCommands", commands=menu(cfg))
                 await self.topics.configure(self)
                 self.state = "ready"
-                self.detail = f"Connected as @{self.identity.get('username','bot')}"
+                self.detail = f"Connected as @{self.identity.get('username', 'bot')}"
                 if self._skipped_topics:
                     self.detail += (
                         "; some configured topics require Telegram forum permissions."

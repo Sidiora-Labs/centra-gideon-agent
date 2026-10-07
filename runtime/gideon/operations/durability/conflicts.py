@@ -47,6 +47,8 @@ from typing import Mapping
 
 from gideon.core.atomic_write import atomic_write
 from gideon.operations.durability import inventory as inv
+from gideon.operations.durability.ancestors import Deletion
+from gideon.operations.durability.merge import _is_tombstone
 from gideon.operations.durability.shards import canonical_json
 
 logger = logging.getLogger(__name__)
@@ -341,9 +343,6 @@ class ConflictQueue:
             if r.entry_id == entry_id and r.status == STATUS_NEEDS_REVIEW
         }
 
-
-from gideon.operations.durability.ancestors import Deletion
-from gideon.operations.durability.merge import _is_tombstone
 
 DELETED_HERE = "here"
 DELETED_THERE = "there"

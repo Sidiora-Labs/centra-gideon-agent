@@ -9,7 +9,6 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any
 
 from gideon.core.atomic_write import atomic_json_write
 from gideon.security.owner_grants import GrantBook

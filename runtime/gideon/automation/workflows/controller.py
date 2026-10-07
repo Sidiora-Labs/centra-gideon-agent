@@ -2817,7 +2817,7 @@ class RunController:
                 origin_id=str(reentry["origin_id"]),
                 attempt_id=execution_attempt,
                 node_id=str(reentry["node_id"]),
-            ) as active_reentry:
+            ):
                 task = asyncio.create_task(self._execute(item, ctx, calls))
             self._pending_owner_reentry.pop(item.path, None)
         else:

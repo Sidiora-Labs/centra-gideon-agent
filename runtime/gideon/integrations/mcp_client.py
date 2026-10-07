@@ -124,20 +124,22 @@ def _remote_http_client_factory(
         if context is None:
             return False
         parsed = urlsplit(str(request.url))
-        path = parsed.path.lower()
+        parsed.path.lower()
         if str(request.url) in oauth_metadata_urls:
             if parsed.scheme.lower() != "https":
                 raise ValueError("MCP OAuth endpoints require HTTPS")
             return True
         metadata = getattr(context, "oauth_metadata", None)
-        for field in (
+        for endpoint_field in (
             "token_endpoint",
             "registration_endpoint",
             "revocation_endpoint",
             "introspection_endpoint",
         ):
             endpoint_value = (
-                getattr(metadata, field, None) if metadata is not None else None
+                getattr(metadata, endpoint_field, None)
+                if metadata is not None
+                else None
             )
             if endpoint_value is not None and str(endpoint_value) == str(request.url):
                 if parsed.scheme.lower() != "https":
@@ -1186,7 +1188,7 @@ class McpClientRegistry:
             for n, s in specs.items()
             if isinstance(s, dict) and not s.get("disabled")
         }
-        want_canonical = {self._canonical_key(n) for n in self._specs}
+        {self._canonical_key(n) for n in self._specs}
         for name, spec in self._specs.items():
             key = _conn_key(name, spec, "")
             if key not in self._conns:

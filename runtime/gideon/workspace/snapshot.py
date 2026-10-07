@@ -829,7 +829,6 @@ def _sqlite_row_total(db: Path) -> int:
     fully checkpointed and has no WAL to miss.
     """
     from gideon.core.sqlite_compat import connect
-    from gideon.core.sqlite_compat import sqlite3 as _sqlite3
 
     total = 0
     try:

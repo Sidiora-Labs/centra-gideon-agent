@@ -41,7 +41,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from gideon.core.config import loader as config_loader
-from gideon.core.sqlite_compat import connect, sqlite3
+from gideon.core.sqlite_compat import connect
 from gideon.operations.durability import sqlite_files
 from gideon.security.security import is_sensitive_path
 from gideon.workspace.snapshot import (

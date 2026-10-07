@@ -8,7 +8,6 @@ books; damaged records fail closed and strict writes preserve them. Listing chan
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import logging

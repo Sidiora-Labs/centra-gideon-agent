@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
-from gideon.integrations.sync_transports.base import RemoteRef, SyncTransportProvider
+from gideon.integrations.sync_transports.base import SyncTransportProvider
 from gideon.operations.durability import conflicts as conflicts_mod
 from gideon.operations.durability import inventory as inv
 from gideon.operations.durability import reconcile
@@ -36,12 +36,7 @@ from gideon.operations.durability.conflicts import ConflictQueue
 from gideon.operations.durability.cursor import Cursor
 from gideon.operations.durability.db_merge import make_db_merger
 from gideon.operations.durability.outbox import Outbox
-from gideon.operations.durability.published import (
-    KEEP_PREVIOUS_SECS,
-    Published,
-    export_digest,
-    superseded,
-)
+from gideon.operations.durability.published import Published, export_digest, superseded
 from gideon.operations.durability.pull_engine import PullReport, pull_from_peers
 from gideon.operations.durability.push_engine import PushReport, publish_export
 from gideon.operations.durability.registry import REGISTRY_KEY, Registry

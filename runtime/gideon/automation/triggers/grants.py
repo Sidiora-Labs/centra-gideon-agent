@@ -177,7 +177,6 @@ def agent_start_approval(
     if not trigger_id or not isinstance(action_config, dict):
         return None
     try:
-        from gideon.automation.triggers.store import TriggerStore
 
         row = _loaded_trigger(trigger_id)
     except Exception:
@@ -215,7 +214,6 @@ def allows_agent_start(approval: AgentStartApproval) -> bool:
     ):
         return False
     try:
-        from gideon.automation.triggers.store import TriggerStore
 
         row = _loaded_trigger(approval.trigger_id)
     except Exception:

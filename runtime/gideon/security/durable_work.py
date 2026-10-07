@@ -10,7 +10,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 from gideon.security.approval_answer import OWNER, Principal, principal_from_record
 from gideon.security.session_credentials import begin_turn, current_work, end_turn
@@ -148,9 +150,6 @@ def background_work(log, key: str):
     finally:
         end_turn(credential)
 
-
-import uuid
-from dataclasses import dataclass
 
 _RUN_DOMAIN = b"gideon.accepted-workflow-origin.v1\0"
 RUN_ORIGIN_KEY = "accepted_work_origin"

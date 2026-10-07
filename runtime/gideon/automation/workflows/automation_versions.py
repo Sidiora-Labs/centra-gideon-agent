@@ -271,7 +271,6 @@ def grant_content(revision: str, bounds: Any) -> str:
 
 def trigger_bounds(trigger_id: str, name: str) -> dict[str, Any]:
     from gideon.automation.triggers import grants
-    from gideon.automation.triggers.store import TriggerStore
 
     row = grants._loaded_trigger(trigger_id)
     if row is None or not row.ok or not grants.is_granted(row.trigger):

@@ -1,7 +1,6 @@
 """Chronological capture receipts in the existing knowledge database."""
 
 import asyncio
-import hashlib
 import json
 import logging
 import os

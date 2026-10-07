@@ -113,7 +113,6 @@ class CreativeDatabase:
         finally:
             db.close()
 
-
     def _get(self, db, id):
         row = db.execute(
             "SELECT record FROM ingredients WHERE id=?", (identifier(id),)

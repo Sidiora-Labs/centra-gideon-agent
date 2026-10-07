@@ -417,7 +417,7 @@ def _decode_model_rows(document: object, capabilities_of=None) -> list[ModelInfo
         identifier = row.get("id")
         if not isinstance(identifier, str) or not identifier:
             continue
-        owner = row.get("owned_by")
+        row.get("owned_by")
         models.append(
             ModelInfo(
                 id=identifier,

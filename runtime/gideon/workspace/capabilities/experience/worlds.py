@@ -4,7 +4,6 @@ import json
 import math
 import re
 import weakref
-from pathlib import Path
 
 import aiohttp
 

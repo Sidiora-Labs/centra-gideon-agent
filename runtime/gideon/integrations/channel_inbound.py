@@ -73,9 +73,13 @@ def admit(
     identity = _message_key(provider, msg)
     with _ADMISSION_LOCK:
         if identity not in _ADMITTED:
-            hold_for_owner = None
-            if is_dm and _speaks_as_owner(provider):
-                hold_for_owner = lambda: _hold_unknown_sender(state, provider, msg)
+
+            def hold_unknown_sender():
+                return _hold_unknown_sender(state, provider, msg)
+
+            hold_for_owner = (
+                hold_unknown_sender if is_dm and _speaks_as_owner(provider) else None
+            )
             decision = _decide(
                 state,
                 provider,

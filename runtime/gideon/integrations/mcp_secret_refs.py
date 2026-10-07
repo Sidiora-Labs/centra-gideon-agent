@@ -100,7 +100,6 @@ def safe_import_projection(
     *, name: str, backend: str, spec: dict[str, Any], secrets_skipped: int = 0
 ) -> dict[str, Any]:
     """Build a browser-safe display record without serializing executable values."""
-    from gideon.security.security import redact_credentials, redact_exfiltration_urls
 
     command = spec.get("command", "")
     args = spec.get("args", [])

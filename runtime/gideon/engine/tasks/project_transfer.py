@@ -1,11 +1,7 @@
 """Project archive HTTP transfer and temporary upload ownership."""
 
 import asyncio
-import json
 import logging
-import tempfile
-from dataclasses import replace
-from pathlib import Path
 
 from aiohttp import web
 from aiohttp.multipart import BodyPartReader

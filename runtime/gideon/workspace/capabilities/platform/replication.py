@@ -8,7 +8,6 @@ import sqlite3
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from gideon.core.config.loader import config_dir
 from gideon.operations.durability import conflicts, inventory, reconcile, tombstones

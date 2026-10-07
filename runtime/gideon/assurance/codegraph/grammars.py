@@ -34,6 +34,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -128,9 +129,6 @@ def manifest_path() -> Path:
 def bundle_path(folder: Path) -> Path:
     """Where the bundle this module fetched waits for the pack to copy it."""
     return folder / f"parsers-{platform_key()}.tar.zst"
-
-
-from contextlib import contextmanager
 
 
 @contextmanager

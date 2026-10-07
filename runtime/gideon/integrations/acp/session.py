@@ -30,7 +30,6 @@ from gideon.integrations.acp.types import (
     METHOD_SESSION_UPDATE,
     OPTION_ALLOW_ONCE,
     STOP_REASON_CANCELLED,
-    STOP_REASON_END_TURN,
     AcpEvent,
     AcpPromptStats,
     JsonRpcMessage,
@@ -391,7 +390,6 @@ class AcpSession:
         timeout: float,
     ) -> AsyncIterator[JsonRpcMessage]:
         deadline = time.monotonic() + timeout
-        received_at: float | None = None
         reader: asyncio.Task | None = None
         try:
             while not self._closed:
@@ -424,7 +422,7 @@ class AcpSession:
                                 return
                             yield terminal
                         return
-                    received_at = time.monotonic()
+                    time.monotonic()
                     yield message
                     continue
                 if response_future.done():

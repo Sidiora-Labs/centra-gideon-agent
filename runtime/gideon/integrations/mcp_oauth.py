@@ -13,7 +13,6 @@ import stat
 import time
 import webbrowser
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 

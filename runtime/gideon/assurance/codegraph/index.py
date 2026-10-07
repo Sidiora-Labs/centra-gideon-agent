@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from sqlite3 import Connection as SQLiteConnection, Row as SQLiteRow
+    from sqlite3 import Connection as SQLiteConnection
 
 import hashlib
 import logging

@@ -57,6 +57,7 @@ from pathlib import Path
 from typing import Any
 
 from gideon.core.periodic_sweep import PeriodicSweep
+from gideon.operations.child_output import STDERR, STDOUT, ChildOutput, relay
 
 logger = logging.getLogger(__name__)
 
@@ -1001,6 +1002,3 @@ def _classify_install_failure(exc: Exception, step: str) -> tuple[str, str]:
             "Check that python -m venv works, then re-run the install.",
         )
     return "install_failed", "Re-run the install; it resumes from the failed step."
-
-
-from gideon.operations.child_output import STDERR, STDOUT, ChildOutput, relay

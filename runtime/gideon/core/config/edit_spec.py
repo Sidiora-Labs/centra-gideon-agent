@@ -177,9 +177,10 @@ def security_loosening(field: str, current: Any, new: Any) -> str:
     elif mode == "false":
         loosened = new is False and current is not False
     elif mode == "higher":
-        numeric = lambda value: isinstance(value, (int, float)) and not isinstance(
-            value, bool
-        )
+
+        def numeric(value):
+            return isinstance(value, (int, float)) and not isinstance(value, bool)
+
         if not numeric(current) or not numeric(new):
             loosened = True
         elif field in {
@@ -201,9 +202,10 @@ def security_loosening(field: str, current: Any, new: Any) -> str:
         else:
             loosened = new > current
     elif mode == "lower":
-        numeric = lambda value: isinstance(value, (int, float)) and not isinstance(
-            value, bool
-        )
+
+        def numeric(value):
+            return isinstance(value, (int, float)) and not isinstance(value, bool)
+
         if not numeric(current) or not numeric(new):
             loosened = True
         elif field == "agent.spawn_min_memory_gb" and (current == 0 or new == 0):

@@ -24,7 +24,6 @@ from pathlib import Path
 from gideon.operations.service.common import SERVICE_NAME, gideon_bin, service_path
 from gideon.operations.service.environment import (
     ServiceEnvironment,
-    ServiceEnvironmentError,
     resolve_service_environment,
     status_environment_lines,
     systemd_environment_lines,

@@ -97,7 +97,6 @@ def _digest_reads(state: Any) -> Reader:
 def _inbox_item(item: Any, reader: Reader) -> CollectedItem | None:
     """One Inbox row as the lane collects it, or None when it no longer wants attention or is a
     row *reader* does not read (:func:`_digest_reads`)."""
-    from gideon.integrations import inbox_reach
 
     if not is_open_status(getattr(item, "status", "")):
         return None

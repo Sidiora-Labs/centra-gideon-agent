@@ -35,7 +35,6 @@ from gideon.security.security import redact_credentials, redact_exfiltration_url
 if TYPE_CHECKING:
     from gideon.cognition.history import ConversationLog
     from gideon.cognition.memory_slots import _SlotStore
-    from gideon.engine.session import ConversationDirectory
     from gideon.extensions.skills.allocation import SkillDecision
     from gideon.integrations.channel_history import ChannelHistory
     from gideon.integrations.llm.base import ModelProvider
@@ -485,9 +484,11 @@ def has_restorable_history(
 
 class CompressionSessions(Protocol):
     async def recycle_background(self) -> None: ...
+
     async def get_or_create(
         self, key: str, agent: str | None = None
     ) -> tuple["ModelProvider", bool, bool]: ...
+
     def release(self, key: str) -> None: ...
 
 
@@ -1210,7 +1211,6 @@ class PromptAssembler:
         return sections
 
     def _neighbor_blocks(self, key: str) -> list[str]:
-        from gideon.integrations.prompt_providers.runtime import render_snippet_block
 
         sections: list = []
         if self.conversation_log is None:

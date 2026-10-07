@@ -815,7 +815,6 @@ class EventTriggerEngine:
                 from gideon.automation.triggers.claims import (
                     acquire_claim,
                     release_claim,
-                    write_claim,
                 )
                 from gideon.interfaces.dashboard.handlers.triggers import (
                     _dispatch_store_action,

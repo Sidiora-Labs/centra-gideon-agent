@@ -983,11 +983,7 @@ def _load_skill_resource(args: dict[str, Any]) -> str:
     quoted, not obeyed. The truncation notice sits OUTSIDE the fence so it reads as
     harness text rather than as part of the resource.
     """
-    from gideon.extensions.skills.loader import (
-        RESOURCE_MAX_BYTES,
-        ProcedureLibrary,
-        SkillResourceRefused,
-    )
+    from gideon.extensions.skills.loader import RESOURCE_MAX_BYTES, SkillResourceRefused
 
     skill_name = (args.get("skill") or "").strip()
     rel_path = (args.get("path") or "").strip()
@@ -1056,7 +1052,6 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
         skill_name = (args.get("name") or "").strip()
         if not skill_name:
             return "Error: name is required."
-        from gideon.extensions.skills.loader import ProcedureLibrary
 
         grants, loader = _skill_library()
         if (
@@ -1112,7 +1107,6 @@ def _call_tool_inner(name: str, args: dict[str, Any]) -> str:
             limit = int(args.get("limit") or 20)
         except (ValueError, TypeError):
             limit = 20
-        from gideon.extensions.skills.loader import ProcedureLibrary
         from gideon.extensions.skills.surfacing import search_skills
 
         _, library = _skill_library()

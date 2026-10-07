@@ -58,7 +58,6 @@ async def metered_media_call(
     from gideon.security.guardrails.budgets import (
         CallCost,
         budget_from_config,
-        current_run_key,
         get_meter,
         run_budget_from_config,
     )

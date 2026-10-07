@@ -196,9 +196,7 @@ class MoltbookAdapter:
                             else None
                         )
                         retry = response.headers.get("Retry-After")
-                        retry_seconds = (
-                            int(retry) if retry and retry.isdigit() else None
-                        )
+                        int(retry) if retry and retry.isdigit() else None
                         raise MoltbookError(
                             clean(str(message or f"HTTP {response.status}"), 500),
                             response.status if response.status < 500 else 503,

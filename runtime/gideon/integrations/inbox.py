@@ -771,9 +771,15 @@ FEEDBACK_TARGETS = {
 def judgment_producers(item: dict) -> dict[str, dict]:
     """Only the stored maker can receive feedback for a machine judgment."""
     producers = {}
-    for field, maker in (("classification", "classified_by"), ("draft", "drafted_by")):
-        if item.get(field) and item.get(maker):
-            producers[field] = {"producer_kind": "prompt", "producer_id": item[maker]}
+    for judgment_field, maker in (
+        ("classification", "classified_by"),
+        ("draft", "drafted_by"),
+    ):
+        if item.get(judgment_field) and item.get(maker):
+            producers[judgment_field] = {
+                "producer_kind": "prompt",
+                "producer_id": item[maker],
+            }
     if item.get("source") == "digest" and item.get("classified_by"):
         producers["digest"] = {
             "producer_kind": "prompt",
@@ -980,9 +986,10 @@ def _schedule_attention_verification(
             running = asyncio.get_running_loop()
         except RuntimeError:
             running = None
-        apply = lambda: _apply_attention_verdict(
-            state, store, item.id, verdict, pending
-        )
+
+        def apply():
+            return _apply_attention_verdict(state, store, item.id, verdict, pending)
+
         if owner_loop is not None and running is not owner_loop:
             if not owner_loop.is_closed():
                 owner_loop.call_soon_threadsafe(apply)

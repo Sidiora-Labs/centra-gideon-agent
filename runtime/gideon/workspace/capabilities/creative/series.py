@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 import json
 from datetime import datetime, timezone
-from typing import Any
 from uuid import uuid4
 
 from .store import CatalogError, CreativeDatabase, identifier, integer, keys, text

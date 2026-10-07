@@ -69,7 +69,6 @@ from gideon.security.guardrails.failure import (
     BudgetExceededError,
     CircuitOpenError,
     FailureMode,
-    FirstTokenTimeout,
     GuardError,
     ModelCallTimeout,
     PromptInjectionBlocked,
