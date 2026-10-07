@@ -85,7 +85,7 @@ export function ProviderConfigForm({ name }: { name: string }) {
         setBase({ value: current.config ?? {}, revision: current.revision })
         setValues(Object.fromEntries(Object.entries(current.config ?? {}).map(([key, value]) => [key, secretNames.includes(key) ? '' : value])))
         setClearedSecrets([])
-      }).catch(() => {})
+      }).catch((error) => { setLoadErr(error) })
     },
   })
 

@@ -75,7 +75,7 @@ export function RsvpReader({ item, onClose }: { item: KnowledgeItem; onClose: ()
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null)
   const current = useRef<KnowledgeRsvpState | null>(null)
   const generation = useRef(0)
-  const saveQueue = useRef<Promise<KnowledgeRsvpState | undefined>>(Promise.resolve(undefined))
+  const saveQueue = useRef<Promise<void>>(Promise.resolve())
 
   useEffect(() => {
     let alive = true
@@ -91,13 +91,12 @@ export function RsvpReader({ item, onClose }: { item: KnowledgeItem; onClose: ()
       chunk_size: next.chunk_size,
       content_revision: next.content_revision,
     }
-    const run = saveQueue.current.catch(() => undefined).then(() => api.saveKnowledgeRsvp(item.id, request))
-    saveQueue.current = run
-    void run.then(value => {
+    const run = saveQueue.current.then(() => api.saveKnowledgeRsvp(item.id, request))
+    saveQueue.current = run.then(value => {
       if (generation.current !== version) return
       current.current = value
       setState(value)
-    }).catch(reason => {
+    }, reason => {
       if (generation.current !== version) return
       setPlaying(false)
       setError(reason instanceof Error ? reason.message : 'Could not save reading position.')
@@ -143,11 +142,11 @@ export function RsvpReader({ item, onClose }: { item: KnowledgeItem; onClose: ()
       if (target && ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)) return
       if (event.key === ' ') {
         event.preventDefault()
-        if (playing) { setPlaying(false); void flush() } else setPlaying(true)
+        if (playing) { setPlaying(false); void flush().then(() => {}, reason => setError(reason instanceof Error ? reason.message : 'Could not save reading position.')) } else setPlaying(true)
       }
       else if (event.key === 'ArrowLeft' && state) { event.preventDefault(); setPlaying(false); persist({ ...state, word_index: Math.max(0, state.word_index - 1) }) }
       else if (event.key === 'ArrowRight' && state) { event.preventDefault(); setPlaying(false); persist({ ...state, word_index: Math.min(words.length - 1, state.word_index + 1) }) }
-      else if (event.key === 'Escape') { setPlaying(false); void flush().catch(() => undefined).finally(onClose) }
+      else if (event.key === 'Escape') { setPlaying(false); void flush().then(onClose, reason => setError(reason instanceof Error ? reason.message : 'Could not save reading position.')) }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -160,7 +159,7 @@ export function RsvpReader({ item, onClose }: { item: KnowledgeItem; onClose: ()
 
   const update = (change: Partial<KnowledgeRsvpState>) => persist({ ...state, ...change })
   const pause = async () => { setPlaying(false); try { await flush() } catch { /* surfaced by enqueueSave */ } }
-  const close = async () => { setPlaying(false); try { await flush() } catch { /* surfaced by enqueueSave */ } onClose() }
+  const close = async () => { setPlaying(false); try { await flush(); onClose() } catch { /* retain the reader and its surfaced save error */ } }
   const bookmark = async () => {
     const bookmarked = current.current
     if (!bookmarked) return

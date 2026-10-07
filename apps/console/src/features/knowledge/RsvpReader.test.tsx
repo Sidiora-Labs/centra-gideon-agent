@@ -23,7 +23,7 @@ beforeAll(async () => {
   })
   let errors = ''
   child.stderr?.on('data', chunk => { errors += String(chunk) })
-  const started = await new Promise<{ port: number; item: KnowledgeItem }>((done, fail) => {
+  const started = await new Promise<{ port: number; item: KnowledgeItem; token: string }>((done, fail) => {
     let buffer = ''
     const timeout = setTimeout(() => fail(new Error(errors || 'RSVP application startup timed out')), 15000)
     child.on('exit', code => { clearTimeout(timeout); fail(new Error(`RSVP application exited ${code}: ${errors}`)) })
@@ -37,7 +37,17 @@ beforeAll(async () => {
   })
   origin = `http://127.0.0.1:${started.port}`
   item = started.item
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  const refused = await originalFetch(origin + `/api/capabilities/knowledge/rsvp/${item.id}`)
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const target = typeof input === 'string' && input.startsWith('/') ? origin + input : input
+    const url = target instanceof Request ? target.url : String(target)
+    const headers = new Headers(target instanceof Request ? target.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${started.token}`)
+    return originalFetch(target, { ...init, headers })
+  }
 }, 20000)
 
 beforeEach(async () => {

@@ -111,7 +111,14 @@ describe('the migrated surfaces read the error', () => {
 
   for (const rel of ADOPTERS) {
     it(`${rel} branches on the load error before the empty state`, () => {
-      const src = readFileSync(join(SRC, rel), 'utf8')
+      const consumer = readFileSync(join(SRC, rel), 'utf8')
+      const extracted: Record<string, string> = {
+        'features/tasks/TasksListPage.tsx': 'features/tasks/taskCollectionState.ts',
+        'features/prompts/PromptsListPage.tsx': 'features/prompts/promptLibraryState.ts',
+      }
+      const dependency = extracted[rel]
+      if (dependency) expect(consumer).toContain(`from './${dependency.split('/').at(-1)!.replace('.ts', '')}'`)
+      const src = consumer + (dependency ? '\n' + codeOf(join(SRC, dependency)) : '')
       expect(src, 'must render the shared primitive').toMatch(/<LoadError\b/)
       expect(src, 'must capture the rejection, not discard it').toMatch(
         /\berror\s*[,}]|error:\s*\w*(?:err|Err)\w*|catch\(\(\w+\)\s*=>\s*\{[^}]*[Ee]rr\w*\(/,
@@ -178,17 +185,18 @@ describe('the migrated surfaces read the error', () => {
 })
 
 describe('direct fetches keep their rejection too — the 2026-09-05 false-empty family', () => {
-  const PINS: Array<[string, RegExp, string]> = [
-    ['features/knowledge/KnowledgeListPage.tsx', /\.catch\(\(e\)\s*=>\s*\{\s*setOutcomesErr\(e\);\s*setOutcomes\(null\)\s*\}\)/, 'gathered matches'],
-    ['features/skills/SkillsPage.tsx', /catch\s*\(e\)\s*\{\s*setSearchErr\(e\);\s*setResults\(null\)/, 'skill search results'],
-    ['features/tasks/TasksListPage.tsx', /\.catch\(\(e\)\s*=>\s*\{\s*setReadyErr\(e\);\s*setReady\(null\)\s*\}\)/, 'ready tasks'],
-    ['features/tasks/TasksListPage.tsx', /\.catch\(\(e\)\s*=>\s*\{\s*if\s*\(alive\)\s*\{\s*setSearchErr\(e\);\s*setResults\(null\)\s*\}\s*\}\)/, 'search results'],
+  const PINS: Array<[string, string, RegExp, string]> = [
+    ['features/knowledge/KnowledgeListPage.tsx', 'features/knowledge/KnowledgeListPage.tsx', /\.catch\(\(e\)\s*=>\s*\{\s*setOutcomesErr\(e\);\s*setOutcomes\(null\)\s*\}\)/, 'gathered matches'],
+    ['features/skills/SkillsPage.tsx', 'features/skills/skillLibraryState.ts', /\.catch\(failure\s*=>[\s\S]*?results: null[\s\S]*?loading: false, searchErr: failure/, 'skill search results'],
+    ['features/tasks/TasksListPage.tsx', 'features/tasks/taskCollectionState.ts', /\.catch\(error\s*=>[^\n]*setReady\(null\); setReadyError\(error\)/, 'ready tasks'],
+    ['features/tasks/TasksListPage.tsx', 'features/tasks/taskCollectionState.ts', /\.catch\(error\s*=>[^\n]*setResults\(null\); setSearchError\(error\)/, 'search results'],
   ]
 
   it('each slice records its rejection and renders LoadError for it', () => {
-    for (const [rel, catchPin, what] of PINS) {
+    for (const [rel, producer, catchPin, what] of PINS) {
       const src = codeOf(join(SRC, rel))
-      expect(catchPin.test(src), `${rel}: the catch must record the error, not fold it into an empty value (${catchPin})`).toBe(true)
+      if (producer !== rel) expect(src).toContain(`from './${producer.split('/').at(-1)!.replace('.ts', '')}'`)
+      expect(catchPin.test(codeOf(join(SRC, producer))), `${producer}: the catch must record the error, not fold it into an empty value (${catchPin})`).toBe(true)
       expect(src.includes(`<LoadError what="${what}"`), `${rel}: must render <LoadError what="${what}">`).toBe(true)
     }
   })

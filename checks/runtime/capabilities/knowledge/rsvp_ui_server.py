@@ -12,6 +12,7 @@ from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge_rsvp import register
 from gideon.interfaces.dashboard.state import ConsoleState
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 
 async def main():
@@ -26,7 +27,7 @@ async def main():
     item = store.get_item(item_id)
     state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
     state._knowledge_store = store
-    app = web.Application()
+    app = web.Application(middlewares=[token_auth_middleware()])
     app["state"] = state
     register(app)
     runner = web.AppRunner(app)
@@ -35,7 +36,7 @@ async def main():
     await listener.start()
     print(
         json.dumps(
-            {"port": listener._server.sockets[0].getsockname()[1], "item": item}
+            {"port": listener._server.sockets[0].getsockname()[1], "item": item, "token": generate_token("rsvp-test-owner")}
         ),
         flush=True,
     )
