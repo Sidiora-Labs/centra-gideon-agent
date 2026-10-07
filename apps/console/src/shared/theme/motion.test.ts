@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { act, renderHook } from '@testing-library/react'
 
 import * as motion from './motion'
 import {
@@ -215,13 +216,17 @@ function harvestTransitions(): { path: string; t: Record<string, unknown> }[] {
     for (const [k, child] of Object.entries(v as Record<string, unknown>)) consider(`${path}.${k}`, child)
   }
 
-  for (const [name, value] of Object.entries(motion)) consider(name, value)
+  for (const [name, value] of Object.entries(motion)) {
+    // React hooks require a mounted component; they do not produce transitions.
+    if (name === 'useReducedMotion') continue
+    consider(name, value)
+  }
   return found
 }
 
 const NOT_WALKED = [
   'duration', 'dragElastic', 'ease', 'expr', 'exprHeavy', 'prefersReducedMotion',
-  'swipeDismiss', 'viewTransition',
+  'swipeDismiss', 'viewTransition', 'useReducedMotion',
 ]
 
 describe('the reduced-motion off-switch, enumerated over the module', () => {
@@ -476,5 +481,28 @@ describe('motion token round trip', () => {
       expect(declared, `${t.varName}: registry ${(t as { value: number }).value} vs css ${m![1]}`)
         .toBe((t as { value: number }).value)
     }
+  })
+})
+
+
+describe('the reactive reduced-motion preference', () => {
+  it('tracks preference changes in a mounted hook and removes its listener', () => {
+    let listener: (() => void) | undefined
+    const media = {
+      matches: true, media: '(prefers-reduced-motion: reduce)',
+      addEventListener: vi.fn((_event: string, callback: () => void) => { listener = callback }),
+      removeEventListener: vi.fn(),
+    }
+    defineMatchMedia(vi.fn(() => media) as unknown as typeof window.matchMedia)
+    const { result, unmount } = renderHook(() => motion.useReducedMotion())
+    expect(result.current).toBe(true)
+    expect(media.addEventListener).toHaveBeenCalledWith('change', expect.any(Function))
+    expect(listener).toBeDefined()
+    act(() => { media.matches = false; listener!() })
+    expect(result.current).toBe(false)
+    act(() => { media.matches = true; listener!() })
+    expect(result.current).toBe(true)
+    unmount()
+    expect(media.removeEventListener).toHaveBeenCalledWith('change', listener)
   })
 })
