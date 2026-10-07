@@ -119,7 +119,7 @@ const usePacksCfg = () => useQuery('settings:packs', () =>
 const usePacksInstalled = () => useQuery('settings:packs:installed', () =>
   api.packsInstalled(), { persist: true })
 const useCompanionDiscovery = () => useQuery('settings:companion:discovery', () => api.companionDiscovery())
-const useWorkflows = () => useQuery('settings:workflows-card', () => api.workflowDefs().then((d) => d.defs), { persist: true })
+const useWorkflows = () => useQuery('workflows:defs', () => api.workflowDefs().then((d) => d.defs), { persist: true })
 const useAutonomousLoops = () => useQuery('settings:autonomous-loops-card', () => api.uLoops().then((loops) => loops.filter((loop) => loop.kind !== 'code')), { persist: false })
 
 async function mutate(fn: () => Promise<unknown>, ...affects: CacheKeySpec[]) {

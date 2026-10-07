@@ -477,7 +477,7 @@ export function LoopCockpitPage({ id, onBack, onDeleted, onOpenArtifact, onOpenT
 
   const wsDir = (c as { workspace_dir?: string }).workspace_dir || ''
   const cycleLabel = (() => {
-    const shown = running ? c.total_cycles + 1 : c.total_cycles
+    const shown = shownCycle(c.total_cycles, c.status)
     return c.max_cycles === 0 ? `cycle ${shown} · ongoing` : `cycle ${shown}/${c.max_cycles}`
   })()
   const statusBar = (

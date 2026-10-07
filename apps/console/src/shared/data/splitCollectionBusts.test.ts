@@ -19,14 +19,20 @@ describe('the task collection is busted as a collection, not as one key', () => 
 
   it('every bust in the list page is prefix mode', () => {
     const code = list()
-    const busts = code.match(/invalidateKeys\('tasks'[^)]*\)/g) ?? []
-    expect(busts.length, 'the loader plus both LoadError retries').toBe(3)
-    for (const b of busts) expect(b, 'exact-key mode cannot reach `tasks-all`').toMatch(/'tasks', true\)/)
+    const state = codeOf('features/tasks/taskCollectionState.ts')
+    expect(code).toMatch(/useTaskCollection\(/)
+    expect(code).toMatch(/onRetry=\{collection\.load\}/)
+    expect(code).toMatch(/onRetry=\{collection\.retryReady\}/)
+    expect(code).toMatch(/onRetry=\{collection\.retrySearch\}/)
+    expect(state).toMatch(/const load = \(\) => \{ invalidateKeys\('tasks', true\); collection\.refresh\(\)/)
+    expect(state).toMatch(/retryReady: \(\) => setRetry/)
+    expect(state).toMatch(/retrySearch: \(\) => setRetry/)
+    expect(state).not.toMatch(/invalidateKeys\('tasks'\)/)
   })
 
   it('creating a task busts the collection — it used to bust nothing at all', () => {
     const code = codeOf('features/tasks/TaskCreatePage.tsx')
-    const at = code.indexOf('await api.createTask(')
+    const at = code.indexOf('run(() => api.createTask(')
     expect(at, 'the create must still be here').toBeGreaterThan(-1)
     expect(code.slice(at, at + 300), "the task you just made is the one you want to depend on")
       .toMatch(/invalidateKeys\('tasks', true\)/)
@@ -95,6 +101,8 @@ describe('the general check, so the fifth instance is caught by a test', () => {
 
     const KNOWN_DISTINCTIONS = new Set([
       'uLoops',
+      'modelsAvailable', // Settings combines catalog + active bindings; onboarding uses catalog alone.
+      'modelProviders', // Settings provider table and onboarding recap have distinct envelopes.
       'system',
       'modelProviderTypes',
     ])
@@ -112,6 +120,20 @@ describe('the general check, so the fifth instance is caught by a test', () => {
     expect(split, 'the loaded-model set is one key again').not.toContain('modelsLoaded')
     expect(split.length, `PENDING_JUDGMENT is stale — prune the entries that are now single-namespace`)
       .toBe(PENDING_JUDGMENT.size)
+  })
+
+  it('model catalog and provider writes invalidate every composite and onboarding reader', () => {
+    const ramp = codeOf('features/onboarding/LocalModelOnRamp.tsx')
+    const providers = codeOf('features/settings/ProvidersPanel.tsx')
+    const models = codeOf('features/settings/ModelsPanel.tsx')
+    expect(models).toMatch(/useQuery\('settings:models',[\s\S]{0,260}?api\.modelsAvailable\([\s\S]{0,260}?api\.activeModels\(/)
+    for (const key of ['settings:providers', 'settings:model-connections', 'settings:models', 'settings:models-available', 'onboarding:model-providers', 'onboarding:local-chat-catalog']) {
+      expect(ramp, key).toContain(`'${key}'`)
+      expect(providers, key).toContain(`invalidateKeys('${key}')`)
+    }
+    for (const writer of models.matchAll(/invalidateKeys\('settings:models-available'\)/g)) {
+      expect(models.slice(writer.index!, writer.index! + 160)).toContain("invalidateKeys('onboarding:local-chat-catalog')")
+    }
   })
 
   it('the loops split stays split — it encodes disjoint subsets', () => {

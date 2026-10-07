@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { memoryModeCopy } from '../../features/chat/memoryModeCopy'
 import { ACTIVE_LOOP_STATUSES, effectiveLoopStatus, shownCycle } from './loopStatus'
 
 const SRC = join(process.cwd(), 'src')
@@ -24,9 +25,12 @@ describe('shownCycle', () => {
 
   it('keeps incognito reads and transcript persistence truthful', () => {
     const chat = readFileSync(join(SRC, 'features/ChatPage.tsx'), 'utf8')
-    expect(chat).toContain("hint: 'Do not write to memory'")
-    expect(chat).toContain('This chat is still saved to your history.')
-    expect(chat).not.toMatch(/no memory (?:is )?read|stays out of your history/i)
+    expect(chat).toMatch(/memoryModeCopy\(memoryMode\)\.notice/)
+    expect(chat).toMatch(/memoryModeCopy\(m\.id\)\.hint/)
+    expect(memoryModeCopy('incognito').hint).toBe('Read memories without writing new ones')
+    expect(memoryModeCopy('incognito').notice).toContain('This transcript is saved with Incognito mode and hidden from chat history and search.')
+    expect(memoryModeCopy('incognito').notice).toContain('saved memories can be read, but new memory writes are disabled')
+    expect(memoryModeCopy('temporary').notice).toContain('memory reads and writes are disabled')
   })
 })
 

@@ -165,9 +165,9 @@ describe('status decides whether an item is still asking', () => {
     }
   })
 
-  it('fails OPEN on a missing or unrecognised status', () => {
-    expect(laneFor(mkItem({ item_kind: 'needs_input', status: undefined as unknown as InboxItemStatus }))).toBe('your-turn')
-    expect(laneFor(mkItem({ item_kind: 'needs_input', status: 'snoozed' as unknown as InboxItemStatus }))).toBe('your-turn')
+  it('requires a known open status before presenting an item as actionable', () => {
+    expect(laneFor(mkItem({ item_kind: 'needs_input', status: undefined as unknown as InboxItemStatus }))).toBeNull()
+    expect(laneFor(mkItem({ item_kind: 'needs_input', status: 'snoozed' as unknown as InboxItemStatus }))).toBeNull()
   })
 })
 
@@ -318,7 +318,7 @@ describe('malformed input does not blank the surface', () => {
     expect(Object.keys(lanes)).toEqual([...LANES])
 
     const ids = allCards(lanes).map((c) => c.id)
-    expect(ids).toContain('no-status')
+    expect(ids).not.toContain('no-status')
     expect(ids).toContain('nan-time')
     expect(ids).not.toContain('')
     expect(lanes['needs-approval'].map((c) => c.id)).toContain('ok')

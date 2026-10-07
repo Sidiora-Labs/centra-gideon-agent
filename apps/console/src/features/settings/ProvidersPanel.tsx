@@ -77,7 +77,7 @@ export function ProvidersPanel({ query, setQuery }: Pick<RouteProps, 'query' | '
   const [runtimeOverride, setRuntimeOverride] = useState<AgentRuntime[] | null>(null)
   const runtimes = runtimeOverride ?? runtimesData ?? []
 
-  const reload = () => { invalidateKeys('settings:providers'); invalidateKeys('settings:models-available'); refreshProviders(); refreshRuntimes(); refreshAvailable() }
+  const reload = () => { invalidateKeys('settings:providers'); invalidateKeys('settings:models-available'); invalidateKeys('settings:model-connections'); invalidateKeys('settings:models'); invalidateKeys('onboarding:model-providers'); invalidateKeys('onboarding:local-chat-catalog'); refreshProviders(); refreshRuntimes(); refreshAvailable() }
 
   const recheckRuntimes = async () => {
     try { setRuntimeOverride(await api.agentRuntimes(true)) } catch {   }

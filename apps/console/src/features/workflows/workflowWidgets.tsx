@@ -27,7 +27,7 @@ export function useWorkflowWidgets(needed: boolean, workflow: string): { widgets
 }
 
 function WorkflowPicker({ value, onChange }: { value: string; onChange: (value: unknown) => void }) {
-  const query = useQuery('workflow-action:definitions', () => api.workflowDefs().then(result => result.defs))
+  const query = useQuery('workflows:action:definitions', () => api.workflowDefs().then(result => result.defs))
   if (query.error) return <InlineError icon onRetry={query.refresh}>Couldn’t load workflows: {String((query.error as Error)?.message || query.error)}</InlineError>
   return <Combobox value={value} onChange={onChange}
     options={(query.data ?? []).map(def => ({ value: def.name, label: def.name, description: def.description }))}
@@ -40,7 +40,7 @@ function WorkflowInputs({ workflow, value, onChange }: { workflow: string; value
 }
 
 function DeclaredWorkflowInputs({ workflow, value, onChange }: { workflow: string; value: unknown; onChange: (value: unknown) => void }) {
-  const query = useQuery(`workflow-action:definition:${workflow}`, () => api.workflowDef(workflow).then(result => result.definition))
+  const query = useQuery(`workflows:action:definition:${workflow}`, () => api.workflowDef(workflow).then(result => result.definition))
   if (query.error) return <InlineError icon onRetry={query.refresh}>Couldn’t load {workflow} inputs: {String((query.error as Error)?.message || query.error)}</InlineError>
   if (!query.data) return <p data-type="body-s" className="text-on-surface-low">Loading inputs…</p>
   return <WorkflowInputFields definition={query.data} value={value} onChange={onChange} />

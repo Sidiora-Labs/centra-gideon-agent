@@ -271,6 +271,7 @@ export function ModelTokenSection() {
         setToken(''); setTestStatus(null)
         invalidateKeys('settings:local-model-token')
         invalidateKeys('settings:models-available')
+        invalidateKeys('onboarding:local-chat-catalog')
         invalidateKeys('settings:models')
         refresh()
       }
@@ -285,6 +286,7 @@ export function ModelTokenSection() {
       setTestStatus(null)
       invalidateKeys('settings:local-model-token')
       invalidateKeys('settings:models-available')
+      invalidateKeys('onboarding:local-chat-catalog')
       invalidateKeys('settings:models')
       refresh()
     } finally { setSaving(false) }

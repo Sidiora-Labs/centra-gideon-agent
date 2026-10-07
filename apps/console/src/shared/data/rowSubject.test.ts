@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { turnLabel } from '../../features/chat/sessionMapSearch'
 import { rowSubject } from './rowSubject'
 
 
@@ -43,16 +44,17 @@ describe('the inbox row names itself by identity, not by kind', () => {
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 
   it('composes through the shared helper', () => {
-    expect(code).toMatch(/label=\{rowSubject\(\[channelBacked \? \(it\.sender_name \|\| it\.sender_id \|\| 'Unknown'\) : km\.label,/)
+    expect(code).toMatch(/const title = channel \? item\.sender_name \|\| item\.sender_id \|\| 'Unknown sender' : kind\.label/)
+    expect(code).toMatch(/label=\{rowSubject\(\[title, preview\]\)\}/)
   })
 
   it('collapses the message whitespace rather than taking its first line', () => {
-    expect(code).toMatch(/previewText\(it\.message\)\]\)/)
-    expect(code, 'firstLine is the wrong transform for this data').not.toMatch(/firstLine\(it\.message/)
+    expect(code).toMatch(/const preview = previewText\(item\.message\)/)
+    expect(code, 'firstLine is the wrong transform for this data').not.toMatch(/firstLine\(item\.message/)
   })
 
   it('the kind label is still the FIRST part, so the row still says what sort of thing it is', () => {
-    expect(code).toMatch(/: km\.label, previewText\(it\.message/)
+    expect(code).toMatch(/const title = channel \?[^\n]*: kind\.label/)
   })
 })
 
@@ -82,7 +84,10 @@ describe('both composing surfaces use the one helper', () => {
         if (statSync(p).isDirectory()) return walk(p)
         return /\.tsx?$/.test(n) && !/\.(test|doc)\.tsx?$/.test(n) ? [p] : []
       })
-    const offenders = walk(join(SRC, "features")).filter((abs) => /slice\(0, 5[0-9]\)…|length > 5[0-9] \?/.test(readFileSync(abs, 'utf8')))
+    const offenders = walk(join(SRC, "features")).filter((abs) => /slice\(0, 54\)[\s\S]{0,30}?…|length > 55 \?/.test(readFileSync(abs, 'utf8')))
     expect(offenders).toEqual([])
+    // Question markers have a separate seven-word, 58-character budget.
+    expect(turnLabel({ role: 'user', summary: 'x'.repeat(80) })).toBe('x'.repeat(57) + '…')
+    expect(turnLabel({ role: 'user', summary: 'one two three four five six seven eight' })).toBe('one two three four five six seven')
   })
 })

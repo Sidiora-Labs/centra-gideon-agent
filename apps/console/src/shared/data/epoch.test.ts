@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { sessionTitle } from './sessionTitle'
+import { relTime as taskRelTime } from '../../features/tasks/taskMeta'
 import { epochSeconds, sessionActivitySeconds, sessionRecencyMs } from './epoch'
 import { relPast, relFuture, absTime } from '../../features/schedule/scheduleMeta'
 
@@ -88,10 +90,13 @@ describe('sessionActivitySeconds — the field choice, in one place', () => {
   it('#/chat reads both through lib/epoch, with no local parse left', () => {
     const src = readFileSync(join(process.cwd(), "src/features/ChatPage.tsx"), 'utf8')
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-    expect(code, 'the label takes the shared field choice').toMatch(/relTimeShort\(sessionActivitySeconds\(s\)\)/)
-    expect(code, 'the formatter parses through epochSeconds').toMatch(/const at_s = epochSeconds\(at\)/)
-    expect(code, 'no hand-rolled fallback chain remains').not.toMatch(/last_activity_ts \|\| s\.last_ts/)
-    expect(code, 'no local Date.parse in the formatter').not.toMatch(/function relTimeShort[\s\S]{0,300}?Date\.parse/)
+    const titles = readFileSync(join(process.cwd(), 'src/shared/data/sessionTitle.ts'), 'utf8')
+    expect(code).toMatch(/sessionTitle\(s\)/)
+    expect(titles).toMatch(/relStamp\(sessionActivitySeconds\(s\)\)/)
+    expect(code).not.toMatch(/last_activity_ts \|\| s\.last_ts/)
+    expect(sessionTitle({ key: 'chat-1-2', last_activity_ts: 'not a date' })).toBe('Untitled chat')
+    expect(taskRelTime('not a date')).toBe('')
+    expect(taskRelTime('')).toBe('')
   })
 })
 
@@ -151,7 +156,7 @@ describe('every relative-time formatter in the tree coerces', () => {
 
   it('has none that does arithmetic on unvalidated input', () => {
     const bare = formatters
-      .filter((f) => !/epochSeconds\(/.test(f.body) && !/Number\.isNaN\(/.test(f.body))
+      .filter((f) => !/epochSeconds\(/.test(f.body) && !/Number\.(?:isNaN|isFinite)\(/.test(f.body))
     expect(bare.map((f) => `${f.file}:${f.name}`), 'a formatter reads a timestamp without validating it').toEqual([])
   })
 })

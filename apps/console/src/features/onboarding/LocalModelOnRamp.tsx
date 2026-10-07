@@ -24,7 +24,7 @@ export function LocalModelOnRamp({ bindChat, chatModel = '', onBound }: { bindCh
       const result = await api.bindLocalModel(row.endpoint, bindChat)
       if (!result.ok) throw new Error('The local provider could not be set up.')
       setAdded(previous => ({ ...previous, [row.endpoint]: result.provider }))
-      for (const key of ['onboarding:local-model', 'onboarding:model-providers', 'settings:remote-model-providers', 'settings:model-providers', 'onboarding:local-chat-catalog']) invalidateKeys(key)
+      for (const key of ['onboarding:local-model', 'onboarding:model-providers', 'settings:providers', 'settings:model-connections', 'settings:models', 'settings:models-available', 'onboarding:local-chat-catalog']) invalidateKeys(key)
       refresh()
       if (bindChat) onBound?.()
     } catch (error) { setFailure(String((error as Error)?.message || error)) }
