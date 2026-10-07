@@ -25,7 +25,6 @@ import copy
 import hashlib
 import json
 import logging
-import os
 import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
@@ -1251,7 +1250,6 @@ class NativeAgentRuntime(AgentProvider):
         return False
 
     def _substitution_for_current_model(self):
-        from gideon.integrations.llm.base import ModelSubstitution
 
         configured = self._configured_substitution
         served = str(getattr(self._model, "served_model_ref", "") or "")
@@ -1726,7 +1724,7 @@ class NativeAgentRuntime(AgentProvider):
         read_refusal = self._read_refusal(prep)
         if read_refusal:
             self._breaker.record_read_refusal(prep.bkey)
-            metadata = {"ok": False, "loop_breaker_refusal": True}
+            metadata: dict[str, object] = {"ok": False, "loop_breaker_refusal": True}
             observation = read_refusal
             if self._breaker.repeat_circuit_tripped():
                 self._cancel.request(reason=CANCEL_INTERNAL)
@@ -2232,7 +2230,7 @@ class NativeAgentRuntime(AgentProvider):
                     if offered is None or not offered.mcp_definition_digest:
                         meta_sink.update(ok=False, effect_state="not_started")
                         return "Error: MCP tool was not run because its offered definition is unavailable."
-                    result = await provider.invoke(
+                    tool_result = await provider.invoke(
                         tool_name,
                         args,
                         expected_definition=offered.mcp_definition_digest,
@@ -2241,12 +2239,12 @@ class NativeAgentRuntime(AgentProvider):
                         and not human_approved,
                     )
                 else:
-                    result = await provider.invoke(tool_name, args)
+                    tool_result = await provider.invoke(tool_name, args)
             except Exception as exc:
                 meta_sink["ok"] = False
                 return f"Error: {tool_name} raised {type(exc).__name__}: {exc}"
-        meta_sink.update(self._result_metadata(result))
-        return format_tool_result(result)
+        meta_sink.update(self._result_metadata(tool_result))
+        return format_tool_result(tool_result)
 
     _META_TOOLS = frozenset(("tool_search", "tool_schema", "reset_tools"))
 

@@ -66,7 +66,7 @@ async def advance(stages: Iterable[StartupStage]) -> tuple[str, ...]:
     return tuple(completed)
 
 
-async def cancel_tasks(tasks: Iterable[asyncio.Task | None]) -> None:
+async def cancel_tasks(tasks: Iterable[asyncio.Future[Any] | None]) -> None:
     current = asyncio.current_task()
     selected = tuple(
         {task for task in tasks if task is not None and task is not current}
@@ -130,7 +130,9 @@ async def bind_surface(runtime: RuntimeCoordinator, *, api_only: bool) -> None:
 
         watcher = getattr(surface, "_incident_watch_task", None)
         if watcher is None or watcher.done():
-            watcher = asyncio.create_task(watch(lambda _: surface.push_refresh("incident", "loops")))
+            watcher = asyncio.create_task(
+                watch(lambda _: surface.push_refresh("incident", "loops"))
+            )
             surface._incident_watch_task = watcher
             surface._background_tasks.add(watcher)
             watcher.add_done_callback(surface._background_tasks.discard)
@@ -185,7 +187,9 @@ async def retire(runtime: RuntimeCoordinator) -> None:
         try:
             await asyncio.wait_for(cancel_tasks(surface._background_tasks), timeout=5.0)
         except asyncio.TimeoutError:
-            log.warning("Dashboard background work did not settle within shutdown deadline")
+            log.warning(
+                "Dashboard background work did not settle within shutdown deadline"
+            )
     for watcher in (runtime.loop_watchdog, runtime.workflow_watchdog):
         if watcher is not None:
             await watcher.stop()
@@ -344,9 +348,14 @@ class RuntimeProcess:
             payload = {
                 "port": runtime._dashboard_port,
                 "token": generate_token(
-                    "local-startup", ttl_seconds=DEFAULT_BROWSER_SESSION_TTL_SECS,
+                    "local-startup",
+                    ttl_seconds=DEFAULT_BROWSER_SESSION_TTL_SECS,
                     issuer="ready",
-                    kind="desktop" if os.environ.get("GIDEON_INSTALL_KIND") == "desktop" else "cli",
+                    kind=(
+                        "desktop"
+                        if os.environ.get("GIDEON_INSTALL_KIND") == "desktop"
+                        else "cli"
+                    ),
                 ),
                 "pid": os.getpid(),
                 "home": str(config_dir()),
