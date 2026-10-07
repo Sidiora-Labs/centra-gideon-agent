@@ -1,3 +1,4 @@
+import { Button } from '../../../shared/ui/Button'
 import NativeMediaPage from './NativeMediaPage'
 import { EpisodeScenes } from './EpisodePage'
 import { useEffect, useState } from 'react'
@@ -27,8 +28,8 @@ export function JobCard({ job, act, busy }: { job: MediaJob; act: (job: MediaJob
     {artifactUrl && <a href={artifactUrl}>Open media artifact</a>}
     {job.result?.adapter_id && <p>Trained adapter: {job.result.adapter_id}</p>}
     {job.operation === 'lora_train' && <a href={'/api/capabilities/media/jobs/' + job.id + '/checkpoints'}>Retained checkpoint inventory</a>}
-    {['queued', 'running'].includes(job.status) && <button disabled={busy} onClick={() => act(job, 'cancel')}>Cancel</button>}
-    {['failed', 'cancelled'].includes(job.status) && <button disabled={busy} onClick={() => act(job, 'retry')}>Retry</button>}
+    {['queued', 'running'].includes(job.status) && <Button variant="secondary" loading={busy} onClick={() => act(job, 'cancel')}>Cancel</Button>}
+    {['failed', 'cancelled'].includes(job.status) && <Button variant="secondary" loading={busy} onClick={() => act(job, 'retry')}>Retry</Button>}
     <details><summary>Attempt history</summary>{job.events.map((event, index) => {
       const outputUrl = mediaArtifactRawUrl(event.result)
       return <p key={index}>{event.at} · {event.status} · {event.detail}{outputUrl && <> · <a href={outputUrl}>Attempt output</a></>}</p>

@@ -1,3 +1,4 @@
+import { Button } from '../../../shared/ui/Button'
 import NativeMediaPage from './NativeMediaPage'
 import { useEffect, useState } from 'react'
 
@@ -17,7 +18,7 @@ export default function Readiness({ showSettingsLinks = true }: { showSettingsLi
   useEffect(() => { void load() }, [])
   return <NativeMediaPage title="Media readiness" actions={<><a href="#/capabilities/media">Sketches</a>{showSettingsLinks && <><a href="#/settings?tab=models">Models</a><a href="#/settings?tab=providers">Providers</a></>}</>} width="content">
     <p>Availability and model catalog observations do not prove credentials, remote reachability, GPU capacity, or successful inference. Refresh does not generate media or install models.</p>
-    <button disabled={busy} onClick={() => void load(true)}>{busy ? 'Checking…' : 'Refresh readiness'}</button>{error && <p role="alert">{error}</p>}
+    <Button variant="secondary" loading={busy} onClick={() => void load(true)}>{busy ? 'Checking…' : 'Refresh readiness'}</Button>{error && <p role="alert">{error}</p>}
     {!data && <p>Loading last observation…</p>}{data && <><p>Last observed: {data.observed_at || 'Never'}. Saved observations may be stale.</p><ReadinessCards items={data.items} /></>}
   </NativeMediaPage>
 }

@@ -65,7 +65,7 @@ export default function LibraryPage({ artifactId, onSelectArtifact, onNavigate }
   }
   const dirty = selected && (selected.name !== name || selected.tags.join(', ') !== tags || selected.collection !== membership)
   return <NativeMediaPage title="Media library" actions={onNavigate
-    ? <button type="button" onClick={() => onNavigate('sketches')}>Image sketches</button>
+    ? <Button variant="secondary" type="button" onClick={() => onNavigate('sketches')}>Image sketches</Button>
     : <a href="#/capabilities/media">Image sketches</a>}>
     {error && <p role="alert">{error}</p>}
     <div className="grid gap-m rounded-lg bg-surface-container p-l sm:grid-cols-2 lg:grid-cols-5">

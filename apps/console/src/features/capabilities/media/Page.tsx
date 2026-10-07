@@ -1,5 +1,5 @@
 import { Select, TextInput } from '../../../shared/ui/forms'
-import { BUSY_REASON, unavailableWhen } from '../../../shared/ui/unavailable'
+import { BUSY_REASON } from '../../../shared/ui/unavailable'
 import SpritePage from './SpritePage'
 import AnimationPage from './AnimationPage'
 import DownloadPage from './DownloadPage'
@@ -101,7 +101,7 @@ function SketchPage({ sketchId, onSelectSketch, onJob }: { sketchId?: string; on
         <Button disabled={!!dirty || busy} onClick={() => void action(async () => { const result = await request('/' + sketch.id + '/export', 'POST', { revision: sketch.revision }); setDownload('/api/artifacts/' + result.artifact_id + '/raw?version=' + result.version) })} disabledReason={busy ? BUSY_REASON : undefined}>Export PNG</Button>
         {download && <a href={download} download="sketch.png">Download PNG</a>}
       </div>
-      <button {...unavailableWhen(!!dirty, 'Save or discard sketch changes before queuing an export', { busy })} onClick={() => { if (busy || dirty) return; setBusy(true); fetch('/api/capabilities/media/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'sketch_export', sketch_id: sketch.id, revision: sketch.revision, request_id: crypto.randomUUID() }) }).then(async response => { const value = await response.json(); if (!response.ok) throw new Error(value.error); if (onJob) onJob(value.id); else location.hash = '#/capabilities/media?view=jobs' }).catch(reason => setError(String(reason))).finally(() => setBusy(false)) }}>Queue PNG export</button>
+      <Button variant="secondary" disabled={!!dirty} disabledReason={!!dirty ? 'Save or discard sketch changes before queuing an export' : undefined} loading={busy} onClick={() => { if (busy || dirty) return; setBusy(true); fetch('/api/capabilities/media/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ operation: 'sketch_export', sketch_id: sketch.id, revision: sketch.revision, request_id: crypto.randomUUID() }) }).then(async response => { const value = await response.json(); if (!response.ok) throw new Error(value.error); if (onJob) onJob(value.id); else location.hash = '#/capabilities/media?view=jobs' }).catch(reason => setError(String(reason))).finally(() => setBusy(false)) }}>Queue PNG export</Button>
       <p role="status">Revision {sketch.revision}{dirty ? ' · Unsaved changes' : ' · Saved'}. Erase removes drawing only; the original image stays intact.</p>
       <div className="relative max-w-full overflow-hidden rounded-lg ring-1 ring-outline-variant/30" style={{ width: sketch.width, aspectRatio: `${sketch.width}/${sketch.height}`, background: 'white' }}>
         {sketch.source_artifact_id && <img alt="Original image" src={base + '/' + sketch.id + '/source'} className="absolute inset-0 w-full h-full" onError={() => setError('Original image is unavailable')} />}

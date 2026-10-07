@@ -1,5 +1,5 @@
+import { Button } from '../../../shared/ui/Button'
 import { Select, TextInput } from '../../../shared/ui/forms'
-import { unavailableWhen } from '../../../shared/ui/unavailable'
 import NativeMediaPage from './NativeMediaPage'
 import { useEffect, useState } from 'react'
 type SourceImage = { id: string; name: string; version: number }
@@ -8,7 +8,7 @@ export const defaultTransform = (op: string): Transform => op === 'crop' ? { op,
 export function TransformList({ operations, change }: { operations: Transform[]; change: (operations: Transform[]) => void }) {
   return <ol>{operations.map((operation, index) => <li className="rounded-lg bg-surface-container p-m" key={index}><h2>{index+1}. {operation.op}</h2>
     {Object.entries(operation).filter(([key]) => key !== 'op').map(([key, value]) => <label key={key}>{key}{key === 'color' ? <input type="color" step="any" value={value} onChange={event => change(operations.map((item, at) => at === index ? { ...item, [key]: typeof value === 'number' ? Number(event.target.value) : event.target.value } : item))} /> : <TextInput type={typeof value === 'number' ? 'number' : 'text'} step="any" value={String(value)} onChange={nextValue => change(operations.map((item, at) => at === index ? { ...item, [key]: typeof value === 'number' ? Number(nextValue) : nextValue } : item))} />}</label>)}
-    <button className="aria-disabled:opacity-40" {...unavailableWhen(index === 0, 'This transform is already first')} onClick={() => { if (index === 0) return; const reordered = [...operations]; [reordered[index-1], reordered[index]] = [reordered[index], reordered[index-1]]; change(reordered) }}>Move up</button><button onClick={() => change(operations.filter((_, at) => at !== index))}>Remove transform</button>
+    <Button variant="secondary" className="aria-disabled:opacity-40" disabled={index === 0} disabledReason={index === 0 ? 'This transform is already first' : undefined} onClick={() => { if (index === 0) return; const reordered = [...operations]; [reordered[index-1], reordered[index]] = [reordered[index], reordered[index-1]]; change(reordered) }}>Move up</Button><Button variant="secondary" onClick={() => change(operations.filter((_, at) => at !== index))}>Remove transform</Button>
   </li>)}</ol>
 }
 export default function CleanupPage({ onJob }: { onJob?: (id: string) => void } = {}) {
@@ -32,12 +32,12 @@ export default function CleanupPage({ onJob }: { onJob?: (id: string) => void } 
     <p>Transforms run in the listed order on an EXIF-oriented copy. The pinned original stays unchanged. Resize uses Lanczos interpolation; it does not invent detail. Solid background cleanup removes only matching color connected to image edges, preserving enclosed regions; it is not semantic segmentation.</p>
     {error && <p role="alert">{error}</p>}
     <label>Find source image<TextInput type="search" value={String(query)} onChange={nextValue => setQuery(nextValue)} /></label>
-    <button type="button" disabled={loading} onClick={() => setRefresh(value => value + 1)}>Refresh images</button>
+    <Button variant="secondary" type="button" loading={loading} onClick={() => setRefresh(value => value + 1)}>Refresh images</Button>
     <label>Source image<Select ariaLabel="Source image" value={String(source ? `${source.id}:${source.version}` : '')} onChange={nextValue => setSource(images.find(image => `${image.id}:${image.version}` === nextValue) || null)} options={[{ value: String(""), label: "Choose an image" }, ...(source && !images.some(image => image.id === source.id && image.version === source.version) ? [{ value: `${source.id}:${source.version}`, label: source.name + " · version " + source.version }] : []), ...(images.map(image => ({ value: String(`${image.id}:${image.version}`), label: String(image.name) + " · version " + String(image.version) })) ?? [])]} /></label>
     {loading ? <p role="status">Loading images…</p> : <p role="status">{total} matching images{total > images.length ? ' · Search to find more' : ''}</p>}
     {source && <p>Pinned source: {source.name} · version {source.version}</p>}
-    <label>Transform<Select value={String(kind)} onChange={nextValue => setKind(nextValue)} options={[...(['crop', 'resize', 'rotate', 'flip', 'brightness', 'contrast', 'sharpen', 'solid_background'].map(name => ({ value: String(name), label: String(name) })) ?? [])]} /></label><button {...unavailableWhen(operations.length >= 10, 'A cleanup can contain at most 10 transforms', { busy })} onClick={() => { if (busy || operations.length >= 10) return; setOperations(old => [...old, defaultTransform(kind)]) }}>Add transform</button>
+    <label>Transform<Select value={String(kind)} onChange={nextValue => setKind(nextValue)} options={[...(['crop', 'resize', 'rotate', 'flip', 'brightness', 'contrast', 'sharpen', 'solid_background'].map(name => ({ value: String(name), label: String(name) })) ?? [])]} /></label><Button variant="secondary" disabled={operations.length >= 10} disabledReason={operations.length >= 10 ? 'A cleanup can contain at most 10 transforms' : undefined} loading={busy} onClick={() => { if (busy || operations.length >= 10) return; setOperations(old => [...old, defaultTransform(kind)]) }}>Add transform</Button>
     <p>Up to 10 transforms. Dimensions stay within 4096 × 4096; solid background cleanup is limited to 4 megapixels. Rotations are counterclockwise right angles.</p>
-    <TransformList operations={operations} change={setOperations} /><button {...unavailableWhen(!source || operations.length === 0, !source ? 'Choose a source image first' : 'Add a transform before queuing cleanup', { busy })} onClick={() => void submit()}>{busy ? 'Queuing…' : 'Queue cleanup'}</button>
+    <TransformList operations={operations} change={setOperations} /><Button variant="secondary" disabled={!source || operations.length === 0} disabledReason={!source || operations.length === 0 ? !source ? 'Choose a source image first' : 'Add a transform before queuing cleanup' : undefined} loading={busy} onClick={() => void submit()}>{busy ? 'Queuing…' : 'Queue cleanup'}</Button>
   </NativeMediaPage>
 }

@@ -1,5 +1,5 @@
+import { Button } from '../../../shared/ui/Button'
 import { Select, TextArea, TextInput } from '../../../shared/ui/forms'
-import { unavailableWhen } from '../../../shared/ui/unavailable'
 import LoraPicker, { type LoraInventory } from './LoraPicker'
 import { useEffect, useRef, useState } from 'react'
 import NativeMediaPage from './NativeMediaPage'
@@ -27,6 +27,6 @@ export default function ImagePage({ onJob }: { onJob?: (id: string) => void } = 
     {error && <p role="alert">{error}</p>}{!capabilities && <p>Loading image capabilities…</p>}{capabilities && <><p>Selected: {capabilities.selection || 'None'}</p>{!capabilities.available && <p role="status">Provider unavailable. Configure a model through media readiness.</p>}
       <label>Prompt<TextArea maxLength={4000} value={String(prompt)} onChange={nextValue => setPrompt(nextValue)} /></label><ConditioningFields capabilities={capabilities} values={values} change={(key, value) => setValues(old => ({ ...old, [key]: value }))} />
       {inventory && <LoraPicker inventory={inventory} selected={adapters} change={(id, value) => setAdapters(old => { const next = { ...old }; if (value === null) delete next[id]; else next[id] = value; return next })} />}
-      <button {...unavailableWhen(!capabilities.available || !prompt.trim(), !capabilities.available ? 'Configure an available image model through media readiness' : 'Enter an image prompt first', { busy })} onClick={() => void submit()}>{busy ? 'Queuing…' : 'Queue image generation'}</button></>}
+      <Button variant="secondary" disabled={!capabilities.available || !prompt.trim()} disabledReason={!capabilities.available || !prompt.trim() ? !capabilities.available ? 'Configure an available image model through media readiness' : 'Enter an image prompt first' : undefined} loading={busy} onClick={() => void submit()}>{busy ? 'Queuing…' : 'Queue image generation'}</Button></>}
   </NativeMediaPage>
 }
