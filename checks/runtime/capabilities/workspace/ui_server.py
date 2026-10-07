@@ -19,9 +19,8 @@ async def main():
         root = Path(directory)
         os.environ["GIDEON_HOME"] = directory
         os.environ["GIDEON_WORKSPACE"] = str(root / "workspace")
-        from gideon.core.config.loader import workspace_root
-
         from checks.runtime.capabilities.workspace.test_workspace import repository
+        from gideon.core.config.loader import workspace_root
 
         repo = repository(workspace_root() / "repo")
         (root / "config.json").write_text(
