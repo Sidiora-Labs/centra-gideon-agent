@@ -481,7 +481,8 @@ def _iterated_enum_classes(
 
 
 def _inert_enum_members(
-    files: list[Path], attr_names: set[str], native_files: list[Path] | None = None
+    files: list[Path], attr_names: set[str], native_files: list[Path] | None = None,
+    native_aliases: dict[tuple[Path, str], tuple[Path, str]] | None = None,
 ) -> list[tuple[Path, str]]:
     """``(file, "Class.MEMBER")`` for every enum member with neither a reader nor an iterator.
 
@@ -493,7 +494,8 @@ def _inert_enum_members(
        whole-enum iteration reaches every member by construction, so ONE iteration site
        clears ALL of that class's members; or
     3. a public native Rust unit enum derives both serde serialization traits and
-       snake_case conversion, with the same class name and complete variant values.
+       supported literal serde renames, with the same class name (or a verified
+       source-bound counterpart alias) and complete variant values.
        The production census supplies native source files explicitly; fixture trees
        and ordinary value constructors do not gain this clearance.
 
@@ -572,7 +574,7 @@ def _inert_enum_members(
     iterated = _iterated_enum_classes(files, enum_names)
     from tooling.scripts.native_wire_enums import native_wire_enum_evidence
 
-    native_wire = native_wire_enum_evidence(files, native_files or [])
+    native_wire = native_wire_enum_evidence(files, native_files or [], native_aliases)
     out: list[tuple[Path, str]] = []
     for path, members in declared.items():
         for class_name, member in members:
@@ -589,10 +591,13 @@ def _inert_enum_surfaces(
     """An enum member is inert when its name is never accessed as an attribute anywhere in
     ``src/`` AND its class is never iterated as a whole — see ``_inert_enum_members`` and
     ``_iterated_enum_classes`` for the two halves."""
+    from tooling.scripts.native_wire_enums import native_wire_aliases
+
     return [
         (_rel(path), f"{KIND_ENUM}:{surface}")
         for path, surface in _inert_enum_members(
-            files, attr_names, sorted((_repo_root() / "crates").glob("*/src/**/*.rs"))
+            files, attr_names, sorted((_repo_root() / "crates").glob("*/src/**/*.rs")),
+            native_wire_aliases(_repo_root()),
         )
     ]
 

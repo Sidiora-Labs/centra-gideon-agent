@@ -670,7 +670,7 @@ def test_incomplete_native_wire_evidence_does_not_clear_private_surface(tmp_path
     elif mutation == "extra-python-variant":
         python.write_text(python.read_text() + "    THIRD = 'third'\n")
     elif mutation == "custom-rename":
-        source = source.replace('"snake_case"', '"kebab-case"')
+        source = source.replace('"snake_case"', '"camelCase"')
     elif mutation == "tagged":
         source = source.replace('rename_all = "snake_case"', 'rename_all = "snake_case", tag = "kind"')
     elif mutation == "conditional":
@@ -701,3 +701,64 @@ def test_actual_native_protocol_wire_values_have_complete_parity():
     matches = native_wire_enum_evidence([python], [native])
     assert matches[(python.resolve(), "Operation")] == (native.resolve(),)
     assert matches[(python.resolve(), "RenderMode")] == (native.resolve(),)
+
+
+def test_native_kebab_case_and_literal_variant_renames_require_complete_parity(tmp_path):
+    python, native = _wire_enum_fixture(tmp_path)
+    python.write_text(python.read_text().replace("second_kind", "second-kind"))
+    native.write_text(native.read_text().replace("snake_case", "kebab-case"))
+    assert _inert_enum_members([python], set(), [native]) == []
+    python.write_text(python.read_text().replace("second-kind", "event.label").replace("'first'", "'event.kind'"))
+    native.write_text('''#[derive(Deserialize, Serialize)]
+        pub enum WireKind {
+            #[serde(rename = "event.kind")] First,
+            #[serde(rename = "event.label")] SecondKind,
+        }
+    ''')
+    assert _inert_enum_members([python], set(), [native]) == []
+    native.write_text(native.read_text().replace("event.label", "event.other"))
+    assert len(_inert_enum_members([python], set(), [native])) == 2
+
+
+@pytest.mark.parametrize("variant", [
+    'First', '#[serde(alias = "event.kind")] First',
+    '#[serde(rename = "event.kind", alias = "first")] First',
+    '#[serde(rename = "event.kind")] First(String)',
+])
+def test_incomplete_or_custom_native_variant_map_remains_flagged(tmp_path, variant):
+    python, native = _wire_enum_fixture(tmp_path)
+    python.write_text(python.read_text().replace("'first'", "'event.kind'").replace("'second_kind'", "'event.label'"))
+    native.write_text(f'''#[derive(Deserialize, Serialize)]
+        pub enum WireKind {{
+            {variant},
+            #[serde(rename = "event.label")] SecondKind,
+        }}
+    ''')
+    assert len(_inert_enum_members([python], set(), [native])) == 2
+
+
+def test_source_bound_native_alias_never_waives_name_path_or_value_proof(tmp_path):
+    python, native = _wire_enum_fixture(tmp_path, "PythonKind", "NativeKind")
+    aliases = {(python.resolve(), "PythonKind"): (native.resolve(), "NativeKind")}
+    assert len(_inert_enum_members([python], set(), [native])) == 2
+    assert _inert_enum_members([python], set(), [native], aliases) == []
+    copied = tmp_path / "different.rs"
+    copied.write_text(native.read_text())
+    assert len(_inert_enum_members([python], set(), [copied], aliases)) == 2
+    native.write_text(native.read_text().replace("SecondKind", "OtherKind"))
+    assert len(_inert_enum_members([python], set(), [native], aliases)) == 2
+
+
+def test_actual_custom_native_aliases_and_predicate_fields_have_exact_wire_parity():
+    from tooling.scripts.native_wire_enums import native_wire_aliases, native_wire_enum_evidence
+
+    root = Path(__file__).resolve().parents[2]
+    aliases = native_wire_aliases(root)
+    python = sorted({path for path, _ in aliases})
+    native = sorted({path for path, _ in aliases.values()})
+    matches = native_wire_enum_evidence(python, native, aliases)
+    for identity, (native_path, _) in aliases.items():
+        assert matches[identity] == (native_path,)
+    predicate = root / "runtime/gideon/hypermid/contracts.py"
+    smart_note = root / "crates/hypermid-memory/src/smart_note.rs"
+    assert matches[(predicate.resolve(), "PredicateField")] == (smart_note.resolve(),)
