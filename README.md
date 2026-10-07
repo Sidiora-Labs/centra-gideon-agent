@@ -1,4 +1,4 @@
-<p align="left"><img src="assets/gideon.png" alt="Gideon"></p>
+<p align="left"><img src="https://supabase.paxeer.app/storage/v1/object/public/json/readme_gideon.png" alt="Gideon"></p>
 
 <h1 align="center">Gideon Agent</h1>
 <p align="center">
