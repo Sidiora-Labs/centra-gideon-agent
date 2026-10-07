@@ -281,7 +281,7 @@ class TestApprovalBriefOnTheNotification:
         allow_sender("slack", "U_OWNER", via="owner")
 
     @staticmethod
-    async def _prompt(brief, outcome):
+    async def _prompt(brief, outcome, monkeypatch: pytest.MonkeyPatch):
         """Answer an actual registered Slack offer and return its notification."""
         from slack_desk_runtime import enterprise
         from slack_desk_runtime.client import RealSlackDeskClient
@@ -297,11 +297,16 @@ class TestApprovalBriefOnTheNotification:
         )
 
         client = RealSlackDeskClient("xoxb-test-network-disabled")
-        client.open_dm = AsyncMock(return_value="D1")
-        client.post_blocks = AsyncMock(return_value="1.1")
-        client.update_message = AsyncMock()
-        client._web.conversations_info = AsyncMock(
-            return_value={"ok": True, "channel": {"id": "D1", "is_im": True}}
+        monkeypatch.setattr(client, "open_dm", AsyncMock(return_value="D1"))
+        post_blocks = AsyncMock(return_value="1.1")
+        monkeypatch.setattr(client, "post_blocks", post_blocks)
+        monkeypatch.setattr(client, "update_message", AsyncMock())
+        monkeypatch.setattr(
+            client._web,
+            "conversations_info",
+            AsyncMock(
+                return_value={"ok": True, "channel": {"id": "D1", "is_im": True}}
+            ),
         )
         transport = SlackDeskTransport({"bot_token": "xoxb-test-network-disabled"})
         delivery = SlackDeskDelivery(client, "U_OWNER", transport=transport)
@@ -317,22 +322,33 @@ class TestApprovalBriefOnTheNotification:
             assert pending.delivery is delivery
             assert pending.provider is None
             action = "approve_tool" if outcome == "approved" else "reject_tool"
-            arguments = dict(
-                channel="D1",
-                msg_ts="1.1",
-                action_id=action,
-                user_id="U_OWNER",
-                team_id=enterprise._validated_team_id,
-                thread_ts="",
-                slack_desk=client,
-                answer_value="req-fallback",
-            )
             assert (
-                await handle_interaction(**(arguments | {"user_id": "U_FOREIGN"}))
+                await handle_interaction(
+                    channel="D1",
+                    msg_ts="1.1",
+                    action_id=action,
+                    user_id="U_FOREIGN",
+                    team_id=enterprise._validated_team_id,
+                    thread_ts="",
+                    slack_desk=client,
+                    answer_value="req-fallback",
+                )
                 is None
             )
             assert not pending.future.done()
-            assert await handle_interaction(**arguments) == action
+            assert (
+                await handle_interaction(
+                    channel="D1",
+                    msg_ts="1.1",
+                    action_id=action,
+                    user_id="U_OWNER",
+                    team_id=enterprise._validated_team_id,
+                    thread_ts="",
+                    slack_desk=client,
+                    answer_value="req-fallback",
+                )
+                == action
+            )
 
         def on_prompted(pending):
             nonlocal answer_task
@@ -350,7 +366,8 @@ class TestApprovalBriefOnTheNotification:
             )
             assert answer_task is not None
             await answer_task
-            return verdict, client.post_blocks.call_args[0][2]
+            assert post_blocks.call_args is not None
+            return verdict, post_blocks.call_args[0][2]
         finally:
             if answer_task is not None and not answer_task.done():
                 answer_task.cancel()
@@ -362,17 +379,17 @@ class TestApprovalBriefOnTheNotification:
                 register_transport(previous_transport)
 
     @pytest.mark.asyncio
-    async def test_approved_notification_names_the_blast_radius(self):
-        verdict, fallback = await self._prompt(self._BRIEF, "approved")
+    async def test_approved_notification_names_the_blast_radius(self, monkeypatch):
+        verdict, fallback = await self._prompt(self._BRIEF, "approved", monkeypatch)
         assert verdict is True
         assert fallback == (
             "🔐 [cron] Approve: bash? — Can: writes files, runs a command · Risk: destructive"
         )
 
     @pytest.mark.asyncio
-    async def test_rejected_notification_names_the_same_blast_radius(self):
+    async def test_rejected_notification_names_the_same_blast_radius(self, monkeypatch):
         """Refusing is a decision too — the owner needs the same facts to refuse well."""
-        verdict, fallback = await self._prompt(self._BRIEF, "rejected")
+        verdict, fallback = await self._prompt(self._BRIEF, "rejected", monkeypatch)
         assert verdict is False
         assert "Can: writes files, runs a command · Risk: destructive" in fallback
 
@@ -380,8 +397,10 @@ class TestApprovalBriefOnTheNotification:
     @pytest.mark.parametrize(
         "outcome,verdict", [("approved", True), ("rejected", False)]
     )
-    async def test_no_brief_leaves_the_notification_untouched(self, outcome, verdict):
+    async def test_no_brief_leaves_the_notification_untouched(
+        self, outcome, verdict, monkeypatch
+    ):
         """VACUITY TWIN for both decisions: no brief, no added clause."""
-        got, fallback = await self._prompt(None, outcome)
+        got, fallback = await self._prompt(None, outcome, monkeypatch)
         assert got is verdict
         assert fallback == "🔐 [cron] Approve: bash?"
