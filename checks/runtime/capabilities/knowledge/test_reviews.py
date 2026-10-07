@@ -7,7 +7,6 @@ from threading import Barrier
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.core.config.loader import AppConfig
@@ -21,6 +20,7 @@ from gideon.integrations.mcp_core import (
 )
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge_reviews import register
 from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.communications.store import PeopleStore
 from gideon.workspace.capabilities.knowledge.capture import CaptureError, CaptureInbox
 from gideon.workspace.capabilities.knowledge.review_schedule import (
@@ -271,12 +271,13 @@ def test_scheduled_materialization_previous_local_day_and_replay(reviews):
 
 
 @pytest.mark.asyncio
-async def test_actual_tick_dispatch_writes_canonical_note_and_execution_journal(reviews):
+async def test_actual_tick_dispatch_writes_canonical_note_and_execution_journal(
+    reviews,
+):
     from gideon.automation.schedule_history import ExecutionJournal
+    from gideon.automation.triggers import grants
     from gideon.automation.triggers.service import tick
     from gideon.engine.gateway import RuntimeCoordinator
-
-    from gideon.automation.triggers import grants
     from gideon.security.approval_answer import YOU
 
     schedules = ReviewSchedules(reviews)
@@ -285,12 +286,19 @@ async def test_actual_tick_dispatch_writes_canonical_note_and_execution_journal(
     trigger = schedules.triggers.get(saved["trigger_id"]).trigger
     question = grants.question(trigger)
     assert question is not None
-    assert grants.grant(trigger, confirmed_revision=question.revision, principal=YOU, shown=question.shown)
+    assert grants.grant(
+        trigger,
+        confirmed_revision=question.revision,
+        principal=YOU,
+        shown=question.shown,
+    )
     schedules.triggers.upsert(trigger)
     stamp = datetime.fromisoformat(
         saved["next_fire_at"].replace("Z", "+00:00")
     ).timestamp()
-    result = await tick(schedules.triggers, now=stamp + 1, persist=True, base_dir=reviews.home)
+    result = await tick(
+        schedules.triggers, now=stamp + 1, persist=True, base_dir=reviews.home
+    )
     assert len(result.fires) == 1
     fire = result.fires[0]
     assert fire.trigger.id == saved["trigger_id"]
@@ -300,9 +308,7 @@ async def test_actual_tick_dispatch_writes_canonical_note_and_execution_journal(
         runtime = RuntimeCoordinator(
             AppConfig(), no_dashboard=True, no_crons=True, no_open=True
         )
-        await runtime._fire_store_trigger(
-            fire.trigger, fire.to_dict()
-        )
+        await runtime._fire_store_trigger(fire.trigger, fire.to_dict())
         return await ExecutionJournal(reviews.home).list_for_job(saved["trigger_id"])
 
     records, total = await dispatch()
@@ -316,9 +322,10 @@ async def test_actual_tick_dispatch_writes_canonical_note_and_execution_journal(
     assert receipt["request_id"].startswith("scheduled-" + saved["id"])
     assert schedules.triggers.get(saved["trigger_id"]).trigger.run_count == 1
     assert (
-        (await tick(schedules.triggers, now=stamp + 2, persist=True, base_dir=reviews.home)).fires
-        == []
-    )
+        await tick(
+            schedules.triggers, now=stamp + 2, persist=True, base_dir=reviews.home
+        )
+    ).fires == []
 
 
 def test_concurrent_review_writers_share_one_canonical_receipt(reviews):
@@ -487,7 +494,9 @@ def test_http_preview_save_schedules_and_rejected_scope_selectors(reviews):
         root = "/api/capabilities/knowledge/reviews"
         async with TestClient(TestServer(app)) as client:
             assert (await client.get(root)).status == 403
-            client.session.headers["Authorization"] = "Bearer " + generate_token("knowledge-owner")
+            client.session.headers["Authorization"] = "Bearer " + generate_token(
+                "knowledge-owner"
+            )
             response = await client.get(
                 root + "/preview?period=weekly&date=2026-09-25&timezone=UTC"
             )

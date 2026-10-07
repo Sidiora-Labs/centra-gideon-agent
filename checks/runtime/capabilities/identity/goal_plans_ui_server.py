@@ -1,16 +1,16 @@
 """Real application used by the console interaction test."""
 
-import json
 import asyncio
+import json
 import sys
 from pathlib import Path
 
 from aiohttp import web
-from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.interfaces.dashboard.handlers.capabilities_identity_goal_plans import (
     register,
 )
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 
 async def main():
@@ -26,7 +26,15 @@ async def main():
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
     port = site._server.sockets[0].getsockname()[1]
-    print(json.dumps({"endpoint": f"http://127.0.0.1:{port}/api/capabilities/identity/goal-plans", "token": generate_token("identity-test-owner")}), flush=True)
+    print(
+        json.dumps(
+            {
+                "endpoint": f"http://127.0.0.1:{port}/api/capabilities/identity/goal-plans",
+                "token": generate_token("identity-test-owner"),
+            }
+        ),
+        flush=True,
+    )
     try:
         await asyncio.Event().wait()
     finally:

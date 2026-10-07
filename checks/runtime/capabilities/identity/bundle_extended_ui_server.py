@@ -6,9 +6,9 @@ import sys
 from pathlib import Path
 
 from aiohttp import web
-from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.interfaces.dashboard.handlers.capabilities_identity_bundles import register
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.identity.store import StoryStore
 from gideon.workspace.capabilities.identity.twin import TwinStore
 
@@ -45,7 +45,12 @@ async def main():
         endpoints.append(
             f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}/api/capabilities/identity/bundles"
         )
-    print(json.dumps({"endpoint": "|".join(endpoints), "token": generate_token("identity-owner")}), flush=True)
+    print(
+        json.dumps(
+            {"endpoint": "|".join(endpoints), "token": generate_token("identity-owner")}
+        ),
+        flush=True,
+    )
     try:
         await asyncio.Event().wait()
     finally:

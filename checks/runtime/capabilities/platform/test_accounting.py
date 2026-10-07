@@ -408,10 +408,13 @@ async def test_signed_http_and_native_read_canonical_accounting(home):
                 str(record["timestamp"]).replace("Z", "+00:00")
             )
             record["timestamp"] = (original + shift).isoformat()
-        fixture = "\n".join(
-            record if isinstance(record, str) else json.dumps(record)
-            for record in records
-        ) + "\n"
+        fixture = (
+            "\n".join(
+                record if isinstance(record, str) else json.dumps(record)
+                for record in records
+            )
+            + "\n"
+        )
         imported = await client.post(
             PREFIX + "/import",
             params={"token": token},

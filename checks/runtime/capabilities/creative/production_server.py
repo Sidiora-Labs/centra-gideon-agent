@@ -10,8 +10,8 @@ from gideon.interfaces.dashboard.handlers.capabilities_creative import STORE
 from gideon.interfaces.dashboard.handlers.capabilities_creative_production import (
     register as register_production,
 )
-from gideon.workspace.capabilities.creative.store import IngredientStore
 from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
+from gideon.workspace.capabilities.creative.store import IngredientStore
 
 
 async def main():

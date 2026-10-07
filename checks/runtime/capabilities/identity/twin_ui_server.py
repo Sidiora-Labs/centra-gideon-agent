@@ -8,7 +8,6 @@ from pathlib import Path
 from aiohttp import web
 
 from gideon.interfaces.dashboard.handlers.capabilities_identity_twin import register
-
 from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 

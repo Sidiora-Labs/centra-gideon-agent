@@ -6,16 +6,16 @@ from pathlib import Path
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
-import json
 import asyncio
+import json
 
 from aiohttp import web
-from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from checks.runtime.capabilities.identity.guarded_fixture import fixture
 from gideon.interfaces.dashboard.handlers.capabilities_identity_guarded_recipes import (
     register,
 )
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 
 async def main():
@@ -29,7 +29,12 @@ async def main():
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
     print(
-        json.dumps({"endpoint": f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}/api/capabilities/identity/guarded-recipes", "token": generate_token("identity-test-owner")}),
+        json.dumps(
+            {
+                "endpoint": f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}/api/capabilities/identity/guarded-recipes",
+                "token": generate_token("identity-test-owner"),
+            }
+        ),
         flush=True,
     )
     try:

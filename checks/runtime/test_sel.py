@@ -488,8 +488,12 @@ class TestHmacKeyManagementExtras:
         assert (other / "sel_hmac.key").read_bytes() != original_key
         assert b.verify_integrity() == (0, 0)
         b.log(_make_event(event_id="home-b", operation="home-b-operation"))
-        assert [json.loads(line)["event_id"] for line in a._path.read_text().splitlines()] == ["home-a"]
-        assert [json.loads(line)["event_id"] for line in b._path.read_text().splitlines()] == ["home-b"]
+        assert [
+            json.loads(line)["event_id"] for line in a._path.read_text().splitlines()
+        ] == ["home-a"]
+        assert [
+            json.loads(line)["event_id"] for line in b._path.read_text().splitlines()
+        ] == ["home-b"]
         assert a.verify_integrity() == (1, 1)
         assert b.verify_integrity() == (1, 1)
 

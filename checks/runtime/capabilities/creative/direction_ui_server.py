@@ -3,11 +3,11 @@ import json
 import os
 
 from aiohttp import web
-from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.interfaces.dashboard.handlers.capabilities_creative_direction import (
     register,
 )
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.creative.direction import DirectionStore
 from gideon.workspace.capabilities.creative.works import WorkStore
 

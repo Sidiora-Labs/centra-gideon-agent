@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.cognition.memory_service import MemoryService
@@ -19,6 +18,7 @@ from gideon.integrations.mcp_core import (
 )
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge_topics import register
 from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.communications.store import PeopleStore
 from gideon.workspace.capabilities.knowledge.capture import CaptureError
 from gideon.workspace.capabilities.knowledge.tools import KnowledgeCapabilityTools
@@ -364,8 +364,12 @@ def test_real_http_topic_refresh_isolation_and_delete(topics, tmp_path):
             TestClient(TestServer(other)) as isolated,
         ):
             assert (await client.get(root)).status == 403
-            client.session.headers["Authorization"] = "Bearer " + generate_token("knowledge-owner")
-            isolated.session.headers["Authorization"] = "Bearer " + generate_token("knowledge-owner")
+            client.session.headers["Authorization"] = "Bearer " + generate_token(
+                "knowledge-owner"
+            )
+            isolated.session.headers["Authorization"] = "Bearer " + generate_token(
+                "knowledge-owner"
+            )
             body = {
                 "request_id": "http-topic-save",
                 "name": "HTTP topic",

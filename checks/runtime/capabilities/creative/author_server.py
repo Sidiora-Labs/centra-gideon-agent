@@ -6,9 +6,9 @@ import sys
 from pathlib import Path
 
 from aiohttp import web
-from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.interfaces.dashboard.handlers.capabilities_creative import STORE, register
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.artifacts.handlers import api_artifact_raw
 from gideon.workspace.artifacts.native import NativeArtifactProvider
 from gideon.workspace.artifacts.registry import register_provider
@@ -35,7 +35,15 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
-    print(json.dumps({"url": f"http://127.0.0.1:{runner.addresses[0][1]}", "token": generate_token("author_server-owner")}), flush=True)
+    print(
+        json.dumps(
+            {
+                "url": f"http://127.0.0.1:{runner.addresses[0][1]}",
+                "token": generate_token("author_server-owner"),
+            }
+        ),
+        flush=True,
+    )
     try:
         await asyncio.Event().wait()
     finally:

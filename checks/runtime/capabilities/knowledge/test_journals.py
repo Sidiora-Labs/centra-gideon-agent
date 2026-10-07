@@ -6,7 +6,6 @@ from threading import Barrier
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.core.config.loader import AppConfig
@@ -20,6 +19,7 @@ from gideon.interfaces.dashboard.handlers.capabilities_knowledge_journals import
     register,
 )
 from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.knowledge.anniversaries import anniversaries
 from gideon.workspace.capabilities.knowledge.capture import CaptureError
 from gideon.workspace.capabilities.knowledge.journals import COLUMNS, DateJournals
@@ -379,7 +379,9 @@ def test_real_http_journal_canonical_read_and_selector_rejection(journals):
         root = "/api/capabilities/knowledge/journals"
         async with TestClient(TestServer(app)) as client:
             assert (await client.get(root)).status == 403
-            client.session.headers["Authorization"] = "Bearer " + generate_token("knowledge-owner")
+            client.session.headers["Authorization"] = "Bearer " + generate_token(
+                "knowledge-owner"
+            )
             assert (
                 await (await client.get(root + "?date=2025-09-25&timezone=UTC")).json()
             )["journal"] is None

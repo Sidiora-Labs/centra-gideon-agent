@@ -3,7 +3,6 @@ import asyncio
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.core.config.loader import AppConfig
@@ -13,6 +12,7 @@ from gideon.interfaces.dashboard.handlers.capabilities_knowledge import (
 )
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge_rsvp import register
 from gideon.interfaces.dashboard.state import ConsoleState
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.knowledge.capture import CaptureError
 from gideon.workspace.capabilities.knowledge.rsvp import (
     RsvpStates,
@@ -272,7 +272,9 @@ async def test_http_round_trip_guards_shape_and_persists_bookmark(tmp_path):
     register(app)
     client = TestClient(TestServer(app))
     await client.start_server()
-    client.session.headers["Authorization"] = "Bearer " + generate_token("knowledge-owner")
+    client.session.headers["Authorization"] = "Bearer " + generate_token(
+        "knowledge-owner"
+    )
     try:
         opened_response = await client.get(
             f"/api/capabilities/knowledge/rsvp/{item_id}"
@@ -361,7 +363,9 @@ async def test_knowledge_umbrella_mounts_one_rsvp_owner_and_restores_canonical_i
     assert isinstance(owner, RsvpStates)
     client = TestClient(TestServer(app))
     await client.start_server()
-    client.session.headers["Authorization"] = "Bearer " + generate_token("knowledge-owner")
+    client.session.headers["Authorization"] = "Bearer " + generate_token(
+        "knowledge-owner"
+    )
     try:
         opened = await (
             await client.get(f"/api/capabilities/knowledge/rsvp/{item_id}")

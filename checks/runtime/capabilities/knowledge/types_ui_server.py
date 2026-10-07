@@ -16,7 +16,6 @@ from gideon.interfaces.dashboard.handlers.capabilities_knowledge_types import (
     register as register_types,
 )
 from gideon.interfaces.dashboard.state import ConsoleState
-
 from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 

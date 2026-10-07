@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge_links import register
 from gideon.interfaces.dashboard.state import ConsoleState
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.knowledge.capture import CaptureError
 from gideon.workspace.capabilities.knowledge.links import LinkStudies, link_url
 from gideon.workspace.capabilities.knowledge.repository_intake import (
@@ -518,7 +518,9 @@ async def test_http_bucket_link_order_delete_and_repository_guards(
     register(app)
     client = TestClient(TestServer(app))
     await client.start_server()
-    client.session.headers["Authorization"] = "Bearer " + generate_token("knowledge-owner")
+    client.session.headers["Authorization"] = "Bearer " + generate_token(
+        "knowledge-owner"
+    )
     headers = {"X-Session-Key": "dashboard:ui"}
     try:
         created = await (

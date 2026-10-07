@@ -13,7 +13,15 @@ async def main():
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", 0).start()
-    print(json.dumps({"url": f"http://127.0.0.1:{runner.addresses[0][1]}", "token": generate_token("peers-owner")}), flush=True)
+    print(
+        json.dumps(
+            {
+                "url": f"http://127.0.0.1:{runner.addresses[0][1]}",
+                "token": generate_token("peers-owner"),
+            }
+        ),
+        flush=True,
+    )
     try:
         await asyncio.Event().wait()
     finally:
