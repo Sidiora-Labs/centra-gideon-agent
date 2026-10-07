@@ -27,31 +27,50 @@ keeps a template portable across a user's provider setup.
 
 from __future__ import annotations
 
-from gideon.security.safety_flags import yes_or_no
-
 import asyncio
 import json
 import logging
 import os
 import time
 from functools import wraps
+from typing import Any, Awaitable, Callable, Concatenate, ParamSpec
+
+from gideon.security.safety_flags import yes_or_no
+
+_DispatchArgs = ParamSpec("_DispatchArgs")
 
 
-def _with_workflow_identity(function):
+def _with_workflow_identity(
+    function: Callable[
+        Concatenate[Node, BindingContext, _DispatchArgs], Awaitable[NodeResult]
+    ],
+) -> Callable[Concatenate[Node, BindingContext, _DispatchArgs], Awaitable[NodeResult]]:
     @wraps(function)
-    async def invoke(node, ctx, **kwargs):
+    async def invoke(
+        node: Node,
+        ctx: BindingContext,
+        *args: _DispatchArgs.args,
+        **kwargs: _DispatchArgs.kwargs,
+    ) -> NodeResult:
         run_id = str(kwargs.get("run_id") or "")
         if not run_id:
-            return await function(node, ctx, **kwargs)
+            return await function(node, ctx, *args, **kwargs)
         from gideon.security.durable_work import workflow_work
+
         try:
             with workflow_work(run_id, node.id or "node"):
-                return await function(node, ctx, **kwargs)
+                return await function(node, ctx, *args, **kwargs)
         except PermissionError as error:
-            return _fail(FailureClass.PERMISSION, str(error), "review and resume the run from an authenticated owner session")
+            return _fail(
+                FailureClass.PERMISSION,
+                str(error),
+                "review and resume the run from an authenticated owner session",
+            )
+
     return invoke
+
+
 from enum import Enum
-from typing import Any
 
 from gideon.automation.workflows import leases, longrun, ownership
 from gideon.automation.workflows.bindings import (
@@ -78,6 +97,8 @@ from gideon.automation.workflows.engine_support import (
 )
 from gideon.automation.workflows.failure_taxonomy import (
     classify_action_result,
+)
+from gideon.automation.workflows.failure_taxonomy import (
     classify_exception as _classify_exception,
 )
 from gideon.automation.workflows.judge_contract import (
@@ -179,9 +200,7 @@ def _schema_example(schema: Any) -> Any:
         required = schema.get("required")
         keys = required if isinstance(required, list) else list(properties)
         return {
-            key: _schema_example(properties[key])
-            for key in keys
-            if key in properties
+            key: _schema_example(properties[key]) for key in keys if key in properties
         }
     if declared_type == "array" or "items" in schema and "type" in schema:
         return [_schema_example(schema.get("items"))]
@@ -447,11 +466,16 @@ async def dispatch_stage(
         )
 
     from gideon.extensions.apps import app_work as app_scopes
+
     work = app_scopes.of_run_id(run_id)
     capability = str(cfg.get("capability", "") or "research").strip().lower()
     refusal = app_scopes.run_refusal(work, capability=capability)
     if refusal:
-        return _fail(FailureClass.PERMISSION, refusal, "choose work within the app's declared agent tier")
+        return _fail(
+            FailureClass.PERMISSION,
+            refusal,
+            "choose work within the app's declared agent tier",
+        )
     claim_target = claim_key(run_id, node.id or "")
     holder = claim_holder(run_id, node.id or "")
     if claim_target:
@@ -467,10 +491,21 @@ async def dispatch_stage(
             )
 
     from gideon.automation.workflows.batch_start import issue_for_stage
+
     try:
-        batch_permit = issue_for_stage(run_id, node.id or "", task=prompt, agent=str(cfg.get("agent", "") or ""), cwd=cwd)
+        batch_permit = issue_for_stage(
+            run_id,
+            node.id or "",
+            task=prompt,
+            agent=str(cfg.get("agent", "") or ""),
+            cwd=cwd,
+        )
     except PermissionError as error:
-        return _fail(FailureClass.PERMISSION, str(error), "Ask the owner to review the batch again")
+        return _fail(
+            FailureClass.PERMISSION,
+            str(error),
+            "Ask the owner to review the batch again",
+        )
     info = subagents.spawn(
         batch_start_approval=batch_permit,
         app_work=work,
@@ -651,12 +686,17 @@ async def dispatch_subworkflow(
 
     spec = definition if isinstance(definition, dict) else definition.to_dict()
     from gideon.automation.workflows import automation_versions as consent
+
     try:
         bounds = consent.run_bounds(run_id) if run_id else None
         if bounds is not None:
             spec, bounds = consent.selection(name, bounds)
     except consent.VersionConsentError as error:
-        return _fail(FailureClass.USER, str(error), "ask the owner to review the workflow versions")
+        return _fail(
+            FailureClass.USER,
+            str(error),
+            "ask the owner to review the workflow versions",
+        )
 
     raw_inputs = cfg.get("inputs") if isinstance(cfg.get("inputs"), dict) else {}
     child_inputs: dict[str, Any] = {}
@@ -671,21 +711,36 @@ async def dispatch_subworkflow(
             )
 
     from gideon.extensions.apps import app_work as app_scopes
+
     work = app_scopes.of_run_id(run_id)
     refusal = app_scopes.run_refusal(work)
     if refusal:
-        return _fail(FailureClass.PERMISSION, refusal, "the child must remain within its app scope")
+        return _fail(
+            FailureClass.PERMISSION,
+            refusal,
+            "the child must remain within its app scope",
+        )
     parent = store.get(run_id) if run_id else None
     from gideon.security.durable_work import bind_run_origin, verified_run_origin
+
     origin_values = verified_run_origin(parent)
     if parent is not None and origin_values is None:
-        return _fail(FailureClass.PERMISSION, "parent work source proof is unavailable", "review and resume the parent from an authenticated owner session")
+        return _fail(
+            FailureClass.PERMISSION,
+            "parent work source proof is unavailable",
+            "review and resume the parent from an authenticated owner session",
+        )
     if parent is not None:
         from gideon.automation.workflows import private_work
+
         try:
             await private_work.validate_run(supervisor, parent)
         except RuntimeError as error:
-            return _fail(FailureClass.PERMISSION, str(error), "the original private scope must remain live")
+            return _fail(
+                FailureClass.PERMISSION,
+                str(error),
+                "the original private scope must remain live",
+            )
     child = store.create(
         WorkflowRun(
             id="",
@@ -697,19 +752,27 @@ async def dispatch_subworkflow(
             root_run_id=(parent.root_run_id if parent else "") or run_id or "",
             project_id=parent.project_id if parent else "",
             origin=RunOrigin(kind=OriginKind.SUBAGENT_TOOL, trigger_id=node.id),
-            extra=app_scopes.stamp({
-                **(ownership.inherited_extra(parent) if parent is not None else {}),
-                **({consent.BOUNDS_KEY: bounds} if bounds is not None else {}),
-            }, work),
+            extra=app_scopes.stamp(
+                {
+                    **(ownership.inherited_extra(parent) if parent is not None else {}),
+                    **({consent.BOUNDS_KEY: bounds} if bounds is not None else {}),
+                },
+                work,
+            ),
         )
     )
     if origin_values is not None:
         # The host dispatcher has verified the parent; mint a child-specific
         # receipt from that provenance, preserving source and privacy constraints.
         from gideon.security.durable_work import _seal_origin
+
         origin_values["run_id"] = ""
         if not bind_run_origin(child, _seal_origin(origin_values)):
-            return _fail(FailureClass.PERMISSION, "child work origin does not fit its run scope", "review the parent run's app and privacy scope")
+            return _fail(
+                FailureClass.PERMISSION,
+                "child work origin does not fit its run scope",
+                "review the parent run's app and privacy scope",
+            )
         store.save(child)
     store.write_spec(child.id, spec)
 
@@ -807,15 +870,28 @@ async def dispatch_action(
 
         getter = get_action_provider
     from gideon.extensions.apps import app_work as app_scopes
+
     work = app_scopes.of_run_id(run_id)
     if work is not None:
         if name in app_scopes.STARTS_AGENTS:
-            return _fail(FailureClass.PERMISSION, "app workflow agents must start as scoped stage steps", "use a stage or subworkflow node")
+            return _fail(
+                FailureClass.PERMISSION,
+                "app workflow agents must start as scoped stage steps",
+                "use a stage or subworkflow node",
+            )
         from gideon.automation.triggers.screen import provider_is_read_only
-        capability = "research" if provider_is_read_only(name) and name not in {"create-task", "call-app-route", "notify", "send-message"} else "mutating"
+
+        capability = (
+            "research"
+            if provider_is_read_only(name)
+            and name not in {"create-task", "call-app-route", "notify", "send-message"}
+            else "mutating"
+        )
         refusal = app_scopes.run_refusal(work, capability=capability)
         if refusal:
-            return _fail(FailureClass.PERMISSION, refusal, "choose an action within the app tier")
+            return _fail(
+                FailureClass.PERMISSION, refusal, "choose an action within the app tier"
+            )
     provider = getter(name)
     if provider is None:
         return _fail(
@@ -850,10 +926,14 @@ async def dispatch_action(
 
     key = unattended_dispatch_key(f"workflow:{run_id}")
     from gideon.security.guardrails.denylist import enforce_action
+
     denied = enforce_action(name, action_config, context, session_key=key)
     if denied.blocked:
-        return _fail(FailureClass.PERMISSION, denied.refusal(),
-                     "change what this step runs, then run the workflow again")
+        return _fail(
+            FailureClass.PERMISSION,
+            denied.refusal(),
+            "change what this step runs, then run the workflow again",
+        )
     try:
         token = app_scopes.hold(work)
         try:
@@ -1965,7 +2045,9 @@ def check_declared_schema(value: Any, schema: dict[str, Any]) -> str:
             props = declared.get("properties") if "type" in declared else declared
             if not isinstance(props, dict):
                 props = {}
-            required = declared.get("required", []) if "type" in declared else props.keys()
+            required = (
+                declared.get("required", []) if "type" in declared else props.keys()
+            )
             for key in required if isinstance(required, (list, tuple)) else props:
                 if key not in actual:
                     return f"{path}.{key} is missing"
@@ -1974,7 +2056,11 @@ def check_declared_schema(value: Any, schema: dict[str, Any]) -> str:
                     problem = check(actual[key], child, f"{path}.{key}")
                     if problem:
                         return problem
-        if isinstance(actual, list) and isinstance(declared, dict) and "items" in declared:
+        if (
+            isinstance(actual, list)
+            and isinstance(declared, dict)
+            and "items" in declared
+        ):
             for index, child in enumerate(actual):
                 problem = check(child, declared["items"], f"{path}[{index}]")
                 if problem:
@@ -2129,7 +2215,7 @@ async def dispatch(
     return apply_publish(node, result, run_id=run_id, cwd=cwd or None)
 
 
-def selected_dispatcher(node: Node) -> Any | None:
+def selected_dispatcher(node: Node) -> Callable[..., Awaitable[NodeResult]] | None:
     """Return the dispatcher selected for a leaf node.
 
     The controller records external-effect lifecycle events around dispatch.  Keeping the
@@ -2191,13 +2277,13 @@ async def _dispatch_inner(
             completion=completion,
             compaction_saves=compaction_saves,
         )
-    if dispatcher is dispatch_visualize:
+    if kind == NodeKind.VISUALIZE:
         return await dispatch_visualize(node, ctx, completion=completion)
     if dispatcher is dispatch_stage:
         return await dispatch_stage(
             node, ctx, subagents=subagents, depth=depth, run_id=run_id, cwd=cwd
         )
-    if dispatcher is dispatch_branch:
+    if kind == NodeKind.BRANCH:
         return await dispatch_branch(node, ctx)
     if dispatcher is dispatch_action:
         return await dispatch_action(
