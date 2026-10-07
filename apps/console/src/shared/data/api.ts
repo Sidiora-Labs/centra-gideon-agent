@@ -552,6 +552,34 @@ export interface ChannelTrust {
   default_dm_policy: string
   default_group_policy: string
 }
+
+export function channelTrustResponse(value: unknown): ChannelTrust {
+  const object = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
+  const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(x => typeof x === 'string')
+  if (!object(value) || !Array.isArray(value.trust_rows)
+    || !strings(value.dm_policies) || !strings(value.group_policies)
+    || typeof value.default_dm_policy !== 'string' || typeof value.default_group_policy !== 'string') {
+    throw new Error('Invalid channel trust response')
+  }
+  for (const row of value.trust_rows) {
+    if (!object(row) || typeof row.provider !== 'string' || !object(row.policies)
+      || typeof row.policies.dm !== 'string' || typeof row.policies.group !== 'string'
+      || !Array.isArray(row.allowed_senders) || !row.allowed_senders.every(sender =>
+        object(sender) && ['sender_id', 'name', 'added_at', 'via'].every(key => typeof sender[key] === 'string'))
+      || !Array.isArray(row.tracked_channels) || !row.tracked_channels.every(channel =>
+        object(channel) && ['channel_id', 'name', 'added_at'].every(key => typeof channel[key] === 'string'))
+      || typeof row.pairing_active !== 'boolean' || typeof row.pairing_expires_at !== 'string') {
+      throw new Error('Invalid channel trust provider response')
+    }
+  }
+  return {
+    providers: value.trust_rows as ChannelTrustProvider[],
+    dm_policies: value.dm_policies,
+    group_policies: value.group_policies,
+    default_dm_policy: value.default_dm_policy,
+    default_group_policy: value.default_group_policy,
+  }
+}
 export interface ChannelOwnerState {
   provider: string
   supported: boolean
@@ -5011,7 +5039,7 @@ export const api = {
   disconnectChannel: (name: string) => post<{ ok: boolean }>(`/api/channels/${encodeURIComponent(name)}/disconnect`),
   testChannel: (name: string) => post<{ ok: boolean; health?: ChannelHealth; detail?: string }>(`/api/channels/${encodeURIComponent(name)}/test`),
 
-  channelTrust: () => get<ChannelTrust>('/api/channels/trust'),
+  channelTrust: () => get<unknown>('/api/channels/trust').then(channelTrustResponse),
   channelOwner: (provider: string) => get<ChannelOwnerState>(`/api/channels/${encodeURIComponent(provider)}/owner`),
   createChannelOwnerPairing: (provider: string) => post<{ ok: boolean; provider: string; code: string; expires_in: number }>(`/api/channels/${encodeURIComponent(provider)}/owner/pairing`),
   cancelChannelOwnerPairing: (provider: string) => del(`/api/channels/${encodeURIComponent(provider)}/owner/pairing`),
