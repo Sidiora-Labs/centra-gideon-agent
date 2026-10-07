@@ -7,6 +7,7 @@ import {
 import { verifiedScope } from './AuditPanel'
 import type { LucideIcon } from 'lucide-react'
 import { notify } from '../../app/shell/appSdk'
+import { MoreRow } from '../../shared/ui/MoreRow'
 import {
   api, isFeatureOff, requireWriteAccepted, type SecurityStats, type SecretsVaultState, type MemoryStats, type AgentRuntime, type DashboardConfig,
   type SettingsProvider, type NotificationSettings, type UpdateCheck,
@@ -917,7 +918,7 @@ export const SETTINGS_WIDGETS: SettingsWidget[] = [
                 </div></>
             : rules && (list.length
               ? <><BigStat value={list.length} caption={list.length === 1 ? 'custom rule' : 'custom rules'} />
-                  <div className="mt-2"><ChipRow query={query} chips={list.slice(0, 6).map((r) => ({ label: r.name, tone: 'muted' as const }))} /></div></>
+                  <div className="mt-2"><ChipRow query={query} chips={list.slice(0, 6).map((r) => ({ label: r.name, tone: 'muted' as const }))} /><MoreRow total={list.length} shown={6} noun="rules" /></div></>
               : <div data-type="body-s" className="text-on-surface-low">Builtin projectors shrink logs, diffs, JSON, tests, CSV, and code; the full raw stays recoverable. A savings meter appears here once projection kicks in.</div>)}
         </BentoCard>
       )

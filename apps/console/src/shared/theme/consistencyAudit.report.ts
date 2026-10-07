@@ -203,7 +203,10 @@ export function scanA11y(): A11yCoverage {
     if (REDUCED_MOTION.test(text) && !rel.startsWith('shared/theme/')) reducedMotionFiles.push(rel)
     if (ANIMATED.test(text)) animatedFiles++
     if (rel === 'shared/theme/tokens.css') {
-      hasGlobalReducedMotion = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[^}]*\*/.test(text)
+      const app = readFileSync(join(SRC, 'app/shell/App.tsx'), 'utf8')
+      hasGlobalReducedMotion = /\[data-reduced-motion\]\s*\*/.test(text)
+        && /\[data-reduced-motion\][^{]*\{[^}]*animation-duration:[^}]*transition-duration:/.test(text)
+        && /toggleAttribute\('data-reduced-motion',\s*reducedMotion\)/.test(app)
       hasGlobalFocusRing = /:focus-visible\s*\{[^}]*outline/.test(text)
     }
   }

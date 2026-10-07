@@ -24,9 +24,11 @@ function cappedLists() {
     for (const m of src.matchAll(CAP)) {
       const ln = src.slice(0, m.index!).split('\n').length - 1
       const root = m[1].split('[')[0].split('.')[0].replace(/[!?]/g, '')
-      const before = lines.slice(Math.max(0, ln - 8), ln + 1).join('\n')
+      const before = lines.slice(Math.max(0, ln - 16), ln + 1).join('\n')
       const totalStated = new RegExp(
         `(?:label|title)=\\{?[\`"'][^\`"']*\\$\\{[^}]*${root}[\\w$.?!\\[\\]]*\\.length`,
+      ).test(before) || new RegExp(
+        `>[^<]*\\{\\s*${root}[\\w$.?!\\[\\]]*\\.length\\}`,
       ).test(before)
       out.push({
         rel: abs.replace(SRC + '/', ''), base: m[1], root, cap: Number(m[2]), totalStated,
@@ -79,7 +81,9 @@ describe('every list whose label states a total discloses its cap', () => {
     expect(lists.length, 'the sweep must find the capped lists').toBeGreaterThanOrEqual(25)
     const stated = lists.filter((l) => l.totalStated)
     expect(stated.length, 'and the label-states-a-total subset').toBeGreaterThanOrEqual(8)
-    const silent = stated.filter((l) => !rowFor(l)).map((l) => `${l.rel} (${l.base})`)
+    const silent = stated.filter((l) => !rowFor(l) && !new RegExp(
+      `${l.root}\\.length > ${l.cap}[^\\n]*Showing ${l.cap} of \\$\\{${l.root}\\.length\\}`,
+    ).test(l.after)).map((l) => `${l.rel} (${l.base})`)
     expect(silent, 'a label that promises N above a list of fewer owes the difference').toEqual([])
   })
 

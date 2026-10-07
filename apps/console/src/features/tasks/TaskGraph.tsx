@@ -81,7 +81,7 @@ export function TaskGraph({ tasks, onOpen }: { tasks: TaskItem[]; onOpen: (id: s
       {analysis && <div data-type="caption" className="mb-s flex flex-wrap items-center gap-x-l gap-y-s border-b border-outline-variant/25 p-m text-on-surface-low">
         <span className="inline-flex items-center gap-1.5"><Activity size={13} className="text-ok" />{Math.round(metrics.completion_pct)}% complete</span>
         <span className="inline-flex items-center gap-1.5"><Route size={13} className="text-primary" />Critical path: {critical.size} {critical.size === 1 ? 'task' : 'tasks'}</span>
-        {!!bottlenecks.length && <span className="inline-flex items-center gap-1.5" title={bottlenecks.slice(0, 5).map(entry => `${names.get(entry.id) ?? entry.id} (${entry.dependents})`).join('\n')}><GitFork size={13} className="text-warn" />{bottlenecks.length} {bottlenecks.length === 1 ? 'bottleneck' : 'bottlenecks'}</span>}
+        {!!bottlenecks.length && <span className="inline-flex items-center gap-1.5" title={bottlenecks.slice(0, 5).map(entry => `${names.get(entry.id) ?? entry.id} (${entry.dependents})`).join('\n') + (bottlenecks.length > 5 ? `\nShowing 5 of ${bottlenecks.length} bottlenecks` : '')}><GitFork size={13} className="text-warn" />{bottlenecks.length} {bottlenecks.length === 1 ? 'bottleneck' : 'bottlenecks'}</span>}
         {!!analysis.cycles?.length && <span className="inline-flex items-center gap-1.5 text-danger"><TriangleAlert size={13} />{analysis.cycles.length} cycle{analysis.cycles.length === 1 ? '' : 's'} detected</span>}
         {critical.size > 0 && <span className="text-on-surface-low">— critical-path tasks are ringed below</span>}
       </div>}

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { Box, Search, Users } from 'lucide-react'
 import { EmptyState } from '../shared/ui/ListScaffold'
 import { ArtifactGrid } from './artifacts/ArtifactGrid'
@@ -15,10 +15,12 @@ describe('ArtifactGrid empty states', () => {
   })
 
   it('does not offer the text-file save path for an empty binary kind', () => {
-    render(<ArtifactGrid artifacts={[]} onOpen={() => {}} onBrowseFiles={() => {}} kind="pdf" />)
-    expect(screen.getByText(/Ask the agent to create one/)).toBeInTheDocument()
+    const onBrowseFiles = vi.fn()
+    render(<ArtifactGrid artifacts={[]} onOpen={() => {}} onBrowseFiles={onBrowseFiles} kind="pdf" />)
+    expect(screen.getByText(/Ask Gideon to create a document, image, or deck/)).toBeInTheDocument()
     expect(screen.queryByText(/save a file as an artifact from the Files page/)).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Browse files/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Browse files/ }))
+    expect(onBrowseFiles).toHaveBeenCalledOnce()
   })
 
   it('says "no matching" — and drops the create advice — when a filter is active', () => {
