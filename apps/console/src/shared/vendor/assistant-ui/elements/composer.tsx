@@ -305,7 +305,7 @@ export function ComposerAttachmentChip({
             type="button"
             aria-label={`Remove ${attachment.name}`}
             onClick={() => onRemove(attachment.name)}
-            className={cn(ghostButton, "size-5 [&_svg]:size-3")}
+            className={cn(ghostButton, "size-5 hover:text-danger [&_svg]:size-3")}
           >
             <XIcon />
           </button>

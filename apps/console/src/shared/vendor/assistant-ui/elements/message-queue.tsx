@@ -111,7 +111,7 @@ export function MessageQueue({
                 type="button"
                 aria-label={labels?.remove?.(message.text) ?? `Remove "${message.text}" from the queue`}
                 onClick={() => onCancel(message.id)}
-                className={cn(ghostButton, "size-6 shrink-0")}
+                className={cn(ghostButton, "size-6 shrink-0 hover:text-danger")}
               >
                 <XIcon className="size-3.5" />
               </button>

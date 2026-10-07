@@ -70,7 +70,9 @@ describe('a destructive confirm explains the consequence', () => {
   })
 
   it('clear-all names the TOTAL, not the filtered view', () => {
-    const src = readFileSync(join(SRC, "features", 'notifications', 'NotificationsPage.tsx'), 'utf8')
+    const page = readFileSync(join(SRC, 'features/notifications/NotificationsPage.tsx'), 'utf8')
+    expect(page).toContain('useNotificationFeed(filter, openTs, setOpenTs)')
+    const src = readFileSync(join(SRC, 'features/notifications/notificationFeedState.ts'), 'utf8')
     expect(src).toContain('const total = items?.length ?? 0')
     expect(src, 'the count must come from the raw list, not `filtered`').not.toMatch(
       /const total = filtered/,
@@ -83,9 +85,11 @@ describe('a destructive confirm explains the consequence', () => {
   })
 
   it('the dialogs that deliberately OMIT irreversibility keep doing so', () => {
-    const inbox = readFileSync(join(SRC, "features", 'inbox', 'InboxPage.tsx'), 'utf8')
-    expect(inbox, 'dismiss-all already names its count').toMatch(/Dismiss all \$\{n\} pending item/)
-    expect(inbox).not.toMatch(/Dismiss all[\s\S]{0,200}cannot be undone/)
+    const page = readFileSync(join(SRC, 'features/inbox/InboxPage.tsx'), 'utf8')
+    expect(page).toContain('useInboxQueue(openId, setOpenId)')
+    const inbox = readFileSync(join(SRC, 'features/inbox/inboxQueueState.ts'), 'utf8')
+    expect(inbox, 'dismiss-all already names its count').toMatch(/Dismiss all \$\{count\} open item/)
+    expect(inbox).toContain('There is no undo — but inbox rows stay readable under Handled.')
     const run = readFileSync(join(SRC, "features", 'workflows', 'WorkflowRunDetail.tsx'), 'utf8')
     expect(run, 'cancel says what survives instead').toContain('Completed work is kept.')
   })
@@ -158,9 +162,9 @@ describe('a destructive confirm names the item', () => {
 
   it('TaskDetail both takes the comment AND is passed it', () => {
     const src = code(join(SRC, "features", 'tasks', 'TaskDetail.tsx'))
-    expect(src, 'the signature takes it').toMatch(/async function remove\(commentId: string, body: string\)/)
-    expect(src, 'and the call site supplies it from the row it is rendering').toContain('remove(c.id, c.body)')
-    expect(src, 'no caller left on the old one-argument form').not.toMatch(/remove\(c\.id\)/)
+    expect(src, 'the signature takes it').toMatch(/const remove = async \(id: string, body: string\)/)
+    expect(src, 'and the call site supplies it from the row it is rendering').toContain('remove(comment.id, comment.body)')
+    expect(src, 'no caller left on the old one-argument form').not.toMatch(/remove\(comment\.id\)/)
   })
 
   it('the helper still degrades to "this <entity>" on an empty subject', () => {

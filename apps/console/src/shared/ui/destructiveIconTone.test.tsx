@@ -1,9 +1,12 @@
-import { describe, it, expect } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { jsxTags } from '../testing/jsxContracts'
 import { Trash2 } from 'lucide-react'
 import { IconButton } from './IconButton'
+import { AttachmentChips } from '../../features/chat/AttachmentChips'
+import { MessageQueue } from '../vendor/assistant-ui/elements/message-queue'
 
 
 const SRC = join(process.cwd(), "src")
@@ -69,7 +72,7 @@ describe('the nine persisted destroys adopted it', () => {
   for (const [rel, label] of ADOPTERS) {
     it(`${rel} passes tone="danger" on its destructive IconButton`, () => {
       const code = codeOf(rel)
-      const tags = [...code.matchAll(/<IconButton[\s\S]{0,420}?\/>/g)].map((m) => m[0])
+      const tags = jsxTags(code, ['IconButton']).map(site => site.tag)
       const tag = tags.find((t) => t.includes(label))
       expect(tag, `found the IconButton labelled ${label}`).toBeTruthy()
       expect(tag!, `${label} must declare the danger tone`).toMatch(/tone="danger"/)
@@ -79,7 +82,7 @@ describe('the nine persisted destroys adopted it', () => {
   it('🔑 the two hand-rolled copies are GONE from their className', () => {
     for (const rel of ['features/ChatPage.tsx', 'features/tasks/TaskDetail.tsx']) {
       const code = codeOf(rel)
-      const tags = [...code.matchAll(/<IconButton[\s\S]{0,420}?\/>/g)].map((m) => m[0])
+      const tags = jsxTags(code, ['IconButton']).map(site => site.tag)
       const offenders = tags.filter((t) => /className="[^"]*hover:text-danger/.test(t))
       expect(offenders, `${rel} still hand-rolls the danger hover:\n${offenders.join('\n')}`).toEqual([])
     }
@@ -94,11 +97,11 @@ describe('the nine persisted destroys adopted it', () => {
 
 describe('🔴 the composer controls were ALREADY tinted, and that decision stands', () => {
   const ALREADY_TINTED = [
-    'Cancel upload', 'Remove file', 'Remove knowledge reference', 'Cancel queued message', 'Remove paste',
+    'Cancel upload', 'Remove knowledge reference', 'Remove paste',
   ]
   for (const label of ALREADY_TINTED) {
     it(`ChatPage — "${label}" keeps its danger tint, now via the prop`, () => {
-      const tags = [...codeOf('features/ChatPage.tsx').matchAll(/<IconButton[\s\S]{0,420}?\/>/g)].map((m) => m[0])
+      const tags = jsxTags(codeOf('features/ChatPage.tsx'), ['IconButton']).map(site => site.tag)
       const tag = tags.find((t) => t.includes(label))
       expect(tag, `found the IconButton for ${label}`).toBeTruthy()
       expect(tag!, 'appearance preserved through the prop').toMatch(/tone="danger"/)
@@ -114,7 +117,7 @@ describe('the two that stay neutral, because they are not destroys', () => {
   for (const [rel, label] of NEUTRAL) {
     it(`${rel} — "${label}" is NOT tinted`, () => {
       const code = codeOf(rel)
-      const tags = [...code.matchAll(/<IconButton[\s\S]{0,420}?\/>/g)].map((m) => m[0])
+      const tags = jsxTags(code, ['IconButton']).map(site => site.tag)
       const tag = tags.find((t) => t.includes(label))
       expect(tag, `found the IconButton for ${label}`).toBeTruthy()
       expect(tag!, `${label} changes nothing stored`).not.toMatch(/tone="danger"/)
@@ -135,7 +138,7 @@ describe('VACUITY: the sweep is measuring something', () => {
     let danger = 0
     for (const abs of walk(SRC)) {
       const code = strip(readFileSync(abs, 'utf8'))
-      const tags = [...code.matchAll(/<IconButton[\s\S]{0,420}?\/>/g)].map((m) => m[0])
+      const tags = jsxTags(code, ['IconButton']).map(site => site.tag)
       total += tags.length
       danger += tags.filter((t) => /tone="danger"/.test(t)).length
     }
@@ -147,5 +150,52 @@ describe('VACUITY: the sweep is measuring something', () => {
 
   it('the sibling tier still declares the tone this one borrowed the rule from', () => {
     expect(codeOf('shared/ui/SquareIconButton.tsx')).toMatch(/tone\?: 'neutral' \| 'danger'/)
+  })
+})
+
+
+describe('native delegated composer removal controls retain destructive hover tint', () => {
+  it('attachment removal follows the real Composer → AttachmentChips → vendor chip', () => {
+    expect(codeOf('features/ChatPage.tsx')).toContain('onRemoveAttachment=')
+    expect(codeOf('shared/ui/Composer.tsx')).toContain('<AttachmentChips')
+    const chips = codeOf('features/chat/AttachmentChips.tsx')
+    expect(chips).toContain('<ComposerAttachmentChip')
+    expect(chips).toContain('onRemove={onRemove ? () => onRemove(attachment.id) : undefined}')
+    const button = jsxTags(codeOf('shared/vendor/assistant-ui/elements/composer.tsx'), ['button']).find(site => site.attributes.get('aria-label') === '{`Remove ${attachment.name}`}')
+    expect(button).toBeDefined()
+    expect(button?.attributes.get('onClick')).toBe('{() => onRemove(attachment.name)}')
+    expect(button?.attributes.get('className')).toContain('hover:text-danger')
+  })
+
+  it('queued removal follows the native queue callback, not a vanished ChatPage icon', () => {
+    expect(codeOf('features/ChatPage.tsx')).toContain('onQueueRemove=')
+    const source = codeOf('shared/vendor/assistant-ui/elements/message-queue.tsx')
+    const button = jsxTags(source, ['button']).find(site => site.attributes.get('onClick') === '{() => onCancel(message.id)}')
+    expect(button).toBeDefined()
+    expect(button?.attributes.get('aria-label')).toContain('from the queue')
+    expect(button?.attributes.get('className')).toContain('hover:text-danger')
+  })
+})
+
+
+describe('native delegated destructive controls execute only their named removal', () => {
+  it('the attachment chip retains danger hover and passes the actual attachment id', () => {
+    const onRemove = vi.fn()
+    render(<AttachmentChips attachments={[{ id: 'local-path', name: 'file.txt', state: 'done' }]} onRemove={onRemove} />)
+    const button = screen.getByRole('button', { name: 'Remove file.txt' })
+    expect(button.classList.contains('hover:text-danger')).toBe(true)
+    fireEvent.click(button)
+    expect(onRemove).toHaveBeenCalledExactlyOnceWith('local-path')
+    cleanup()
+  })
+
+  it('the queue removal retains danger hover and passes the selected message id', () => {
+    const onCancel = vi.fn()
+    render(<MessageQueue queued={[{ id: 'queued-id', text: 'queued text' }]} onCancel={onCancel} />)
+    const button = screen.getByRole('button', { name: 'Remove "queued text" from the queue' })
+    expect(button.classList.contains('hover:text-danger')).toBe(true)
+    fireEvent.click(button)
+    expect(onCancel).toHaveBeenCalledExactlyOnceWith('queued-id')
+    cleanup()
   })
 })

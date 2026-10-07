@@ -177,7 +177,7 @@ describe('two more bodies: one corrected, one confirmed', () => {
     const h = py('interfaces/dashboard/handlers_inbox.py')
     const restore = h.slice(h.indexOf('async def api_inbox_restore'))
     expect(restore.slice(0, 1400), 'only a FILTERED item can be restored').toMatch(
-      /if item\.status != ItemStatus\.FILTERED\.value:[\s\S]{0,120}status=409/,
+      /if item\.status_for\(owner\) != ItemStatus\.FILTERED\.value:[\s\S]{0,120}status=409/,
     )
     expect(web('features/inbox/InboxDetail.tsx'), 'the only Restore control is for the filtered case')
       .toMatch(/A second-opinion check flagged this claim/)
@@ -198,7 +198,7 @@ describe('two more bodies: one corrected, one confirmed', () => {
 
 describe('the project delete, and the two workflow bodies', () => {
   it('names the TASK deletion the handler performs — verified against the caller, not the callee', () => {
-    const ui = web('features/projects/ProjectsSection.tsx')
+    const ui = web('features/projects/projectCollectionState.ts')
     expect(ui, 'the task loss is named').toMatch(/Every task in this project is permanently deleted/)
     expect(ui, 'the original misleading word must not come back').not.toContain('task lists detached')
     expect(ui, 'and neither may the false reassurance that replaced it')
@@ -207,20 +207,28 @@ describe('the project delete, and the two workflow bodies', () => {
     const handler = py('engine/tasks/hierarchy_handlers.py')
     const del = handler.match(/async def api_projects_delete[\s\S]*?(?=\nasync def |\ndef |$)/)?.[0] ?? ''
     expect(del, 'found the delete handler').not.toBe('')
-    expect(del, 'it resolves every task in the project').toMatch(/list_all_tasks\(project=/)
-    expect(del, 'and deletes each one').toMatch(/delete_task\(t\.id\)/)
+    expect(del).toContain('return await ProjectRetirement(request).respond()')
+    const retirement = pyBetween(handler, 'class ProjectRetirement:', 'class TaskListRetirement:')
+    expect(retirement).toContain('await self.remove_tasks()')
+    expect(retirement).toContain('self.store.list_task_lists(project_id=self.project_id)')
+    expect(pyMethod(handler, 'async def _remove_task_list_tasks')).toContain('await registry.delete_tasks(task_list_id=list_id)')
+    const deletion = pyMethod(py('engine/tasks/registry.py'), 'async def delete_tasks')
+    expect(deletion).toContain('await list_all_tasks(task_list_id=task_list_id, limit=500)')
+    expect(deletion).toContain('await delete_task(task.id, provider_name=task.provider or None)')
 
     const h = pyMethod(py('engine/tasks/hierarchy.py'), '    def delete_project')
-    expect(h, 'list files are unlinked, not detached').toMatch(
-      /self\._list_path\(tl\.id\)\.unlink\(missing_ok=True\)/,
-    )
-    expect(h, 'and this FUNCTION genuinely does leave task rows to the provider').toMatch(
-      /the task provider owns task deletion/,
-    )
+    expect(h).toContain('self.delete_task_lists(')
+    const store = py('engine/tasks/hierarchy.py')
+    expect(pyMethod(store, '    def delete_task_lists')).toContain('self.delete_task_list(list_id) for list_id in dict.fromkeys(list_ids)')
+    const listDelete = pyMethod(store, '    def delete_task_list(')
+    expect(listDelete).toContain('path = self._list_path(list_id)')
+    expect(listDelete).toContain('path.unlink(missing_ok=True)')
+    expect(h, 'the hierarchy mutation leaves native task rows to the provider deletion chain verified above').not.toMatch(/registry\.delete_task|DELETE FROM tasks/)
+
   })
 
   it('the force re-confirm names it too — the same cascade runs on that path', () => {
-    const ui = web('features/projects/ProjectsSection.tsx')
+    const ui = web('features/projects/projectCollectionState.ts')
     const force = ui.match(/title: 'Project still has active work'[\s\S]*?body: `([^`]*)`/)?.[1] ?? ''
     expect(force, 'found the force dialog').not.toBe('')
     expect(force, 'the task loss is named on the force path too').toMatch(/task/i)
@@ -231,10 +239,12 @@ describe('the project delete, and the two workflow bodies', () => {
     const h = pyMethod(py('engine/tasks/hierarchy.py'), '    def delete_project')
     expect(h, 'the project dir goes wholesale').toMatch(/shutil\.rmtree\(self\._project_dir\(project_id\)/)
     const handler = py('engine/tasks/hierarchy_handlers.py')
-    expect(handler, 'bound work is refused without force').toMatch(
-      /rmtree its worktrees out\s*\n?\s*#?\s*from under git/,
-    )
-    expect(web('features/projects/ProjectsSection.tsx'), 'and the force path has its own warning')
+    const retirement = pyBetween(handler, 'class ProjectRetirement:', 'class TaskListRetirement:')
+    expect(retirement).toContain('if self.force:')
+    expect(retirement).toContain('await _teardown_bound_loops(self.project_id)')
+    expect(retirement).toContain('_unbind_bound_chats(self.state, self.project_id)')
+    expect(retirement).toMatch(/if any\(counts.values\(\)\):[\s\S]*status=409/)
+    expect(web('features/projects/projectCollectionState.ts'), 'and the force path has its own warning')
       .toMatch(/STOPS and REMOVES any bound loops/)
   })
 
@@ -305,7 +315,7 @@ describe('the stop-project dialog, and the file delete', () => {
     expect(ui).toContain('a task still running loses its own worktree and branch')
     expect(ui, 'and it now says how kept work got there').toContain('already merged into your workspace is kept')
     const wt = pyMethod(py('automation/loop/worktree.py'), 'def cleanup_all')
-    expect(wt, 'the worktree is force-removed').toMatch(/"worktree", "remove", "--force"/)
+    expect(wt, 'the worktree is force-removed').toMatch(/"worktree",\s*"remove",\s*"--force"/)
     expect(wt, 'and its branch force-deleted').toMatch(/"branch", "-D", branch_name\(name\)/)
     expect(py('automation/loop/kinds/sdlc.py'), 'a finished task merges into the workspace')
       .toMatch(/worktree\.merge_worktree\(ws, tid/)
@@ -388,10 +398,9 @@ describe('the last three bodies, and what this sweep does NOT claim', () => {
     expect(ui).toContain('You are using this theme, so the app goes back to its default colors.')
     expect(ui, 'and the inactive branch says what a theme IS').toContain('a saved theme is a file, not a snapshot')
     const app = web('app/shell/appearance.tsx')
-    expect(app, 'the active scheme reverts to the default').toMatch(
-      /p\.scheme === id\s*\n?\s*\? \{ \.\.\.p, scheme: DEFAULT_SCHEME/,
-    )
-    expect(app, 'and the theme itself is a deleted file').toMatch(/await api\.deleteTheme\(slug\)/)
+    expect(app).toContain("dispatch({ type: 'remove-scheme', id })")
+    expect(web('app/shell/appearanceState.ts')).toContain("case 'remove-scheme': return state.scheme === action.id ? { ...state, scheme: DEFAULT_SCHEME")
+    expect(app, 'and the theme itself is a deleted file').toContain("await api.deleteTheme(id.replace(/^custom:/, ''))")
   })
 
   it('records the two bodies this sweep deliberately did NOT decide', () => {
@@ -444,9 +453,10 @@ describe('three more bodies, checked against their handlers', () => {
     expect(h, 'the canonical store is Gideon-scoped').toMatch(
       /def _canonical_mcp_json[\s\S]{0,200}?return config_dir\(\) \/ "mcp\.json"/,
     )
-    const fn = h.slice(h.indexOf('async def api_mcp_server_detail'))
-    const del = fn.slice(fn.indexOf('if request.method == "DELETE":'), fn.indexOf('# PUT — register or update'))
-    expect(del, 'the delete branch must be found').toMatch(/for store in \(/)
+    const fn = pyMethod(h, 'async def api_mcp_server_detail')
+    expect(fn, 'actual mutation remains authenticated owner only').toContain('denied = _mcp_owner_required(request)')
+    const del = pyBetween(fn, 'if request.method == "DELETE":', '    try:\n        body = await read_json_body(request)')
+    expect(del, 'the delete branch must be found').toContain('for store in (_canonical_mcp_json(), _GLOBAL_MCP_JSON)')
     expect(del, 'and it does not write the claude-code config').not.toMatch(/_CC_GLOBAL_JSON/)
     expect(web('features/tools/ToolsPage.tsx'), 'so the body stays as it is')
       .toContain('Its tools will no longer be available.')

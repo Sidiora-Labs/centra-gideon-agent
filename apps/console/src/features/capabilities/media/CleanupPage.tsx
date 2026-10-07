@@ -7,7 +7,7 @@ export const defaultTransform = (op: string): Transform => op === 'crop' ? { op,
 export function TransformList({ operations, change }: { operations: Transform[]; change: (operations: Transform[]) => void }) {
   return <ol>{operations.map((operation, index) => <li className="rounded-lg bg-surface-container p-m" key={index}><h2>{index+1}. {operation.op}</h2>
     {Object.entries(operation).filter(([key]) => key !== 'op').map(([key, value]) => <label key={key}>{key}<input type={typeof value === 'number' ? 'number' : key === 'color' ? 'color' : 'text'} step="any" value={value} onChange={event => change(operations.map((item, at) => at === index ? { ...item, [key]: typeof value === 'number' ? Number(event.target.value) : event.target.value } : item))} /></label>)}
-    <button {...unavailableWhen(index === 0, 'This transform is already first')} onClick={() => { if (index === 0) return; const reordered = [...operations]; [reordered[index-1], reordered[index]] = [reordered[index], reordered[index-1]]; change(reordered) }}>Move up</button><button onClick={() => change(operations.filter((_, at) => at !== index))}>Remove transform</button>
+    <button className="aria-disabled:opacity-40" {...unavailableWhen(index === 0, 'This transform is already first')} onClick={() => { if (index === 0) return; const reordered = [...operations]; [reordered[index-1], reordered[index]] = [reordered[index], reordered[index-1]]; change(reordered) }}>Move up</button><button onClick={() => change(operations.filter((_, at) => at !== index))}>Remove transform</button>
   </li>)}</ol>
 }
 export default function CleanupPage({ onJob }: { onJob?: (id: string) => void } = {}) {

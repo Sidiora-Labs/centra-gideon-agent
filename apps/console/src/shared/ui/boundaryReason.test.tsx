@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import { jsxTags } from '../testing/jsxContracts'
 import { AssistantActions } from '../../features/chat/MessageActions'
 
 
@@ -71,26 +72,10 @@ function boundaryGated(): Array<{ file: string; line: number; tag: string; src: 
   const out: Array<{ file: string; line: number; tag: string; src: string }> = []
   for (const abs of walk(SRC)) {
     const text = readFileSync(abs, 'utf8')
-    for (const m of text.matchAll(/<(?:Button|button|motion\.button)\b/g)) {
-      let depth = 0
-      for (let i = m.index! + m[0].length; i < text.length; i++) {
-        const ch = text[i]
-        if (ch === '{') depth++
-        else if (ch === '}') depth--
-        else if (ch === '>' && depth === 0) {
-          const tag = text.slice(m.index!, i + 1)
-          const gate = /(?<!aria-)disabled=\{([\s\S]*?)\}|unavailableWhen\(([\s\S]*?),/.exec(tag)
-          if (gate && BOUNDARY.test(gate[1] ?? gate[2] ?? '')) {
-            out.push({
-              file: abs.slice(SRC.length + 1),
-              line: text.slice(0, m.index).split('\n').length,
-              tag,
-              src: text,
-            })
-          }
-          break
-        }
-      }
+    for (const site of jsxTags(text, ['Button', 'button', 'motion.button'])) {
+      const gate = site.attributes.get('disabled') ?? site.attributes.get('aria-disabled') ?? ''
+      const spread = /unavailableWhen\(([\s\S]*?),/.exec(site.tag)?.[1] ?? ''
+      if (BOUNDARY.test(gate || spread)) out.push({ file: abs.slice(SRC.length + 1), line: site.line, tag: site.tag, src: text })
     }
   }
   return out
@@ -135,17 +120,7 @@ describe('a boundary-gated icon button names its limit', () => {
   ]
 
   const iconButtonTags = (text: string) => {
-    const out: string[] = []
-    for (const m of text.matchAll(/<(?:IconButton|SquareIconButton)\b/g)) {
-      let depth = 0
-      for (let i = m.index! + m[0].length; i < text.length; i++) {
-        const ch = text[i]
-        if (ch === '{') depth++
-        else if (ch === '}') depth--
-        else if (ch === '>' && depth === 0) { out.push(text.slice(m.index!, i + 1)); break }
-      }
-    }
-    return out
+    return jsxTags(text, ['IconButton', 'SquareIconButton']).map(site => site.tag)
   }
 
   it.each(REORDER)('%s explains every boundary-gated reorder control', (rel) => {
