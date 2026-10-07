@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { KnowledgeListPage } from './KnowledgeListPage'
 import { api, type KnowledgeContextResult, type KnowledgeItem, type KnowledgeStats } from '../../shared/data/api'
 import { resetDataStore } from '../../shared/data/data/store'
@@ -95,9 +95,25 @@ describe('connected Knowledge search in the existing library', () => {
     expect(web).toHaveAttribute('data-slot', 'web-search')
     const passages = screen.getByRole('region', { name: 'Retrieved passages' })
     expect(passages).toHaveAttribute('data-slot', 'retrieval-chunks')
-    fireEvent.click(screen.getByRole('button', { name: 'Open source Indexing reference' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Open source Indexing notes' }))
-    expect(onOpenItem.mock.calls).toEqual([['bookmark-9'], [item.id]])
+    const webCards = web.querySelector('[data-slot="web-search"]') as HTMLElement
+    const passageCards = passages.querySelector('[data-slot="retrieval-chunks"]') as HTMLElement
+    const webCitations = web.querySelector('[data-slot="inline-citation"]') as HTMLElement
+    const passageCitations = passages.querySelector('[data-slot="inline-citation"]') as HTMLElement
+    expect(webCards).toBeInTheDocument()
+    expect(passageCards).toBeInTheDocument()
+    expect(webCitations).toBeInTheDocument()
+    expect(passageCitations).toBeInTheDocument()
+    expect(within(webCards).getAllByRole('button')).toHaveLength(1)
+    expect(within(passageCards).getAllByRole('button')).toHaveLength(1)
+    expect(within(webCitations).getAllByRole('button')).toHaveLength(1)
+    expect(within(passageCitations).getAllByRole('button')).toHaveLength(1)
+    expect(passageCards).toHaveTextContent(item.content!)
+    expect(within(webCards).getByRole('link', { name: 'Open Indexing reference in new tab' })).toHaveAttribute('href', 'https://docs.example.org/indexing')
+    fireEvent.click(within(webCards).getByRole('button', { name: 'Select Indexing reference' }))
+    fireEvent.click(within(passageCards).getByRole('button', { name: 'Open source Indexing notes' }))
+    fireEvent.click(within(webCitations).getByRole('button', { name: 'Open source Indexing reference' }))
+    fireEvent.click(within(passageCitations).getByRole('button', { name: 'Open source Indexing notes' }))
+    expect(onOpenItem.mock.calls).toEqual([['bookmark-9'], [item.id], ['bookmark-9'], [item.id]])
   })
 
   it('shows the real context API error while preserving the existing list', async () => {
