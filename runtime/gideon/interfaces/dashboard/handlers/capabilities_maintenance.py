@@ -1,18 +1,18 @@
 import asyncio
 import contextlib
-import weakref
 
 from aiohttp import web
 
 from gideon.core.http_request import read_json_body
 from gideon.workspace.capabilities.platform import maintenance
 
-_application = None
-
 
 def supervisor():
-    app = _application() if _application is not None else None
-    return getattr(app.get("state"), "workflows", None) if app is not None else None
+    from gideon.workspace.capabilities.platform.maintenance_runtime import (
+        supervisor as current,
+    )
+
+    return current()
 
 
 async def endpoint(request):
@@ -53,8 +53,11 @@ async def _lifecycle(app):
 
 
 def register(app):
-    global _application
-    _application = weakref.ref(app)
+    from gideon.workspace.capabilities.platform.maintenance_runtime import (
+        bind_application,
+    )
+
+    bind_application(app)
     app.router.add_get("/api/capabilities/platform/maintenance", endpoint)
     app.router.add_post("/api/capabilities/platform/maintenance", endpoint)
     app.router.add_post("/api/capabilities/platform/maintenance/{id}", endpoint)

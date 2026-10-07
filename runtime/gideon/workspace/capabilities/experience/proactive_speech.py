@@ -15,7 +15,7 @@ def latest_digest(home):
         raise Conflict("digest scope differs from registered runtime home")
     from gideon.cognition.proactive.surface import build_digest_view
     from gideon.extensions.providers.entity_routes import notification_posture
-    from gideon.interfaces.dashboard.handlers.proactive import (
+    from gideon.cognition.proactive.digest_reader import (
         _install_state,
         _latest_digest,
     )

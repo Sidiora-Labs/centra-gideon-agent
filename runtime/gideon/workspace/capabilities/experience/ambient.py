@@ -81,11 +81,11 @@ class AmbientDisplay:
         from gideon.automation.triggers.store import TriggerStore
         from gideon.cognition.proactive.surface import build_digest_view
         from gideon.engine.tasks.native import NativeTaskProvider
-        from gideon.interfaces.dashboard.handlers.proactive import (
+        from gideon.cognition.proactive.digest_reader import (
             _install_state,
             _latest_digest,
         )
-        from gideon.interfaces.dashboard.views_store import list_views
+        from gideon.workspace.capabilities.platform.compositions import list_views
 
         cards: dict[str, Any] = {}
         try:
