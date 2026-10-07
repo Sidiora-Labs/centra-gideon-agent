@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import ts from 'typescript'
 
 
 const PAGES = join(process.cwd(), "src/features")
@@ -11,7 +12,7 @@ const REPORTERS: Array<[string, string]> = [
   [join('settings', 'InboxSettingsPanel.tsx'), 'saveInboxSettings'],
   [join('settings', 'MemoryPanel.tsx'), 'saveMemorySettings'],
   [join('settings', 'NotificationsPanel.tsx'), 'saveNotificationSettings'],
-  [join('inbox', 'InboxSettingsPanel.tsx'), 'saveInboxSettings'],
+  [join('inbox', 'inboxSettingsState.ts'), 'saveInboxSettings'],
 ]
 
 describe('an optimistic settings write reports its failure', () => {
@@ -20,6 +21,12 @@ describe('an optimistic settings write reports its failure', () => {
     expect(src.includes(`api.${call}(`), `${rel} must still perform the write`).toBe(true)
     const at = src.indexOf(`api.${call}(`)
     const chain = src.slice(at, at + 420)
+    if (rel.endsWith('inboxSettingsState.ts')) {
+      expect(chain).toMatch(/acknowledge, error => notify\(/)
+      expect(src).toContain('catch (error) { if (mounted.current) failure(error) }')
+      expect(src).toContain('pending.current = pending.current.filter(entry => entry.id !== change.id); publish()')
+      return
+    }
     expect(/\.catch\(\(\)\s*=>\s*\{\s*\}\)/.test(chain), `${rel}: a silent catch leaves the control lying`).toBe(false)
     expect(/\.catch\(\((?:e|err|error)\)\s*=>/.test(chain), `${rel}: the rejection must be captured`).toBe(true)
     expect(/notify\(/.test(chain), `${rel}: and reported with notify(), like the sibling panels`).toBe(true)
@@ -29,8 +36,18 @@ describe('an optimistic settings write reports its failure', () => {
     for (const [rel] of REPORTERS) {
       const src = readFileSync(join(PAGES, rel), 'utf8')
       expect(src, `${rel}: the copy must match the family`).toMatch(/Couldn't save/)
-      expect(src, `${rel}: a bare "it failed" is not actionable`).toMatch(/\(e as Error\)\?\.message/)
+      expect(src, `${rel}: a bare "it failed" is not actionable`).toMatch(/\((?:e|error) as Error\)\?\.message/)
     }
+  })
+
+  it('both queued Inbox flags report failure and retain rollback', () => {
+    const source = readFileSync(join(PAGES, 'inbox/inboxSettingsState.ts'), 'utf8')
+    const changes = source.split('const setEngagement =')[1].split('return { s:')[0]
+    expect(changes.match(/flags\.write\(/g)).toHaveLength(2)
+    expect(changes.match(/acknowledge, error => notify\(/g)).toHaveLength(2)
+    expect(changes).toContain("Couldn't change engagement ranking")
+    expect(changes).toContain("Couldn't change message source polling")
+    expect(source).toContain('pending.current = pending.current.filter(entry => entry.id !== change.id); publish()')
   })
 
   const ALLOWED_SWALLOWS: Array<[string, string, string]> = [
@@ -46,13 +63,30 @@ describe('an optimistic settings write reports its failure', () => {
     const offenders: string[] = []
     for (const f of files) {
       const src = readFileSync(join(SETTINGS, f), 'utf8')
-      const scan = src.replace(/=>/g, '\u21d2')
-      for (const m of scan.matchAll(/api\.(\w+)\(/g)) {
-        const chain = scan.slice(m.index!, m.index! + 420)
-        if (!/\.catch\(\s*\(\s*\)\s*\u21d2\s*\{\s*\}\s*\)/.test(chain)) continue
-        if (ALLOWED_SWALLOWS.some(([file, call]) => file === f && call === m[1])) continue
-        offenders.push(`${f}:${scan.slice(0, m.index).split('\n').length} (api.${m[1]})`)
+      const tree = ts.createSourceFile(f, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+      const visit = (node: ts.Node) => {
+        if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+          && node.expression.name.text === 'catch') {
+          const callback = node.arguments[0]
+          if (callback && ts.isArrowFunction(callback) && callback.parameters.length === 0
+            && ts.isBlock(callback.body) && callback.body.statements.length === 0) {
+            const calls: string[] = []
+            const findApi = (child: ts.Node) => {
+              if (ts.isCallExpression(child) && ts.isPropertyAccessExpression(child.expression)
+                && child.expression.expression.getText(tree) === 'api') calls.push(child.expression.name.text)
+              ts.forEachChild(child, findApi)
+            }
+            findApi(node.expression.expression)
+            for (const call of calls) {
+              if (!ALLOWED_SWALLOWS.some(([file, allowed]) => file === f && allowed === call)) {
+                offenders.push(`${f}:${tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1} (api.${call})`)
+              }
+            }
+          }
+        }
+        ts.forEachChild(node, visit)
       }
+      visit(tree)
     }
     expect(offenders, 'a discarded rejection tells the user nothing — report it or allowlist it with a reason').toEqual([])
   })

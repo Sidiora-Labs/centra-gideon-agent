@@ -22,7 +22,7 @@ export function AgentDefaultsPanel() {
   useEffect(() => {
     Promise.resolve().then(() => api.terminalSessions())
       .then((r) => setTmuxAvailable(r.persist_available))
-      .catch(() => {})
+      .catch((error) => notify(`Couldn't load terminal persistence capability: ${String((error as Error)?.message || error)}`, 'error'))
   }, [])
 
   const { data, error: loadErr, refresh } = useQuery('settings:agent-defaults', async () => {

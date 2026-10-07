@@ -53,7 +53,7 @@ export function useInboxSettingsState() {
   const retryConfig = () => { setCfgErr(''); setCfgLoading(true); setCfgRevision(value => value + 1) }
   const acknowledge = () => { setSaved(true); if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(() => setSaved(false), 1600) }
   const patch = (change: Partial<InboxSettings>) => settings.write(change, () => api.saveInboxSettings(change), acknowledge, error => notify(`Couldn't save your inbox settings: ${String((error as Error)?.message || error)}`, 'error'))
-  const setEngagement = (value: boolean) => flags.write({ engagement: value }, () => api.patchConfig('inbox.engagement_ranking_enabled', value), acknowledge, () => {})
-  const setSources = (value: boolean) => flags.write({ sources: value }, async () => { await api.patchConfig('inbox.enabled', value); await api.restartInbox() }, acknowledge, () => {})
+  const setEngagement = (value: boolean) => flags.write({ engagement: value }, () => api.patchConfig('inbox.engagement_ranking_enabled', value), acknowledge, error => notify(`Couldn't change engagement ranking: ${String((error as Error)?.message || error)}`, 'error'))
+  const setSources = (value: boolean) => flags.write({ sources: value }, async () => { await api.patchConfig('inbox.enabled', value); await api.restartInbox() }, acknowledge, error => notify(`Couldn't change message source polling: ${String((error as Error)?.message || error)}`, 'error'))
   return { s: settings.value, saved, cfgErr, cfgLoading, retryConfig, loadErr, load: () => setRevision(value => value + 1), engagementOn: flags.value?.engagement ?? null, sourcesOn: flags.value?.sources ?? null, patch, setEngagement, setSources }
 }

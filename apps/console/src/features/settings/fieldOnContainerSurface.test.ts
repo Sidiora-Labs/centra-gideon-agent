@@ -7,7 +7,7 @@ const SRC = join(process.cwd(), "src")
 const read = (rel: string) => readFileSync(join(SRC, rel), 'utf8')
 
 const wrapsRowsOnAContainerSurface = (panel: string) => {
-  expect(read(`pages/settings/${panel}.tsx`), `${panel} must wrap its rows in RowGroup`)
+  expect(read(`features/settings/${panel}.tsx`), `${panel} must wrap its rows in RowGroup`)
     .toMatch(/<RowGroup[\s>]/)
   const rowGroup = read('features/settings/settingsUI.tsx').match(/export function RowGroup\([\s\S]*?\n\}/)?.[0] ?? ''
   expect(rowGroup, 'RowGroup must exist to be the wrapper').toContain('Surface')
@@ -49,15 +49,17 @@ describe('a settings field on a container backdrop lifts its surface', () => {
     wrapsRowsOnAContainerSurface('CompanionPanel')
   })
 
-  it('TextInput still defaults to the container surface, and still has no at-rest border', () => {
+  it('TextInput still defaults to the container surface, and preserves visible field and focus affordances', () => {
     const forms = read('shared/ui/forms.tsx')
     expect(forms, 'default surface').toMatch(/surface = 'container'/)
     expect(forms, 'container maps to the same token the wrappers use').toMatch(/container: 'bg-surface-container'/)
     expect(forms, 'high is a distinct step').toMatch(/high: 'bg-surface-high'/)
-    const base = forms.match(/const INPUT_BASE = '[^']*'/)?.[0] ?? ''
-    expect(base, 'INPUT_BASE must exist').toContain('INPUT_BASE')
+    const base = forms.match(/const fieldChrome = '[^']*'/)?.[0] ?? ''
+    expect(base, 'fieldChrome must exist').toContain('fieldChrome')
     expect(/\bborder\b|ring-1/.test(base.replace(/focus:[^\s']*/g, '')),
-      'no at-rest border/ring — the fill IS the affordance, which is why surface matters').toBe(false)
+      'native fields have an at-rest outline in addition to distinct surface fills').toBe(true)
+    expect(base).toContain('focus:ring-2')
+    expect(forms).toContain('cx(fieldChrome,')
   })
 
   it('the pre-fix shape does not come back at either site', () => {

@@ -47,25 +47,31 @@ describe('a rejected settings save names the control', () => {
 
   it('every panel that receives the label declares it', () => {
     const withToast = panels().filter((f) =>
-      readFileSync(join(SETTINGS, f), 'utf8').includes('${label ?? key}'),
+      readFileSync(join(SETTINGS, f), 'utf8').match(/\$\{label \?\? (?:key|path)\}/),
     )
     const withParam = panels().filter((f) =>
-      /label\?: string\) => \{/.test(readFileSync(join(SETTINGS, f), 'utf8')),
+      /label\?: string\)/.test(readFileSync(join(SETTINGS, f), 'utf8')),
     )
     expect(withToast.length, 'the family spans the panels measured').toBeGreaterThanOrEqual(8)
-    expect(withToast.sort()).toEqual(withParam.sort())
+    for (const panel of withToast) expect(withParam, `${panel}: its error label must be declared`).toContain(panel)
+    for (const panel of withParam.filter(panel => !withToast.includes(panel))) {
+      const source = readFileSync(join(SETTINGS, panel), 'utf8')
+      expect(source, `${panel}: a non-toast writer still exposes its rejection`).toMatch(/setError\(e instanceof Error/)
+      expect(source).toMatch(/error &&[\s\S]*?role="alert"|<Banner[^>]*tone="danger"/)
+    }
   })
 
   it('a label is actually SUPPLIED in every panel, not merely declared', () => {
     const missing: string[] = []
     for (const f of panels()) {
       const src = readFileSync(join(SETTINGS, f), 'utf8')
-      if (!/label\?: string\) => \{/.test(src) && !/label\?: string\)/.test(src)) continue
+      if (!/label\?: string\)/.test(src) && !/label\?: string\)/.test(src)) continue
       const supplies =
         /from '\.\/settingsUI'/.test(src) && /<(ToggleRow|NumberRow)/.test(src)
         || /undefined, l\)/.test(src)
         || /onCommit\(\w+, (label|'[^']+')\)/.test(src)
         || /patchNum\('[^']+', v, '[^']+'\)/.test(src)
+        || /save\(section\.path, value, section\.field_label\)/.test(src)
       if (!supplies) missing.push(f)
     }
     expect(missing, 'these panels accept a label but nothing gives them one').toEqual([])
@@ -103,7 +109,8 @@ describe('a rejected settings save names the control', () => {
     const g = readFileSync(join(SETTINGS, 'GuardrailsPanel.tsx'), 'utf8')
     expect(g).toContain('const patchNum = (path: string, value: number, label?: string)')
     const labelled = [...g.matchAll(/patchNum\('[^']+', v, '[^']+'\)/g)]
-    expect(labelled.length, 'every patchNum call names its control').toBe(5)
+    expect(labelled.length, 'every patchNum call names its control').toBe(6)
+    expect([...g.matchAll(/patchNum\('/g)]).toHaveLength(labelled.length)
   })
 
   it('the label is still used for accessibility, not moved off the control', () => {

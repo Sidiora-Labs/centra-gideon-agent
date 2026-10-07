@@ -11,14 +11,14 @@ export function ConfigSectionsPanel() {
   if (!data && error) return <LoadError what="configuration sections" error={error} onRetry={refresh} />
   if (!data) return <FormSkeleton sections={9} what="configuration sections" />
 
-  const save = async (path: string, value: boolean) => {
+  const save = async (path: string, value: boolean, label?: string) => {
     try {
       await api.patchConfig(path, value)
       setSaved(path)
       refresh()
       window.setTimeout(() => setSaved((current) => current === path ? '' : current), 1500)
     } catch (e) {
-      notify(`Couldn't save ${path}: ${String((e as Error)?.message || e)}`, 'error')
+      notify(`Couldn't save ${label ?? path}: ${String((e as Error)?.message || e)}`, 'error')
     }
   }
 
@@ -28,7 +28,7 @@ export function ConfigSectionsPanel() {
       <RowGroup><Row label={section.field_label}>
         <div className="flex items-center gap-2">
           <SavedToast show={saved === section.path} />
-          <Toggle on={section.value} onChange={(value) => void save(section.path, value)} label={section.field_label} />
+          <Toggle on={section.value} onChange={(value) => void save(section.path, value, section.field_label)} label={section.field_label} />
         </div>
       </Row></RowGroup>
     </Section>)}
