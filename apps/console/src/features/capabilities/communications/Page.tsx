@@ -32,7 +32,6 @@ type Detail = { person: Person; touchpoints: Point[]; care: Care; timezone: stri
 const base = '/api/capabilities/communications/people'
 const empty = { name: '', identities: [] as Identity[], ring: 'tribe', cadence_days: 30, notes: '' }
 const selected = () => new URLSearchParams(location.hash.split('?')[1] || '').get('person') || ''
-const inputStyle = 'block h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 const currentView = () => new URLSearchParams(location.hash.split('?')[1] || '').get('view') || 'people'
 const views = [
   ['people', 'People', UsersRound], ['inbox', 'Inbox', Inbox], ['calendar', 'Calendar', CalendarDays],
@@ -97,7 +96,7 @@ export default function Page() {
         <h2 data-type="title-s">{id ? 'Edit person' : 'Add person'}</h2>
         <Field label="Name"><TextInput value={form.name} maxLength={200} onChange={name => setForm({ ...form, name })} /></Field>
         <Field label="Ring"><Select value={form.ring} onChange={ring => setForm({ ...form, ring })} options={['support', 'core', 'tribe', 'village', 'external'].map(value => ({ value, label: value }))} /></Field>
-        <label className="block" data-type="label-s">Cadence in days<input type="number" min={1} max={3650} className={inputStyle} value={form.cadence_days} onChange={event => setForm({ ...form, cadence_days: Number(event.target.value) })} /></label>
+        <Field label={"Cadence in days"}><TextInput type="number" min={1} max={3650} value={String(form.cadence_days)} onChange={nextValue => setForm({ ...form, cadence_days: Number(nextValue) })} /></Field>
         <Field label="Identities (one email:, phone:, or handle: per line)"><TextArea value={identities} onChange={setIdentities} rows={4} /></Field>
         <Field label="Notes"><TextArea value={form.notes} onChange={notes => setForm({ ...form, notes: notes.slice(0, 10000) })} rows={5} /></Field>
         <Button onClick={save} disabled={busy || !form.name.trim() || (!!id && !detail)} disabledReason={busy ? BUSY_REASON : undefined}>Save person</Button>

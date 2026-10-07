@@ -1,3 +1,4 @@
+import { TextInput, Field } from '../../../shared/ui/forms'
 import { useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -6,7 +7,6 @@ import { BUSY_REASON } from '../../../shared/ui/unavailable'
 type Row = { external_id: string; body: string; direction: string | null; person_id: string | null; eligible: boolean; attachments: { name: string; content_type: string; size: number | null }[] }
 type Preview = { source_digest: string; review_token: string; rows: Row[]; coverage: string; qualification: string }
 const base = '/api/capabilities/communications/signal-archive'
-const style = 'block h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 
 export function SignalArchivePanel() {
   const [account, setAccount] = useState('')
@@ -41,9 +41,9 @@ export function SignalArchivePanel() {
     <p>Import an owned Signal Desktop SQLCipher-4 database with its explicitly supplied 64-character key. Gideon authenticates every encrypted page, never reads Signal Desktop directly, and never stores the key or decrypted database.</p>
     {error && <p role="alert" className="text-danger">{error}</p>}
     {status && <p role="status" className="rounded-lg bg-primary-container p-m text-on-primary-container">{status}</p>}
-    <label className="block">Signal account label<input className={style} value={account} maxLength={100} onChange={event => { setAccount(event.target.value); setPreview(null) }} /></label>
+    <Field label={"Signal account label"}><TextInput value={account} maxLength={100} onChange={nextValue => { setAccount(nextValue); setPreview(null) }} /></Field>
     <label className="block">Encrypted Signal SQLite file<input className="block min-h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m py-s text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" type="file" accept=".db,.sqlite,.sqlite3" disabled={busy} onChange={event => choose(event.target.files?.[0])} /></label>
-    <label className="block">Transient SQLCipher key<input className={style} type="password" autoComplete="off" value={key} maxLength={64} onChange={event => { setKey(event.target.value); setPreview(null) }} /></label>
+    <Field label={"Transient SQLCipher key"}><TextInput type="password" autoComplete="off" value={key} maxLength={64} onChange={nextValue => { setKey(nextValue); setPreview(null) }} /></Field>
     <Button disabled={busy || !account || !content || key.length !== 64} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void run(async () => { setPreview(await requestJson<Preview>(base + '/preview', 'POST', data)); setStatus('') })}>Preview encrypted archive</Button>
     {preview && <div className="space-y-2"><p>{preview.rows.length} authenticated Signal messages; {preview.rows.filter(row => row.eligible).length} match existing people. Coverage: {preview.coverage}.</p>
       {preview.rows.map(row => <article className="rounded-lg border border-outline-variant/20 bg-surface px-l py-m" key={row.external_id}><p>{row.external_id} · {row.direction || 'unsupported event'} · {row.eligible ? 'linked person' : 'history only'}</p><p>{row.body || '(Text unavailable)'}</p>{row.attachments.length > 0 && <p>{row.attachments.length} attachment reference(s)</p>}</article>)}

@@ -58,6 +58,7 @@ it('prepares a real immutable discussion and explicitly reviews its destination 
   accountId = (await response.json()).account.id
   render(<StackerPanel />)
   await screen.findByRole('option', { name: '@alice' })
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Stacker registration' })).toBeEnabled())
   fireEvent.change(screen.getByLabelText('Stacker registration'), { target: { value: accountId } })
   await waitFor(() => expect(screen.getByRole('button', { name: 'Prepare Stacker action' })).toHaveAttribute('data-visual-state', 'ready'))
   fireEvent.change(screen.getByLabelText('Action title'), { target: { value: 'UI discussion' } })

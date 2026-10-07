@@ -1,3 +1,4 @@
+import { TextInput, Field } from '../../../shared/ui/forms'
 import { useEffect, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
@@ -8,7 +9,6 @@ type Source = { id: string; name: string; owner_email: string; credential_ref: s
 type Message = { provenance_key: string; source_kind: string; conversation_id: string; sender: { name: string }; person_id: string | null; direction: string; created_at: string; deleted_at: string | null; body: string; attachments: { id: string; name: string }[] }
 const base = '/api/capabilities/communications/teams/sources'
 const selected = () => new URLSearchParams(location.hash.split('?')[1] || '').get('teams_source') || ''
-const style = 'block h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none transition-colors focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary'
 
 export function TeamsPanel() {
   const [sources, setSources] = useState<Source[]>([])
@@ -58,9 +58,9 @@ export function TeamsPanel() {
     <div className="flex flex-wrap gap-2"><Button onClick={() => open('')}>New Teams source</Button>{sources.map(source => <a key={source.id} className="text-primary underline" href={`#/capabilities/communications?teams_source=${encodeURIComponent(source.id)}`}>{source.name}</a>)}</div>
     {loading && <p role="status" className="rounded-lg bg-primary-container p-m text-on-primary-container">Loading Teams sources…</p>}
     {error && <p role="alert" className="text-danger">{error}</p>}
-    <label className="block">Teams source name<input className={style} value={form.name} maxLength={200} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
-    <label className="block">Verified Microsoft owner email<input className={style} type="email" value={form.owner_email} onChange={event => setForm({ ...form, owner_email: event.target.value })} /></label>
-    <label className="block">Graph credential reference<input className={style} value={form.credential_ref} maxLength={120} onChange={event => setForm({ ...form, credential_ref: event.target.value })} /></label>
+    <Field label={"Teams source name"}><TextInput value={form.name} maxLength={200} onChange={nextValue => setForm({ ...form, name: nextValue })} /></Field>
+    <Field label={"Verified Microsoft owner email"}><TextInput type="email" value={form.owner_email} onChange={nextValue => setForm({ ...form, owner_email: nextValue })} /></Field>
+    <Field label={"Graph credential reference"}><TextInput value={form.credential_ref} maxLength={120} onChange={nextValue => setForm({ ...form, credential_ref: nextValue })} /></Field>
     <Button disabled={busy || !form.name || !form.owner_email || !form.credential_ref} disabledReason={busy ? BUSY_REASON : undefined} onClick={save}>{id ? 'Save Teams source' : 'Create Teams source'}</Button>
     {current && <div className="space-y-2"><p>Sync: {current.sync.state} · coverage: {current.sync.coverage}</p>{current.sync.error && <p>{current.sync.error}</p>}<Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={sync}>Sync Teams history</Button>
       {messages.length === 0 ? <p>No Teams messages have been acquired.</p> : <ul>{messages.map(message => <li key={message.provenance_key} className="my-2"><time>{message.created_at}</time> · {message.source_kind} · {message.direction}{message.person_id ? ' · linked person' : ' · unlinked sender'}<p>{message.deleted_at ? '[Deleted]' : message.body}</p>{message.attachments.length > 0 && <p>{message.attachments.length} attachment reference(s)</p>}</li>)}</ul>}

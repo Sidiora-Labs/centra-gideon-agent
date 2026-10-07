@@ -5,6 +5,7 @@ import threading
 from contextlib import closing
 
 from aiohttp import web
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 
 from gideon.interfaces.dashboard.handlers.capabilities_communications_outbound import (
     register,
@@ -89,7 +90,7 @@ async def main():
             authenticate=False,
         ),
     )
-    app = web.Application()
+    app = web.Application(middlewares=[token_auth_middleware()])
     register(app, service)
 
     async def accounts(_request):
@@ -122,7 +123,7 @@ async def main():
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
     port = site._server.sockets[0].getsockname()[1]
-    print(json.dumps({"port": port}), flush=True)
+    print(json.dumps({"port": port, "token": generate_token("outbound-test-owner")}), flush=True)
     try:
         await asyncio.Event().wait()
     finally:
