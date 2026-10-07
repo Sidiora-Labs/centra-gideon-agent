@@ -28,7 +28,7 @@ function EyeFields({ side, labels, draft, setDraft, disabled }: { side: 'left' |
   const fields = [[labels[8], 'Sphere', 'D'], [labels[9], 'Cylinder', 'D'], [labels[10], 'Axis', labels[19]]] as const;
   return <fieldset disabled={disabled} className="grid gap-m"><legend data-type="label-l" className="mb-s">{sideLabel}</legend>{fields.map(([label, suffix, unit]) => {
     const key = `${prefix}${suffix}` as keyof Draft;
-    return <Field key={key} label={`${sideLabel} ${label} (${unit})`}><TextInput required disabled={disabled} type="number" min={suffix === 'Axis' ? 0 : suffix === 'Cylinder' ? -20 : -40} max={suffix === 'Axis' ? 180 : suffix === 'Cylinder' ? 20 : 40} value={draft[key]} onChange={value => setDraft({ ...draft, [key]: value })} /></Field>;
+    return <Field key={key} label={`${sideLabel} ${label} (${unit})`}><TextInput required disabled={disabled} type="number" step={suffix === 'Axis' ? 1 : 'any'} min={suffix === 'Axis' ? 0 : suffix === 'Cylinder' ? -20 : -40} max={suffix === 'Axis' ? 180 : suffix === 'Cylinder' ? 20 : 40} value={draft[key]} onChange={value => setDraft({ ...draft, [key]: value })} /></Field>;
   })}</fieldset>;
 }
 

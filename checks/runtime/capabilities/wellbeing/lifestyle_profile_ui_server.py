@@ -3,17 +3,26 @@ import json
 
 from aiohttp import web
 
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.wellbeing.lifestyle_profile_http import register
 
 
 async def main():
-    app = web.Application()
+    app = web.Application(middlewares=[token_auth_middleware()])
     register(app)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
     await site.start()
-    print(json.dumps({"port": site._server.sockets[0].getsockname()[1]}), flush=True)
+    print(
+        json.dumps(
+            {
+                "port": site._server.sockets[0].getsockname()[1],
+                "token": generate_token("wellbeing-ui-owner"),
+            }
+        ),
+        flush=True,
+    )
     try:
         await asyncio.Event().wait()
     finally:

@@ -35,6 +35,7 @@ const words = {
 };
 function MeasurementsPage() {
   const w = words[uiLanguage()];
+  const { query, setQuery } = useHashRoute('capabilities');
   const [rows, setRows] = useState<Measurement[]>([]), [history, setHistory] = useState<Measurement[]>([]);
   const [selected, setSelected] = useState<Measurement | null>(null), [kind, setKind] = useState<Measurement['kind']>('body_weight');
   const [observed, setObserved] = useState(new Date().toISOString()), [source, setSource] = useState('manual'), [notes, setNotes] = useState('');
@@ -47,7 +48,7 @@ function MeasurementsPage() {
       const versions = await requestJson<{ history: Measurement[] }>(`${base}/measurements/${encodeURIComponent(id)}/history`);
       setSelected(row); setKind(row.kind); setObserved(row.observed_at); setUnit(row.unit); setSource(row.source); setNotes(row.notes);
       setFirst(String(row.values.weight ?? row.values.systolic)); setSecond(String(row.values.diastolic ?? '')); setHistory(versions.history);
-      window.history.replaceState(null, '', `#/capabilities/wellbeing?id=${encodeURIComponent(id)}`);
+      setQuery({ id }, { replace: true });
     } catch (e) { setError(String(e)); }
   }
   async function load() {
@@ -56,7 +57,7 @@ function MeasurementsPage() {
       setRows((await requestJson<{ measurements: Measurement[] }>(`${base}/measurements?${query}`)).measurements);
     } catch (e) { setError(String(e)); } finally { setBusy(false); }
   }
-  useEffect(() => { void load(); const id = new URLSearchParams(location.hash.split('?')[1]).get('id'); if (id) void select(id); }, []);
+  useEffect(() => { void load(); const id = query.id; if (id) void select(id); }, []);
   async function save(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError('');
     try {
@@ -70,13 +71,13 @@ function MeasurementsPage() {
     catch (e) { setError(String(e)); }
   }
   return <main className="mx-auto w-full space-y-l px-l py-2xl text-on-surface" style={{ maxWidth: 'var(--content-width)' }}>
-    <div className="flex flex-wrap items-center justify-between gap-m"><h2 data-type="title-m">{w[0]}</h2><div className="flex flex-wrap gap-s"><Button onClick={() => { setSelected(null); setHistory([]); setFirst(''); setSecond(''); setNotes(''); setSource('manual'); setRequestId(crypto.randomUUID()); window.history.replaceState(null, '', '#/capabilities/wellbeing'); }}>{w[7]}</Button><Button variant="secondary" onClick={() => void exportData()}>{w[9]}</Button></div></div>
+    <div className="flex flex-wrap items-center justify-between gap-m"><h2 data-type="title-m">{w[0]}</h2><div className="flex flex-wrap gap-s"><Button onClick={() => { setSelected(null); setHistory([]); setFirst(''); setSecond(''); setNotes(''); setSource('manual'); setRequestId(crypto.randomUUID()); setQuery({ id: null }, { replace: true }); }}>{w[7]}</Button><Button variant="secondary" onClick={() => void exportData()}>{w[9]}</Button></div></div>
     {error && <p role="alert">{error}</p>}{busy && <p role="status">{w[10]}</p>}
     <form onSubmit={save} className="grid gap-m rounded-lg bg-surface-container p-l sm:grid-cols-2">
       <Field label={w[0]}><Select value={kind} disabled={!!selected} onChange={value => { const next = value as Measurement['kind']; setKind(next); setUnit(next === 'body_weight' ? 'kg' : 'mmHg'); }} options={[{ value: 'body_weight', label: w[1] }, { value: 'blood_pressure', label: w[2] }]} /></Field>
       <Field label={w[3]}><TextInput required value={observed} onChange={setObserved} /></Field>
-      <Field label={kind === 'body_weight' ? w[1] : w[17]}><input className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" required type="number" step="any" min="0.001" value={first} onChange={e => setFirst(e.target.value)} /></Field>
-      {kind === 'blood_pressure' && <Field label={w[18]}><input className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" required type="number" step="any" min="0.001" value={second} onChange={e => setSecond(e.target.value)} /></Field>}
+      <Field label={kind === 'body_weight' ? w[1] : w[17]}><input className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label={kind === 'body_weight' ? w[1] : w[17]} required type="number" step="any" min="0.001" value={first} onChange={e => setFirst(e.target.value)} /></Field>
+      {kind === 'blood_pressure' && <Field label={w[18]}><input className="h-10 w-full rounded-md border border-outline-variant/30 bg-surface-container px-m text-on-surface outline-none focus:border-primary/40 focus:ring-2 focus:ring-inset focus:ring-primary" aria-label={w[18]} required type="number" step="any" min="0.001" value={second} onChange={e => setSecond(e.target.value)} /></Field>}
       <Field label={w[16]}><Select value={unit} onChange={setUnit} options={(kind === 'body_weight' ? ['kg', 'lb'] : ['mmHg']).map(value => ({ value, label: value }))} /></Field>
       <Field label={w[4]}><TextInput required disabled={!!selected} value={source} onChange={setSource} /></Field>
       <Field label={w[5]}><TextArea value={notes} onChange={setNotes} /></Field><Button type="submit" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>{w[6]}</Button>

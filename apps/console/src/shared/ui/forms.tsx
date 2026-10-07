@@ -38,18 +38,18 @@ interface TextInputProps {
   value: string; onChange: (value: string) => void; placeholder?: string; autoFocus?: boolean
   onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void; name?: string; ariaLabel?: string; required?: boolean
   id?: string; size?: FieldSize; surface?: FieldSurface; type?: 'text' | 'password' | 'number'; mono?: boolean
-  min?: number; max?: number; minLength?: number; maxLength?: number; pattern?: string; leadingIcon?: ReactNode; trailingSlot?: ReactNode
+  min?: number; max?: number; step?: string | number; minLength?: number; maxLength?: number; pattern?: string; leadingIcon?: ReactNode; trailingSlot?: ReactNode
   disabled?: boolean; disabledReason?: string
 }
 export function TextInput({ value, onChange, placeholder, autoFocus, onKeyDown, name, ariaLabel, required,
-  id, size = 'lg', surface = 'container', type, mono, min, max, minLength, maxLength, pattern, leadingIcon, trailingSlot,
+  id, size = 'lg', surface = 'container', type, mono, min, max, step, minLength, maxLength, pattern, leadingIcon, trailingSlot,
   disabled, disabledReason }: TextInputProps) {
   const label = useFieldLabelId()
   const hint = useFieldHintId()
   const identity = useId()
   const dimensions = sizeTokens[size]
   const input = <input id={id || name || identity} name={name} type={type} value={value} autoFocus={autoFocus} placeholder={placeholder}
-    min={min} max={max} minLength={minLength} maxLength={maxLength} pattern={pattern}
+    min={min} max={max} step={step} minLength={minLength} maxLength={maxLength} pattern={pattern}
     {...fieldNaming(label, ariaLabel, name)} aria-describedby={hint} aria-required={required || undefined}
     disabled={disabled} title={disabled ? disabledReason || undefined : undefined}
     onChange={(event) => { if (!disabled) onChange(event.target.value) }} onKeyDown={onKeyDown}
