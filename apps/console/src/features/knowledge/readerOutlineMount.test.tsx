@@ -19,9 +19,9 @@ const SECTIONED = [
   'The last section.',
 ].join('\n')
 
-const RAW_HTML_HEADING = SECTIONED.replace(
+const SETEXT_HEADING = SECTIONED.replace(
   '## How widgets are sold',
-  '<h2>How widgets are sold</h2>',
+  'How widgets are sold\n---------------------',
 )
 
 function item(content: string): KnowledgeItem {
@@ -31,7 +31,7 @@ function item(content: string): KnowledgeItem {
     content,
     item_type: 'note',
     word_count: 400,
-  } as KnowledgeItem
+  } satisfies KnowledgeItem
 }
 
 function renderReader(content: string) {
@@ -62,7 +62,7 @@ async function scrollTick() {
   })
 }
 
-afterEach(() => { vi.restoreAllMocks() })
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('the outline is mounted in the reader', () => {
   it('renders a row per parsed heading, and the reader is not printing a second title', () => {
@@ -134,11 +134,11 @@ describe('selecting a row scrolls the article to that section', () => {
 
 describe('a heading-count mismatch degrades to a no-op', () => {
   it('does not scroll to the wrong section when the renderer emitted an extra heading', () => {
-    renderReader(RAW_HTML_HEADING)
-    const entries = parseOutline(RAW_HTML_HEADING)
+    renderReader(SETEXT_HEADING)
+    const entries = parseOutline(SETEXT_HEADING)
     const hs = headings()
-    expect(entries.length, 'parseOutline skips the raw <h2>').toBe(2)
-    expect(hs.length, 'the renderer emits it (rehype-raw)').toBe(3)
+    expect(entries.length, 'parseOutline only indexes ATX headings').toBe(2)
+    expect(hs.length, 'the Markdown renderer also supports Setext headings').toBe(3)
 
     const spies = hs.map((h) => {
       const fn = vi.fn()
@@ -153,7 +153,7 @@ describe('a heading-count mismatch degrades to a no-op', () => {
   })
 
   it('marks no active row on a mismatched document', async () => {
-    renderReader(RAW_HTML_HEADING)
+    renderReader(SETEXT_HEADING)
     stubGeometry([-200, 50, 600])
     await scrollTick()
     expect(pressedRow(), 'a wrong highlight is worse than no highlight').toBeNull()

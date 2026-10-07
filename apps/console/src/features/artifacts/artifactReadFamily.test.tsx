@@ -4,7 +4,10 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 
-const arts = [{ slug: 'a1', name: 'Weekly digest', kind: 'doc', version: 1, source_path: '/w/x.md' }]
+import type { Artifact, PinnedArtifact } from '../../shared/data/api'
+
+const arts = [{ slug: 'a1', name: 'Weekly digest', kind: 'document', source: 'manual', description: '', tags: [], version: 1, created_at: '2026-10-07T00:00:00Z', updated_at: '2026-10-07T00:00:00Z', events: [], readonly: false, source_path: '/w/x.md' }] satisfies Artifact[]
+const pins = [{ slug: 'a1', pinned_at: '2026-10-07T00:00:00Z', run_id: '' }] satisfies PinnedArtifact[]
 const boom = () => Promise.reject(new Error('store unreachable'))
 
 function mockApi(over: Record<string, unknown>) {
@@ -12,7 +15,7 @@ function mockApi(over: Record<string, unknown>) {
     ...(await orig<Record<string, unknown>>()),
     api: {
       artifacts: () => Promise.resolve(arts),
-      pinnedArtifacts: () => Promise.resolve({ pins: [{ slug: 'a1', pinned_at: 1 }] }),
+      pinnedArtifacts: () => Promise.resolve({ pins }),
       artifactCollections: () => Promise.resolve([]),
       ...over,
     },
@@ -68,22 +71,25 @@ describe('every reader of api.artifacts() can tell failure from empty', () => {
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 
   const readers = () => walk(SRC)
-    .filter((abs) => /api\.artifacts\(\)/.test(codeOf(abs)))
+    .filter((abs) => /api\.artifacts\(/.test(codeOf(abs)))
     .map((abs) => ({ rel: abs.slice(SRC.length + 1), code: codeOf(abs) }))
 
-  it('finds all four readers — the scan is not vacuous', () => {
+  it('finds all seven readers — the scan is not vacuous', () => {
     const rels = readers().map((r) => r.rel).sort()
     expect(rels).toEqual([
       'features/ChatPage.tsx',
       'features/artifacts/ArtifactsSection.tsx',
+      'features/chat/SessionWorkspace.tsx',
       'features/dashboard/widgets/PinnedArtifacts.tsx',
       'features/files/FilesSection.tsx',
+      'features/loops/DesignCockpitPage.tsx',
+      'features/loops/LoopCockpitPage.tsx',
     ])
   })
 
   it('none of them discards the rejection into an empty list', () => {
     const bad = readers()
-      .filter((r) => /catch\s*\{\s*set\w+\(\[\]\)|\.catch\(\(\)\s*=>\s*\[\]/.test(r.code))
+      .filter((r) => /catch\s*\{\s*setArtifacts\(\[\]\)|api\.artifacts\([^;]*?\.catch\(\(\)\s*=>\s*\[\]/.test(r.code))
       .map((r) => r.rel)
     expect(bad, `these turn a failed read into "you have none":\n${bad.join('\n')}`).toEqual([])
   })
@@ -104,7 +110,7 @@ describe('every reader of api.artifacts() can tell failure from empty', () => {
 
   it('the files tree keeps its last known markers rather than asserting none', () => {
     const src = readFileSync(join(SRC, 'features/files/FilesSection.tsx'), 'utf8')
-    expect(src).toMatch(/catch \{ \/\* keep the last known set \*\/ \}/)
+    expect(src).toMatch(/try \{ setArtifacts\(await api\.artifacts\(\)\) \} catch \{\s*\}/)
   })
 
   it('a failed content search says so instead of counting zero matches', () => {

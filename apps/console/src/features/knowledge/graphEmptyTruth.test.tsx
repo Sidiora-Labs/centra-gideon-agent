@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { EntityExtractionTally } from '../../shared/data/api'
 import { KnowledgeGraph } from './KnowledgeGraph'
 
 
@@ -10,18 +11,22 @@ const SRC = (rel: string) => readFileSync(join(process.cwd(), "src/features/know
 describe('the graph empty state tells the truth about why it is empty', () => {
   const original = globalThis.fetch
 
-  beforeEach(() => {
-    globalThis.fetch = vi.fn(async () => ({ json: async () => ({ nodes: [], edges: [] }) })) as never
-  })
+  const graphResponse = (extraction?: EntityExtractionTally) => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ nodes: [], edges: [], extraction }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+  }
+  const retryable: EntityExtractionTally = { running: 0, failed: 1, ran: 0, skipped: 0, not_applicable: 0, not_run: 0, total: 1 }
+  beforeEach(() => graphResponse())
   afterEach(() => { globalThis.fetch = original })
 
   it('says entities are missing, and never tells the user to add documents', async () => {
     render(<KnowledgeGraph />)
-    await waitFor(() => expect(screen.getByText('No entities extracted yet')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('No entities to draw')).toBeTruthy())
+    expect(screen.getByText('No recorded extraction outcomes are available.')).toBeInTheDocument()
     expect(document.body.textContent).not.toMatch(/Add documents/i)
   })
 
   it('carries the enrichment action itself, because its header control is another tab away', async () => {
+    graphResponse(retryable)
     const onRegenerate = vi.fn()
     render(<KnowledgeGraph onRegenerate={onRegenerate} />)
     const btn = await waitFor(() => screen.getByRole('button', { name: /Regenerate intelligence/i }))
@@ -31,13 +36,14 @@ describe('the graph empty state tells the truth about why it is empty', () => {
   })
 
   it('shows progress instead of inviting a second run while one is in flight', async () => {
+    graphResponse(retryable)
     render(<KnowledgeGraph onRegenerate={() => {}} regenerating />)
     await waitFor(() => expect(screen.getByText(/Extracting…/)).toBeTruthy())
   })
 
   it('omits the action when no handler is supplied rather than rendering a dead button', async () => {
     render(<KnowledgeGraph />)
-    await waitFor(() => expect(screen.getByText('No entities extracted yet')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('No entities to draw')).toBeTruthy())
     expect(screen.queryByRole('button', { name: /Regenerate intelligence/i })).toBeNull()
   })
 

@@ -29,8 +29,11 @@ describe('a failed read is not a deletion', () => {
 
   it('projects-detail stops discarding the load error', () => {
     const code = read('features/projects/ProjectsSection.tsx')
-    expect(code, 'the error must be destructured to be checkable')
+    expect(code).toMatch(/useProjectDetailState\(id, query, setQuery\)/)
+    const state = read('features/projects/projectDetailState.ts')
+    expect(state, 'the delegated query retains the error and retry')
       .toMatch(/const \{ data: project, loading, error: detailErr, refresh \} = useQuery/)
+    expect(state).toMatch(/return \{ project, loading, detailErr, refresh/)
     expect(code, 'and a failed read renders the retry, before the deletion branch')
       .toMatch(/if \(!project && detailErr\) \{[\s\S]{0,220}?<LoadError what="project" error=\{detailErr\} onRetry=\{refresh\} \/>/)
   })
@@ -50,8 +53,11 @@ describe('a failed read is not a deletion', () => {
   })
 
   it('the 404-vs-other rule this converges on is still the repo’s rule', () => {
-    expect(read('features/projects/ProjectsSection.tsx'))
-      .toMatch(/if \(status === 404\) return "This folder no longer exists on disk\."/)
+    expect(read('features/projects/ProjectsSection.tsx')).toMatch(/projectDirectoryError\(error\)/)
+    const state = read('features/projects/projectPanelState.ts')
+    expect(state).toMatch(/error instanceof ApiError \? error.status : 0/)
+    expect(state).toMatch(/404: 'This folder no longer exists on disk\.'/)
+    expect(state).toMatch(/messages\[status\] \?\? "Couldn't read this directory\."/)
   })
 
   it('the store contract its other callers rely on is untouched', () => {
