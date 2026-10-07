@@ -132,10 +132,10 @@ export default function Page({ baseUrl = '/api/capabilities/experience' }: { bas
             <div className="min-w-0 flex-1"><Field label={`Target ${i + 1}.${j + 1}`}><Select value={c.target} onChange={target => editNode(n.id, { choices: n.choices.map(x => x.id === c.id ? { ...x, target } : x) })} options={draft.nodes.map(target => ({ value: target.id, label: target.id }))} /></Field></div>
             <Button type="button" onClick={() => editNode(n.id, { choices: n.choices.filter(x => x.id !== c.id) })}>Remove choice {i + 1}.{j + 1}</Button>
           </div>)}
-          {n.kind === 'scene' && <Button type="button" disabled={n.choices.length >= 20} onClick={() => editNode(n.id, { choices: [...n.choices, { id: token(), label: '', target: draft.nodes[0].id }] })}>Add choice to scene {i + 1}</Button>}
-          <Button type="button" disabled={draft.nodes.length === 1} onClick={() => setDraft(d => ({ ...d, nodes: d.nodes.filter(x => x.id !== n.id) }))}>Remove scene {i + 1}</Button>
+          {n.kind === 'scene' && <Button type="button" disabled={n.choices.length >= 20} disabledReason={n.choices.length >= 20 ? 'This scene already has the maximum 20 choices' : undefined} onClick={() => editNode(n.id, { choices: [...n.choices, { id: token(), label: '', target: draft.nodes[0].id }] })}>Add choice to scene {i + 1}</Button>}
+          <Button type="button" disabled={draft.nodes.length === 1} disabledReason={draft.nodes.length === 1 ? 'A story must retain at least one scene' : undefined} onClick={() => setDraft(d => ({ ...d, nodes: d.nodes.filter(x => x.id !== n.id) }))}>Remove scene {i + 1}</Button>
         </Surface></section>)}</div>
-        <Button type="button" disabled={draft.nodes.length >= 200} onClick={() => setDraft(d => ({ ...d, nodes: [...d.nodes, { id: token(), text: '', kind: 'ending', choices: [] }] }))}>Add scene</Button>
+        <Button type="button" disabled={draft.nodes.length >= 200} disabledReason={draft.nodes.length >= 200 ? 'This story already has the maximum 200 scenes' : undefined} onClick={() => setDraft(d => ({ ...d, nodes: [...d.nodes, { id: token(), text: '', kind: 'ending', choices: [] }] }))}>Add scene</Button>
         <Button type="submit">Save story</Button>
       </fieldset>
     </form>}

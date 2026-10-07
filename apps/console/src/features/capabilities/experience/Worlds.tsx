@@ -1,5 +1,5 @@
 import { BUSY_REASON } from '../../../shared/ui/unavailable'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { requestJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 import { Field, TextInput } from '../../../shared/ui/forms'
@@ -12,6 +12,7 @@ export default function Worlds({ baseUrl = '/api/capabilities/experience' }: { b
   const [name, setName] = useState(() => new URLSearchParams(location.hash.split('?')[1]).get('world') || 'home')
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [sources, setSources] = useState<Source[]>([])
+  const sourceReasonId = useId()
   const [unavailable, setUnavailable] = useState<string[]>([])
   const [selected, setSelected] = useState<string[]>([])
   const [error, setError] = useState(''), [receipt, setReceipt] = useState('')
@@ -36,7 +37,7 @@ export default function Worlds({ baseUrl = '/api/capabilities/experience' }: { b
     <Button disabled={busy || !/^[A-Za-z0-9_-]{1,64}$/.test(name)} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void run(async () => { setSnapshot(await requestJson<Snapshot>(path + '/open', 'POST', {})); const query = new URLSearchParams(location.hash.split('?')[1]); query.set('world', name); location.hash = '/capabilities/experience?' + query; await refresh() })}>Join or create world</Button>
     <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void run(refresh)}>Refresh world</Button>
     {snapshot && <><p>World {snapshot.world} · revision {snapshot.seq}</p><p>Present: {snapshot.present.map(person => person.id).join(', ') || 'Nobody'}</p>
-      <Surface tone="low" className="p-m"><fieldset disabled={busy} className="space-y-s"><legend data-type="title-m">Project selected source categories</legend>{kinds.map(kind => <label key={kind}><input className="size-4 accent-primary" type="checkbox" disabled={unavailable.includes(kind)} checked={selected.includes(kind)} onChange={e => setSelected(previous => e.target.checked ? [...previous, kind] : previous.filter(value => value !== kind))} />{kind}</label>)}</fieldset></Surface>
+      <Surface tone="low" className="p-m"><fieldset disabled={busy} className="space-y-s"><legend data-type="title-m">Project selected source categories</legend>{kinds.map(kind => <label key={kind}><input className="size-4 accent-primary" type="checkbox" aria-disabled={unavailable.includes(kind) || undefined} aria-describedby={unavailable.includes(kind) ? `${sourceReasonId}-${kind}` : undefined} checked={selected.includes(kind)} onChange={e => { if (busy || unavailable.includes(kind)) return; setSelected(previous => e.target.checked ? [...previous, kind] : previous.filter(value => value !== kind)) }} />{kind}{unavailable.includes(kind) && <span className="sr-only" id={`${sourceReasonId}-${kind}`}>This world’s {kind} source is unavailable</span>}</label>)}</fieldset></Surface>
       {unavailable.length > 0 && <p>Unavailable sources: {unavailable.join(', ')}</p>}
       <Button disabled={busy || selected.length === 0} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void run(() => mutate('project', { kinds: selected }))}>Project selected sources</Button>
       <ul>{sources.filter(source => selected.includes(source.kind)).map(source => <li key={source.kind + source.id}><a href={source.url}>{source.title}</a> · {source.status}</li>)}</ul>

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { gatewayRequest, readJson } from '../../../shared/data/gatewayRequest'
 import { Button } from '../../../shared/ui/Button'
 
-type Share = { id: string; peer_id: string; artifact_id: string; artifact_version: number; sha256: string; bytes: number; status: string; revision: number; remote_artifact_id: string; error: string }
+type Share = { id: string; kind: string; peer_id: string; artifact_id: string; artifact_version: number; sha256: string; bytes: number; status: string; revision: number; remote_artifact_id: string; error: string }
 type Receipt = { sender: string; share_id: string; artifact_id: string; sha256: string; status: string }
 type Snapshot = { scope: string; max_bytes: number; outbound: Share[]; inbound: Receipt[] }
 
@@ -25,7 +25,7 @@ export default function MediaSharing({ baseUrl = '' }: { baseUrl?: string }) {
       <Button disabled={busy || !peer || !artifact || version < 1} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void run(async () => readJson(await gatewayRequest(url, 'POST', { request_id: crypto.randomUUID(), peer_id: peer, artifact_id: artifact, artifact_version: version })))}>Share selected version</Button>
       <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void load()}>Refresh receipts</Button>
       <h3 data-type="headline-s">Sent shares</h3>{!data.outbound.length && <p>No media has been shared.</p>}
-      <ul>{data.outbound.map(row => <li key={row.id}><code>{row.artifact_id}@{row.artifact_version}</code> → <code>{row.peer_id}</code> · {row.status} · {row.bytes} bytes · SHA-256 {row.sha256}{row.error && <> · {row.error}</>} {row.status === 'active' && <Button variant="danger" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void run(async () => readJson(await gatewayRequest(`${url}/${row.id}/revoke`, 'POST', { revision: row.revision })))}>Revoke remote copy</Button>}</li>)}</ul>
+      <ul>{data.outbound.map(row => <li key={row.id}><code>{row.artifact_id}@{row.artifact_version}</code> → <code>{row.peer_id}</code> · {row.status} · {row.bytes} bytes · SHA-256 {row.sha256}{row.error && <> · {row.error}</>} {row.status === 'active' && <Button variant="danger" disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void run(async () => readJson(await gatewayRequest(`${url}/${row.id}/revoke`, 'POST', { revision: row.revision })))} ariaLabel={`Revoke remote ${row.kind || "media"} copy version ${row.artifact_version}`}>Revoke remote copy</Button>}</li>)}</ul>
       <h3 data-type="headline-s">Received shares</h3>{!data.inbound.length && <p>No peer media received.</p>}
       <ul>{data.inbound.map(row => <li key={row.sender + row.share_id}><code>{row.artifact_id}</code> from <code>{row.sender}</code> · {row.status} · SHA-256 {row.sha256}</li>)}</ul>
     </>}

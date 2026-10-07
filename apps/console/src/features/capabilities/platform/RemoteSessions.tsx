@@ -53,7 +53,7 @@ export function RemoteSessions({ baseUrl = '' }: { baseUrl?: string }) {
     {connections.length === 0 && !error && <p>No remote agent connections configured.</p>}
     {connections.map(connection => <article className="grid gap-s rounded-lg border border-outline-variant/20 bg-surface-container p-l" key={connection.id}>
       <h3 data-type="headline-s">{connection.label}</h3><p>{connection.base_url} · credential {connection.credential_ref}</p>
-      <Button loading={busy} onClick={() => void refresh(connection.id)}>Refresh remote sessions</Button>
+      <Button loading={busy} onClick={() => void refresh(connection.id)} ariaLabel={`Refresh remote sessions for ${connection.label}`}>Refresh remote sessions</Button>
       <ul>{connection.retained_sessions.map(session => <li key={session.id}><button type="button" onClick={() => void open(connection.id, session.id)}>{session.title}</button> <span>{session.provenance}</span></li>)}</ul>
     </article>)}
     {active && <div aria-label="Remote conversation">

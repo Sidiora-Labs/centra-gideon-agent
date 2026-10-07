@@ -38,8 +38,8 @@ export default function RemoteMedia({ baseUrl = '' }: { baseUrl?: string }) {
       <ul aria-label="Remote executions">{data.items.map(item => <li key={item.id}>
         <strong>{item.request_id}</strong> · {item.status} · peer <code>{item.peer_id}</code> · job <code>{item.remote_job_id}</code>
         {item.result?.artifact_id && <span> · artifact <code>{item.result.artifact_id}@{item.result.version}</code></span>}{item.error && <span> · {item.error}</span>}
-        <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void action(item, 'refresh')}>Refresh</Button>
-        <Button variant="danger" disabled={busy || ['succeeded', 'failed', 'cancelled'].includes(item.status)} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void action(item, 'cancel')}>Cancel</Button>
+        <Button disabled={busy} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void action(item, 'refresh')} ariaLabel={`Refresh remote media for ${data.peers.find(peer => peer.id === item.peer_id)?.label || "peer"}`}>Refresh</Button>
+        <Button variant="danger" disabled={busy || ['succeeded', 'failed', 'cancelled'].includes(item.status)} disabledReason={busy ? BUSY_REASON : undefined} onClick={() => void action(item, 'cancel')} ariaLabel={`Cancel remote media for ${data.peers.find(peer => peer.id === item.peer_id)?.label || "peer"}`}>Cancel</Button>
       </li>)}</ul>
     </>}
   </section>
