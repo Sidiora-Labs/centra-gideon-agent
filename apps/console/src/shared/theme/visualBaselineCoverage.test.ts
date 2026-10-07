@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { ROUTES, VIEW_ROUTES, THEMES } from '../../../e2e/routes'
-import { VISUAL_BASELINE_PLATFORMS } from '../../../playwright.config'
+import { VISUAL_BASELINE_PLATFORMS, VISUAL_SUPPLEMENTAL_PLATFORMS } from '../../../playwright.config'
 
 
 const BASELINES = join(process.cwd(), "e2e/__screenshots__/visual.spec.ts")
@@ -57,7 +57,7 @@ describe('the visual gate has a committed baseline for every surface it snapshot
   })
 
   it('contains baselines only for declared platforms', () => {
-    expect([...byPlatform().keys()].sort()).toEqual([...VISUAL_BASELINE_PLATFORMS].sort())
+    expect([...byPlatform().keys()].sort()).toEqual([...VISUAL_BASELINE_PLATFORMS, ...VISUAL_SUPPLEMENTAL_PLATFORMS].sort())
   })
 
   it('no golden is orphaned — every committed baseline maps to a surface still in the manifest', () => {
