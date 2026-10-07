@@ -1,81 +1,53 @@
-# Tests
+# Runtime tests
 
-Gideon uses pytest with pytest-asyncio. ~290 test files cover the gateway,
-provider registry, auth modes, config schema, Slack flows, app SDK, and more.
+Pytest collects runtime tests from `checks/runtime` by default. The suite exercises
+configuration, gateway routes, provider contracts, authorization, apps, memory, and
+other runtime consumers. File counts and a historical green run are not a guarantee of
+current coverage or pass status.
 
-## Running tests
+## Commands
+
+Use the prepared development environment described in
+[CONTRIBUTING.md](../../CONTRIBUTING.md), then run from the repository root:
 
 ```bash
-# Full suite via the OSS Makefile target
 make test
-
-# Or invoke pytest directly
-python -m pytest
-
-# Specific file
 python -m pytest checks/runtime/test_provider_registry.py -v
-
-# Filter by keyword
 python -m pytest -k provider_lazy_imports -v
-
-# Re-run only the tests that failed last time
 python -m pytest --lf -v
 ```
 
-The OSS CI gate is reproduced end-to-end by:
+`make test` invokes pytest; it is not the whole lint, native, console, browser, or release
+gate. See the actual Makefile and workflow commands for those scopes. The root pytest
+configuration uses asyncio `auto` mode, not `strict`.
 
-```bash
-docker build --target test .
-```
+## Isolation and bytecode
 
-That stage runs `black --check`, `isort --check-only`, `flake8`, `mypy`, and
-`pytest` against the in-image source tree.
+Set an isolated `GIDEON_HOME` before importing code for tests that could touch persistent
+state. Use temporary workspace and data paths separately: home isolation does not by
+itself constrain the workspace. An explicitly supplied home is respected by fixtures,
+so never point a destructive test at the real user home.
 
-## Bytecode cache (mutation testing is only evidence with this armed)
+`conftest.py` activates `pycache_guard.py` before importing runtime code. Fresh bytecode
+storage avoids stale `.pyc` reuse during rapid same-size source mutations. `python -B`
+only disables writes; it is not a general stale-bytecode solution. The guard does not
+restore a mutation left in source after an interrupted run.
 
-Every run points its bytecode cache at a fresh temp directory —
-`checks/runtime/conftest.py` calls `pycache_guard.activate()` before it imports anything
-under test. Nothing you have to remember, and nothing to add to a mutation
-cycle: it applies to `make test`, a targeted `pytest checks/runtime/test_x.py::test_y`,
-and CI alike.
+## Meaningful consumer checks
 
-It exists because CPython validates a `.pyc` against the source's
-`(int(mtime), size)`, and a mutation-testing cycle defeats that validator by
-construction: many mutations are same-length edits (`>=` → `<=`, `and` → `or`,
-one identifier for another of equal length) and mutate → run → revert → mutate
-lands inside one integer second. Both hold ⇒ the interpreter runs the
-**previous** bytecode and the suite reports a result for code that is not on
-disk, in the false-confidence direction (the mutation reads as *caught*).
-`python -B` does **not** fix this — it stops the interpreter *writing* a cache,
-not *reading* one — and `-p no:cacheprovider` is about `.pytest_cache`, not
-`__pycache__`. Rationale, measurements and the alternative that was weighed:
-`checks/runtime/pycache_guard.py`. Proof: `checks/runtime/test_pycache_guard.py`.
+Use temporary paths and configuration fixtures where appropriate. Distinguish a pure
+unit seam, scripted protocol fixture, real gateway route, real native daemon, and a live
+vendor integration in the result. Mocking an external process cannot establish its
+actual launch, protocol, identity, or shutdown behavior. Choose the necessary consumer
+and report unavailable prerequisites.
 
-It covers stale bytecode only. A mutation run that *dies* partway through leaves
-the mutation in the source, no cache involved, and this rail does not see that
-(#2710).
+Assertions should cover both the intended behavior and the relevant refusal or benign
+control. A transport response or accepted-work acknowledgement does not prove terminal
+completion or an external effect.
 
-This is not a claim that any past "N mutations applied, N caught" result was
-wrong. It is that nothing enforced the invariant, so no past claim was
-self-certifying. From here the run enforces the bytecode half.
+## Manual scripts
 
-## Conventions
-
-- Test files: `checks/runtime/test_<module>.py`
-- pytest-asyncio is configured in strict mode — every async test needs
-  `@pytest.mark.asyncio`
-- Use the `tmp_path` fixture for filesystem tests
-- Use `monkeypatch` for config / environment overrides
-- Mock subprocess providers (e.g. `AcpAgentProvider`) — never spawn real
-  external processes in tests
-- Group related tests in classes: `class TestFeatureName:`
-
-## Smoke tests
-
-- `checks/runtime/smoke_gateway.sh` — end-to-end gateway security smoke test (requires
-  a running gateway on `localhost:10000`)
-- `checks/runtime/smoke_sandbox.sh` — sandbox isolation smoke test
-- `checks/runtime/debug_sandbox.sh` — on-host sandbox check (detected backend + wrapped `ls ~/.aws/`)
-
-These are not run by `make test`; they are manual scripts for verifying live
-behavior against a running gateway.
+`smoke_gateway.sh`, `smoke_sandbox.sh`, and `debug_sandbox.sh` are separate manual
+utilities. Inspect their environment and targets before running: they are not invoked
+by the ordinary `make test` target, and a running gateway or platform sandbox may be
+required. Do not treat the script's presence as current live verification.
