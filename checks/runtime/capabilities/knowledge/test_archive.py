@@ -20,6 +20,7 @@ from gideon.interfaces.dashboard.handlers.capabilities_knowledge_archives import
     register,
 )
 from gideon.interfaces.dashboard.state import ConsoleState, _ChatSession
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.knowledge.archive import (
     MAX_BYTES,
     ConversationArchive,
@@ -390,13 +391,13 @@ def test_http_original_bytes_selection_and_isolation(archive, tmp_path):
     async def journey():
         state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
         state._knowledge_store = archive.store
-        app = web.Application()
+        app = web.Application(middlewares=[token_auth_middleware()])
         app["state"] = state
         register(app)
         other_store = KnowledgeStore(str(tmp_path / "other.db"))
         other_state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
         other_state._knowledge_store = other_store
-        other = web.Application()
+        other = web.Application(middlewares=[token_auth_middleware()])
         other["state"] = other_state
         register(other)
         root = "/api/capabilities/knowledge/archives"
@@ -404,6 +405,13 @@ def test_http_original_bytes_selection_and_isolation(archive, tmp_path):
             TestClient(TestServer(app)) as client,
             TestClient(TestServer(other)) as isolated,
         ):
+            assert (await client.post(root + "/preview", json=body())).status == 403
+            client.session.headers["Authorization"] = "Bearer " + generate_token(
+                "archive-owner"
+            )
+            isolated.session.headers["Authorization"] = "Bearer " + generate_token(
+                "archive-owner"
+            )
             response = await client.post(root + "/preview", json=body())
             assert response.status == 200
             preview = await response.json()

@@ -18,6 +18,7 @@ from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge import register
 from gideon.interfaces.dashboard.state import ConsoleState
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.knowledge.anniversaries import (
     anniversaries,
     source_record,
@@ -275,8 +276,8 @@ def test_real_http_list_detail_validation_and_isolation(tmp_path):
         identity = create(
             left, "Private note", "2025-09-25", content="The actual original text"
         )
-        left_app = web.Application()
-        right_app = web.Application()
+        left_app = web.Application(middlewares=[token_auth_middleware()])
+        right_app = web.Application(middlewares=[token_auth_middleware()])
         left_app["state"] = state_for(left)
         right_app["state"] = state_for(right)
         register(left_app)
@@ -285,6 +286,15 @@ def test_real_http_list_detail_validation_and_isolation(tmp_path):
             TestClient(TestServer(left_app)) as a,
             TestClient(TestServer(right_app)) as b,
         ):
+            assert (
+                await a.get("/api/capabilities/knowledge/anniversaries")
+            ).status == 403
+            a.session.headers["Authorization"] = "Bearer " + generate_token(
+                "anniversary-owner"
+            )
+            b.session.headers["Authorization"] = "Bearer " + generate_token(
+                "anniversary-owner"
+            )
             response = await a.get(
                 "/api/capabilities/knowledge/anniversaries?date=2026-09-25"
             )
@@ -356,10 +366,16 @@ def test_real_http_memory_exact_source(tmp_path):
         journal.vector_store = archive
         state = state_for(store)
         state._standalone_memory = journal
-        app = web.Application()
+        app = web.Application(middlewares=[token_auth_middleware()])
         app["state"] = state
         register(app)
         async with TestClient(TestServer(app)) as client:
+            assert (
+                await client.get("/api/capabilities/knowledge/anniversaries")
+            ).status == 403
+            client.session.headers["Authorization"] = "Bearer " + generate_token(
+                "anniversary-owner"
+            )
             response = await client.get(
                 "/api/capabilities/knowledge/anniversaries?date=2026-09-25"
             )

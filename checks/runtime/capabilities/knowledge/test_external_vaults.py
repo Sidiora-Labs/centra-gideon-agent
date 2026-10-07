@@ -11,6 +11,7 @@ from gideon.core.config.loader import AppConfig
 from gideon.engine.session import ConversationDirectory
 from gideon.interfaces.dashboard.handlers.capabilities_knowledge_vaults import register
 from gideon.interfaces.dashboard.state import ConsoleState
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.knowledge.capture import CaptureError
 from gideon.workspace.capabilities.knowledge.external_vaults import (
     ExternalVaults,
@@ -382,12 +383,16 @@ async def test_http_register_scan_read_conflict_search_graph_and_delete(
     store = KnowledgeStore(str(home / "knowledge.db"))
     state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
     state._knowledge_store = store
-    app = web.Application()
+    app = web.Application(middlewares=[token_auth_middleware()])
     app["state"] = state
     register(app)
     client = TestClient(TestServer(app))
     await client.start_server()
-    headers = {"X-Session-Key": "dashboard:ui"}
+    assert (await client.get("/api/capabilities/knowledge/vaults")).status == 403
+    headers = {
+        "X-Session-Key": "dashboard:ui",
+        "Authorization": "Bearer " + generate_token("vault-owner"),
+    }
     try:
         registered = await (
             await client.post(

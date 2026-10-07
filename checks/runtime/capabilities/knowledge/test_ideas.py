@@ -305,8 +305,10 @@ def test_real_concurrent_import_retries_create_one_collection(ideas):
 
 def test_interval_schedule_and_actual_clock_dispatch_journal(ideas):
     from gideon.automation.schedule_history import ExecutionJournal
+    from gideon.automation.triggers import grants
     from gideon.automation.triggers.service import tick
     from gideon.engine.gateway import RuntimeCoordinator
+    from gideon.security.approval_answer import YOU
 
     first = imported(ideas)
     schedules = IdeaSchedules(ideas)
@@ -331,6 +333,18 @@ def test_interval_schedule_and_actual_clock_dispatch_journal(ideas):
     ).timestamp()
 
     async def journey():
+        refused = await tick(
+            schedules.triggers, now=stamp + 1, persist=False, base_dir=ideas.home
+        )
+        assert not refused.fires
+        assert refused.ledger_rows[0]["outcome"] == "refused"
+        assert "owner review" in refused.ledger_rows[0]["reason"]
+        question = grants.question(trigger)
+        assert question is not None
+        assert grants.grant(
+            trigger, confirmed_revision=question.revision, principal=YOU
+        )
+        schedules.triggers.upsert(trigger)
         clock = await tick(
             schedules.triggers, now=stamp + 1, persist=True, base_dir=ideas.home
         )
