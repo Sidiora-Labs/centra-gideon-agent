@@ -8,19 +8,39 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import Replication from './Replication'
 
 let server: ChildProcess; let baseUrl: string; let home: string
+const nativeFetch = globalThis.fetch
 beforeAll(async () => {
   home = await mkdtemp(`${tmpdir()}/gideon-replication-ui-`)
   const root = resolve(process.cwd(), '../..')
-  server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/platform/replication_ui_server.py'], { cwd: root, env: { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home, GIDEON_DEV_NO_AUTH: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home }
+  delete childEnv.GIDEON_DEV_NO_AUTH
+  server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/platform/replication_ui_server.py'], { cwd: root, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] })
   let diagnostics = ''
   server.stderr!.on('data', chunk => { diagnostics += chunk.toString() })
-  baseUrl = await new Promise<string>((accept, reject) => {
+  const ready = await new Promise<{ url: string; token: string }>((accept, reject) => {
     const lines = createInterface({ input: server.stdout! })
-    lines.on('line', line => { if (/^\d+$/.test(line)) { accept(`http://127.0.0.1:${line}`); lines.close() } })
+    lines.on('line', line => {
+      try {
+        const value = JSON.parse(line) as { url: string; token: string }
+        if (typeof value.url !== 'string' || typeof value.token !== 'string') return
+        accept(value); lines.close()
+      } catch { /* Wait for native server readiness. */ }
+    })
     server.once('error', reject); server.once('exit', code => reject(new Error(`server exited ${code}: ${diagnostics}`)))
   })
+  baseUrl = ready.url
+  expect((await nativeFetch(`${baseUrl}/api/capabilities/platform/replication`)).status).toBe(403)
+  globalThis.fetch = (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), baseUrl)
+    if (url.origin !== baseUrl) return nativeFetch(input, init)
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+    headers.set('Authorization', `Bearer ${ready.token}`)
+    headers.set('Origin', baseUrl)
+    return nativeFetch(url, { ...init, headers })
+  }
 })
 afterAll(async () => {
+  globalThis.fetch = nativeFetch
   if (server && server.exitCode === null) await new Promise<void>(done => { server.once('exit', done); server.kill('SIGTERM') })
   await rm(home, { recursive: true, force: true })
 })

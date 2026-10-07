@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 from aiohttp import web
 
@@ -7,7 +8,7 @@ from gideon.interfaces.dashboard.handlers.capabilities_peers import (
     register as register_peers,
 )
 from gideon.interfaces.dashboard.handlers.capabilities_replication import register
-from gideon.interfaces.dashboard.token_auth import token_auth_middleware
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.platform.peers import PeerStore
 
 
@@ -36,7 +37,15 @@ async def main():
     HierarchyStore().create_project(
         "Replicated project", brief="Canonical project source"
     )
-    print(port, flush=True)
+    print(
+        json.dumps(
+            {
+                "url": f"http://127.0.0.1:{runner.addresses[0][1]}",
+                "token": generate_token("replication-owner"),
+            }
+        ),
+        flush=True,
+    )
     try:
         await asyncio.Event().wait()
     finally:
