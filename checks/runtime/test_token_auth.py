@@ -978,3 +978,72 @@ async def test_auth_none_keeps_passthrough_for_invalid_cookie() -> None:
     assert resp.status == 200
     assert "user" not in req.read_store
     assert "session_nonce" not in req.read_store
+
+
+def test_bound_server_homes_keep_signing_nonce_and_audit_authority(tmp_path):
+    import asyncio
+    import json
+
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from gideon.interfaces.dashboard.token_auth import use_persistent_secret
+    from gideon.security.auth.home import bind_home
+
+    first, second, foreign = (
+        tmp_path / name for name in ("first", "second", "foreign")
+    )
+    use_persistent_secret()
+
+    async def endpoint(request):
+        return web.json_response({"user": request["user"]})
+
+    async def journey():
+        apps, tokens = [], []
+        for home, user in ((first, "first-owner"), (second, "second-owner")):
+            with bind_home(home):
+                app = web.Application(middlewares=[token_auth_middleware()])
+                # The middleware factory captures the same explicit server home.
+                app.router.add_get("/api/home-proof", endpoint)
+                tokens.append(generate_token(user))
+                apps.append(app)
+        with bind_home(foreign):
+            async with (
+                TestClient(TestServer(apps[0])) as a,
+                TestClient(TestServer(apps[1])) as b,
+            ):
+                for client, own, other, user in (
+                    (a, tokens[0], tokens[1], "first-owner"),
+                    (b, tokens[1], tokens[0], "second-owner"),
+                ):
+                    accepted = await client.get(
+                        "/api/home-proof", headers={"Authorization": "Bearer " + own}
+                    )
+                    assert accepted.status == 200
+                    assert (await accepted.json())["user"] == user
+                    denied = await client.get(
+                        "/api/home-proof", headers={"Authorization": "Bearer " + other}
+                    )
+                    assert denied.status == 403
+                    assert (await denied.json())["error"] == "auth_bearer_invalid"
+        # Equal signing keys still cannot substitute a nonce registered in another home.
+        (second / "session_key").write_bytes((first / "session_key").read_bytes())
+        from gideon.interfaces.dashboard.token_auth import reset_secret_cache
+
+        reset_secret_cache()
+        with bind_home(second):
+            assert validate_token(tokens[0], use_session_exp=True)[0] is False
+        assert not foreign.exists()
+        for home, user, other in (
+            (first, "first-owner", "second-owner"),
+            (second, "second-owner", "first-owner"),
+        ):
+            rows = [
+                json.loads(line)
+                for line in (home / "security_events.jsonl").read_text().splitlines()
+            ]
+            assert rows
+            text = json.dumps(rows)
+            assert user in text
+            assert other not in text
+
+    asyncio.run(journey())

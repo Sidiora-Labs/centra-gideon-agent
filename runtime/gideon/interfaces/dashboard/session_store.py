@@ -68,6 +68,12 @@ def config_dir() -> Path:
     DEFINED here rather than imported: this module can be imported lazily, and an
     import-time binding captures whatever the name pointed at on first use (#2443).
     """
+    from gideon.security.auth.home import bound_home
+
+    home = bound_home()
+    if home is not None:
+        home.mkdir(parents=True, exist_ok=True)
+        return home
     return config_loader.config_dir()
 
 

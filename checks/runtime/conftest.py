@@ -367,6 +367,7 @@ def _reset_sel_singleton():
 
     def _clear() -> None:
         _SEL._instance = None
+        _SEL._instances.clear()
         _SEL._initialized = False
 
     _clear()

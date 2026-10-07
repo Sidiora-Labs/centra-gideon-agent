@@ -29,14 +29,16 @@ import time
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
 from aiohttp import web
 
-from gideon.core.config.loader import _DEFAULT_PORT
+from gideon.core.config.loader import _DEFAULT_PORT, resolve_config_dir
 from gideon.interfaces.dashboard.origin import is_loopback, is_private_network
 from gideon.security.auth import lifetimes, revocation
+from gideon.security.auth.home import bind_home, bound_home
 from gideon.security.auth.lifetimes import (
     MAX_SESSION_TTL_SECS,
     cap_legacy_expiry,
@@ -55,6 +57,8 @@ ERR_BEARER_INVALID = "auth_bearer_invalid"
 ERR_CREDENTIAL_CONFLICT = "auth_credential_conflict"
 
 _SECRET: bytes | None = None
+_SECRET_HOME: Path | None = None
+_SECRET_LOCK = threading.RLock()
 _EPHEMERAL_SECRET: bytes | None = None
 
 
@@ -65,14 +69,18 @@ def _secret() -> bytes:
     every token**: on a local box you re-ran `gideon token`, and off-network you were
     locked out entirely because minting a URL requires being on the machine.
     """
-    global _SECRET
-    if _EPHEMERAL_SECRET is not None:
-        return _EPHEMERAL_SECRET
-    if _SECRET is None:
-        from gideon.interfaces.dashboard.session_store import load_or_create_key
+    with _SECRET_LOCK:
+        global _SECRET, _SECRET_HOME
+        if _EPHEMERAL_SECRET is not None:
+            return _EPHEMERAL_SECRET
+        home = bound_home() or resolve_config_dir()
+        if _SECRET is None or _SECRET_HOME != home:
+            from gideon.interfaces.dashboard.session_store import load_or_create_key
 
-        _SECRET = load_or_create_key()
-    return _SECRET
+            with bind_home(home):
+                _SECRET = load_or_create_key()
+            _SECRET_HOME = home
+        return _SECRET
 
 
 def use_ephemeral_secret(value: bytes | None = None) -> None:
@@ -166,7 +174,7 @@ class TokenStateManager:
             in_memory = pool is not None and nonce in self._nonces[pool]
             if in_memory and pool is not None:
                 self._nonces[pool].move_to_end(nonce)
-        if in_memory:
+        if in_memory and bound_home() is None:
             self._touch_last_seen(nonce)
             return True, ""
 
@@ -1103,6 +1111,7 @@ def token_auth_middleware(
     arbitrary methods or descendants. Legacy method/path tuples remain accepted.
 
     """
+    server_home = bound_home() or resolve_config_dir()
     strict_routes = tuple(
         InternalRoute.parse(entry)
         for entry in sorted(internal_routes | _legacy_internal_routes(internal_paths))
@@ -1212,8 +1221,7 @@ def token_auth_middleware(
                     app_name = layered_app
         return _RequestCredentials(token, source, user_id, app_name)
 
-    @web.middleware
-    async def middleware(request: web.Request, handler: object) -> web.StreamResponse:
+    async def authenticate(request: web.Request, handler: object) -> web.StreamResponse:
         path = request.path
         routed = request.rel_url.path_safe
         _matches_strict = any(
@@ -1492,6 +1500,11 @@ def token_auth_middleware(
 
         _log_auth(request, user_id, "ok", "", carrier=credentials.source)
         return resp  # type: ignore[return-value]
+
+    @web.middleware
+    async def middleware(request: web.Request, handler: object) -> web.StreamResponse:
+        with bind_home(server_home):
+            return await authenticate(request, handler)
 
     middleware._is_token_auth = True  # type: ignore[attr-defined]  # sentinel for server.py security gate  # noqa: E501
     return middleware

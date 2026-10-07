@@ -181,28 +181,48 @@ class SecurityEventLog:
     """
 
     _instance: "SecurityEventLog | None" = None
-    _init_lock = threading.Lock()
+    _instances: dict[Path, "SecurityEventLog"] = {}
+    _init_lock = threading.RLock()
     _initialized: bool = False
 
     def __new__(cls, base_dir: Path | None = None) -> "SecurityEventLog":
+        if base_dir is not None:
+            home = base_dir.expanduser().resolve()
+            with cls._init_lock:
+                if (
+                    cls._instance is not None
+                    and cls._instance._initialized
+                    and cls._instance._dir.resolve() == home
+                ):
+                    cls._instances[home] = cls._instance
+                if home not in cls._instances:
+                    inst = super().__new__(cls)
+                    inst._initialized = False
+                    cls._instances[home] = inst
+                return cls._instances[home]
         if cls._instance is None:
             with cls._init_lock:
                 if cls._instance is None:
-                    inst = super().__new__(cls)
-                    inst._initialized = False
+                    home = _default_dir().expanduser().resolve()
+                    inst = cls._instances.get(home)
+                    if inst is None:
+                        inst = super().__new__(cls)
+                        inst._initialized = False
+                        cls._instances[home] = inst
                     cls._instance = inst
         return cls._instance
 
     def __init__(self, base_dir: Path | None = None) -> None:
-        if self._initialized:
-            return
-        self._dir = base_dir or _default_dir()
-        self._path = self._dir / _SEL_FILE
-        self._lock = threading.Lock()
-        self._hmac_key = self._load_or_create_hmac_key()
-        self._last_hash = self._read_last_hash()
-        self._forward_callback: Callable[[dict], None] | None = None
-        self._initialized = True
+        with self._init_lock:
+            if self._initialized:
+                return
+            self._dir = (base_dir or _default_dir()).expanduser().resolve()
+            self._path = self._dir / _SEL_FILE
+            self._lock = threading.Lock()
+            self._hmac_key = self._load_or_create_hmac_key()
+            self._last_hash = self._read_last_hash()
+            self._forward_callback: Callable[[dict], None] | None = None
+            self._initialized = True
 
     def set_forward_callback(self, callback: Callable[[dict], None] | None) -> None:
         """Register an optional callback to forward events to a centralized log system."""
@@ -628,4 +648,6 @@ def _infer_source(session_key: str) -> str:
 
 def sel() -> SecurityEventLog:
     """Module-level accessor for the singleton SEL instance."""
-    return SecurityEventLog()
+    from gideon.security.auth.home import bound_home
+
+    return SecurityEventLog(bound_home())
