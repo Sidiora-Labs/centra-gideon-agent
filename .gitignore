@@ -77,3 +77,4 @@ playwright-responses/
 /apps/console/dist/
 /apps/desktop/backend-dist/
 .codegraph/
+GOTCHA.kvx
