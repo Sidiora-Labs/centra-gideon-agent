@@ -204,12 +204,12 @@ class SecurityEventLog:
             with cls._init_lock:
                 if cls._instance is None:
                     home = _default_dir().expanduser().resolve()
-                    inst = cls._instances.get(home)
-                    if inst is None:
-                        inst = super().__new__(cls)
-                        inst._initialized = False
-                        cls._instances[home] = inst
-                    cls._instance = inst
+                    cached_instance = cls._instances.get(home)
+                    if cached_instance is None:
+                        cached_instance = super().__new__(cls)
+                        cached_instance._initialized = False
+                        cls._instances[home] = cached_instance
+                    cls._instance = cached_instance
         return cls._instance
 
     def __init__(self, base_dir: Path | None = None) -> None:
