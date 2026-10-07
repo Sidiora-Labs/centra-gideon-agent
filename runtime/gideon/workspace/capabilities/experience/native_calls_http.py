@@ -50,7 +50,6 @@ def handoff(request, record, body):
     if getattr(session, "_app", "") != request.get("app", ""):
         raise NotFound("Conversation belongs to another application")
     from gideon.engine.history_keys import persisted_history_key
-    from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
 
     digest = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
     marker = {
@@ -76,7 +75,7 @@ def handoff(request, record, body):
         )
         text += "\n\n".join(m["role"] + ": " + m["text"] for m in messages)
         session.append("user", text, meta=marker)
-    save_session_to_history(state, session)
+    state.save_session_to_history(session)
     persisted = state.conversation_log.read_messages(key)
     if not any(m.get("meta") == marker for m in persisted):
         raise Conflict(

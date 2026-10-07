@@ -538,3 +538,66 @@ def test_telegram_reply_resolves_the_runners_history_session_key():
         assert state.channel_provider_for("dashboard:missing") == ""
     finally:
         channel_delivery.register(previous, "telegram")
+
+
+@pytest.mark.asyncio
+async def test_native_commands_use_host_persistence_and_shared_effort_contract(
+    tmp_path, monkeypatch
+):
+    from gideon.cognition.history import ConversationLog
+    from gideon.core.config.loader import AppConfig
+    from gideon.engine.gateway import RuntimeCoordinator
+    from gideon.engine.history_keys import persisted_history_key
+    from gideon.engine.session import ConversationDirectory
+    from gideon.integrations.telegram.commands import extra_command
+    from gideon.interfaces.dashboard.handlers import providers
+    from gideon.interfaces.dashboard.state import ConsoleState
+
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    config = AppConfig()
+    state = ConsoleState(
+        ConversationDirectory(config),
+        0,
+        conversation_log=ConversationLog(tmp_path / "history"),
+    )
+    state.conversation_log.init()
+    session = state.get_or_create_session("linked")
+    session.append("user", "Existing conversation")
+    transport = TelegramTransport({"disable_topic_auto_rename": True})
+    transport.services = RuntimeCoordinator(config, no_dashboard=True, no_crons=True)
+    transport.services.dashboard_state = state
+    cm = normalize(
+        {
+            "message_id": 1,
+            "chat": {"id": 123, "type": "private"},
+            "from": {"id": 22},
+            "text": "/title Renamed",
+        }
+    )
+    state.link_channel(session.key, cm.thread_id, cm.channel_id, provider="telegram")
+    assert (
+        await extra_command(transport, cm, "title", "Renamed")
+        == "Conversation renamed."
+    )
+    key = persisted_history_key(state.conversation_log, session.key)
+    assert state.conversation_log.get_metadata(key)["title"] == "Renamed"
+    session.acp_provider = "acp:test"
+    monkeypatch.setattr(providers, "_discovery_cache", {})
+    providers._record_runtime_test(
+        "acp:test", None, {"agents": [{"supported_efforts": []}]}
+    )
+    refusal = await extra_command(transport, cm, "reasoning", "minimal")
+    assert "declares no reasoning-effort options" in refusal
+    assert session.reasoning_effort == ""
+    providers._record_runtime_test(
+        "acp:test", None, {"agents": [{"supported_efforts": [{"value": "minimal"}]}]}
+    )
+    assert (
+        await extra_command(transport, cm, "reasoning", "minimal")
+        == "Reasoning effort updated."
+    )
+    assert session.reasoning_effort == "minimal"
+    assert (
+        await extra_command(transport, cm, "reasoning", "max --evil")
+        == "Use a supported reasoning effort or default."
+    )

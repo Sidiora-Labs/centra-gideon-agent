@@ -56,6 +56,19 @@ async def test_actual_owner_http_answer_skip_stop_and_late_request(
         )
     )
     record = tmp_path / "responses.jsonl"
+    settlement_path = tmp_path / "settled.sock"
+    settled_receipts = asyncio.Queue()
+
+    async def settled(reader, writer):
+        try:
+            settled_receipts.put_nowait(json.loads(await reader.readline()))
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    settlement_server = await asyncio.start_unix_server(
+        settled, path=str(settlement_path)
+    )
     program = "\n".join(
         [
             "import asyncio,json",
@@ -82,10 +95,15 @@ async def test_actual_owner_http_answer_skip_stop_and_late_request(
             "            await prompt(sid,rid,params)",
             "            if 'idle' in text: await request('elicitation/create',dict(form,sessionId=sid))",
             "        except asyncio.CancelledError: await server.reply(rid,{'stopReason':'cancelled'})",
-            "        finally: server.turns.pop(sid,None)",
+            "        finally:",
+            "            server.turns.pop(sid,None)",
+            f"            reader,writer=await asyncio.open_unix_connection({str(settlement_path)!r})",
+            "            writer.write((json.dumps({'session':sid,'request':rid})+chr(10)).encode()); await writer.drain()",
+            "            writer.close(); await writer.wait_closed()",
             "    async def recorded(frame):",
             f"        with open({str(record)!r},'a') as output: output.write(json.dumps(frame)+chr(10))",
-            "        if frame.get('method')=='session/new': await server.reply(frame['id'],{'sessionId':'local'}); return",
+            "        if frame.get('method')=='session/new': await server.reply(frame['id'],{'sessionId':'local','configOptions':[{'id':'mode','category':'mode','type':'select','currentValue':'default','options':[{'value':'default','name':'Default'}]}]}); return",
+            "        if frame.get('method')=='session/set_config_option' and frame.get('params')=={'sessionId':'local','configId':'mode','value':'default'}: await server.reply(frame['id'],{}); return",
             "        await dispatch(frame)",
             "    server._prompt=question; server.dispatch=recorded; await server.serve()",
             "asyncio.run(main())",
@@ -112,7 +130,16 @@ async def test_actual_owner_http_answer_skip_stop_and_late_request(
     )
 
     async def consume(text):
-        return [event async for event in client.stream_events(text, timeout=10)]
+        events = [event async for event in client.stream_events(text, timeout=10)]
+        receipt = await asyncio.wait_for(settled_receipts.get(), 5)
+        frames = [json.loads(line) for line in record.read_text().splitlines()]
+        prompt = next(
+            frame
+            for frame in reversed(frames)
+            if frame.get("method") == "session/prompt"
+        )
+        assert receipt == {"session": "local", "request": prompt["id"]}
+        return events
 
     async def wait_question(task):
         for _ in range(500):
@@ -170,7 +197,6 @@ async def test_actual_owner_http_answer_skip_stop_and_late_request(
             session.task = task
             events = await asyncio.wait_for(task, 10)
             assert not state.owner_questions.pending
-            await asyncio.sleep(0.05)
         frames = [json.loads(line) for line in record.read_text().splitlines()]
         initialize = next(
             frame for frame in frames if frame.get("method") == "initialize"
@@ -197,4 +223,6 @@ async def test_actual_owner_http_answer_skip_stop_and_late_request(
         assert CodexDialect().client_capabilities(attended=True) == {}
     finally:
         await client._teardown()
+        settlement_server.close()
+        await settlement_server.wait_closed()
         end_turn(credential)

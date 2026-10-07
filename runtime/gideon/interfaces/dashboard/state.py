@@ -19,6 +19,7 @@ from gideon.cognition.knowledge.store import KnowledgeStore
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
 from gideon.core.config.loader import DASHBOARD_PORT
+from gideon.core.tool_metadata import parse_cls_meta
 from gideon.engine.task_modes import (
     is_read_only_bash,
     resolve_effective_risk,
@@ -178,34 +179,6 @@ def _log_task_exception(task: asyncio.Task[Any]) -> None:
                 type(redaction_err).__name__,
                 type(exc).__name__,
             )
-
-
-def parse_cls_meta(cls_val: str) -> dict | None:
-    """Parse a JSON-encoded ``cls`` string into a meta dict.
-
-    Returns the parsed dict (with ``tool_input`` sanitized) or ``None``
-    if ``cls_val`` is not valid JSON or not a dict.  Used by both
-    ``_prepare_messages`` (HTTP history) and ``_broadcast_chat_message``
-    (live WS push) so the frontend sees an identical ``meta`` structure.
-    """
-    if not cls_val:
-        return None
-    try:
-        meta = json.loads(cls_val)
-        if not isinstance(meta, dict):
-            return None
-    except (json.JSONDecodeError, TypeError):
-        return None
-
-    if isinstance(meta.get("tool_input"), str):
-        sanitized, _ = redact_exfiltration_urls(meta["tool_input"])
-        sanitized, _ = redact_credentials(sanitized)
-        meta["tool_input"] = sanitized
-
-    if "request_id" in meta and "approval_id" not in meta:
-        meta["approval_id"] = meta.pop("request_id")
-
-    return meta
 
 
 def _mark_permission_resolved(
@@ -1348,6 +1321,33 @@ class ConsoleState(WebSocketState, DashboardApprovalState):
             await asyncio.get_running_loop().run_in_executor(
                 None, self._flush_dirty_sessions
             )
+
+    def save_session_to_history(
+        self,
+        session: _ChatSession,
+        messages: list[dict[str, Any]] | None = None,
+        *,
+        closed: bool = False,
+        force: bool = False,
+        metadata_only: bool = False,
+    ) -> None:
+        """Persist through the host's existing conversation journal writer."""
+        from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
+
+        save_session_to_history(
+            self,
+            session,
+            messages,
+            closed=closed,
+            force=force,
+            metadata_only=metadata_only,
+        )
+
+    def reasoning_effort_refusal(self, provider: str, effort: str) -> str | None:
+        """Read the same discovered effort contract used by the chat composer."""
+        from gideon.interfaces.dashboard.chat_handlers import _effort_not_honorable
+
+        return _effort_not_honorable(provider, effort)
 
     def _flush_dirty_sessions(self) -> None:
         """Write any session with new messages to its JSONL file."""

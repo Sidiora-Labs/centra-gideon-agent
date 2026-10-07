@@ -135,7 +135,7 @@ class OwnerQuestions:
                 match = row
                 break
             try:
-                from gideon.interfaces.dashboard.state import parse_cls_meta
+                from gideon.core.tool_metadata import parse_cls_meta
 
                 details = parse_cls_meta(row.get("cls") or "") or {}
             except (ValueError, TypeError):
@@ -152,9 +152,7 @@ class OwnerQuestions:
             )
             match = session.messages[-1]
         match.setdefault("meta", {})["owner_question"] = payload
-        from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
-
-        save_session_to_history(self.state, session, force=True)
+        self.state.save_session_to_history(session, force=True)
 
     def _settle(self, asked, kind, *, answers=None, reason=""):
         if asked.outcome != "pending":
@@ -379,8 +377,4 @@ class OwnerQuestions:
                     )
         if changed:
             session._dirty = True
-            from gideon.interfaces.dashboard.chat_persistence import (
-                save_session_to_history,
-            )
-
-            save_session_to_history(self.state, session, force=True)
+            self.state.save_session_to_history(session, force=True)

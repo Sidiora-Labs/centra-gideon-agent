@@ -11,6 +11,9 @@ from pathlib import Path
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config.loader import AppConfig
 from gideon.engine.agent import AGENTS_DIR
+from gideon.engine.reasoning_effort import (
+    validate_reasoning_effort as _validate_reasoning_effort,
+)
 from gideon.engine.task_modes import VALID_TASK_MODES
 from gideon.engine.turn_source import source_of
 from gideon.interfaces.dashboard.chat_utils import (
@@ -127,9 +130,6 @@ logger = logging.getLogger(__name__)
 
 _MAX_HISTORY_CHARS = 8000
 
-# Reasoning-effort is no longer a fixed Gideon scale — each backend declares its
-_REASONING_EFFORT_RE = re.compile(r"^[a-z][a-z0-9_-]{0,23}$")
-
 
 def resolve_tool_result_path(session_id: str, result_id: str) -> Path | None:
     """Resolve a tool-result record without creating its session workspace."""
@@ -156,22 +156,6 @@ def purge_session_workspace(session_id: str) -> bool:
         logger.debug("session workspace purge failed for %s", session_id, exc_info=True)
         return False
     return not path.exists()
-
-
-def _validate_reasoning_effort(raw: object) -> str:
-    """Return *raw* if it's a safe reasoning_effort token, else "".
-
-    Enforces a format (not a fixed value set) so any backend-declared effort is
-    accepted while a tampered/corrupted metadata file cannot smuggle spaces or
-    shell metacharacters into a subprocess ``--effort`` arg / config value.
-    """
-    if raw == "" or raw is None:
-        return ""
-    if isinstance(raw, str) and _REASONING_EFFORT_RE.match(raw):
-        return raw
-    if raw:
-        logger.warning("Discarding invalid persisted reasoning_effort: %r", raw)
-    return ""
 
 
 _NON_TRANSCRIPT_ROLES = frozenset(

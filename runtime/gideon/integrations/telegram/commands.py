@@ -224,25 +224,20 @@ async def extra_command(transport, cm, command, argument):
         session._titled = True
         session._dirty = True
         state.push_session_title(session.key, session.title)
-        from gideon.interfaces.dashboard.chat_persistence import save_session_to_history
-
-        save_session_to_history(state, session)
+        state.save_session_to_history(session)
         await transport.topics.rename(transport, cm, session)
         return "Conversation renamed."
     if command == "reasoning":
-        from gideon.interfaces.dashboard.chat_handlers import _effort_not_honorable
-        from gideon.interfaces.dashboard.chat_persistence import (
-            _validate_reasoning_effort,
-        )
+        from gideon.engine.reasoning_effort import validate_reasoning_effort
 
         if not argument:
             return "Reasoning effort: " + (
                 session.reasoning_effort or "provider default"
             )
-        effort = _validate_reasoning_effort("" if argument == "default" else argument)
+        effort = validate_reasoning_effort("" if argument == "default" else argument)
         if argument != "default" and not effort:
             return "Use a supported reasoning effort or default."
-        refusal = _effort_not_honorable(session.acp_provider or "", effort)
+        refusal = state.reasoning_effort_refusal(session.acp_provider or "", effort)
         if refusal:
             return refusal
         if session.running:
