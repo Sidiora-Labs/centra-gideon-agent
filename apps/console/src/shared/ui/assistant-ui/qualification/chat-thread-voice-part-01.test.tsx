@@ -199,6 +199,12 @@ describe('live voice conversation controls', () => {
 
   it('leaves interrupt unavailable when the hosted call has no interrupt callback', () => {
     render(<VoiceConversation mode="speaking" amplitude={0} transcript={[]} onToggleMute={() => {}} onEnd={() => {}}/>)
-    expect(screen.getByRole('button', { name: 'Interrupt the assistant' }).hasAttribute('disabled')).toBe(true)
+    const interrupt = screen.getByRole('button', { name: 'Interrupt the assistant' })
+    expect(interrupt.hasAttribute('disabled')).toBe(false)
+    expect(interrupt).toHaveAttribute('aria-disabled', 'true')
+    expect(interrupt).toHaveAccessibleDescription('Interruption is unavailable for this call.')
+    interrupt.focus()
+    expect(interrupt).toHaveFocus()
+    fireEvent.click(interrupt)
   })
 })
