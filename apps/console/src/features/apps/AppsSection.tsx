@@ -1150,7 +1150,9 @@ export function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSu
           if (status.job.id) setEngineJobId(status.job.id)
           if (status.job.state === 'done' && !availabilityRefreshed.current) {
             availabilityRefreshed.current = true
-            void api.refreshProviderAvailability(app.name).catch(() => {})
+            void api.refreshProviderAvailability(app.name).catch((error) => {
+              if (active) setEngineError(`Engine installed; availability could not refresh: ${error instanceof Error ? error.message : 'Could not read provider availability'}`)
+            })
           }
         }
       } catch (error) {

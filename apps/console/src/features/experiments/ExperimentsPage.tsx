@@ -29,6 +29,8 @@ export function ExperimentsPage({ navigate, sub }: RouteProps) {
   const [candidateRun, setCandidateRun] = useState('')
   const [replay, setReplay] = useState<ExperimentReplay | null>(null)
 
+  const [definitionsError, setDefinitionsError] = useState('')
+
   const campaignId = sub?.split('/')[0] || ''
   const scoredAttempts = selected?.attempts.flatMap(attempt => attempt.score === null ? [] : [{
     label: `Attempt #${attempt.ordinal + 1}`,
@@ -56,7 +58,15 @@ export function ExperimentsPage({ navigate, sub }: RouteProps) {
     const timer = window.setInterval(() => { if (document.visibilityState === 'visible') void refresh() }, 6000)
     return () => window.clearInterval(timer)
   }, [refresh])
-  useEffect(() => { api.workflowDefs().then(({ defs }) => setDefinitions(defs.map(d => d.name))).catch(() => {}) }, [])
+  useEffect(() => {
+    let alive = true
+    api.workflowDefs().then(({ defs }) => {
+      if (alive) { setDefinitions(defs.map(d => d.name)); setDefinitionsError('') }
+    }).catch((cause) => {
+      if (alive) setDefinitionsError(`Could not load workflows: ${cause instanceof Error ? cause.message : 'Please reload to retry.'}`)
+    })
+    return () => { alive = false }
+  }, [])
 
   const act = async (fn: () => Promise<ExperimentCampaign>) => {
     setBusy(true)
@@ -115,6 +125,7 @@ export function ExperimentsPage({ navigate, sub }: RouteProps) {
       right={<QuietButton title="Refresh experiments" onClick={() => void refresh()}><RefreshCw size={14} /> Refresh</QuietButton>} />
     <div className="min-h-0 flex-1 overflow-y-auto p-l space-y-l">
       {error && <p role="alert" className="rounded-md bg-danger/10 p-m text-danger">{error}</p>}
+      {definitionsError && <p role="alert" className="rounded-md bg-danger/10 p-m text-danger">{definitionsError}</p>}
       {campaignId && selected ? <section className="space-y-m rounded-xl bg-surface-container p-l">
         <div className="flex flex-wrap items-center justify-between gap-m">
           <div><h2 data-type="title-m">{selected.title}</h2><p data-type="body-s" className="text-on-surface-low">{selected.objective}</p></div>

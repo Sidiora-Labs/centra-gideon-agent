@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
 import { AlertTriangle, Pencil, Trash2, Check, X, ExternalLink, Sparkles, Layers, Loader2, Pin, Star, BookOpen, BookOpenText, Archive, Download, Target, Maximize2, Wand2, ChevronDown, WifiOff, RefreshCw, MessageCircleQuestion } from 'lucide-react'
 import { HeaderActions, HeaderControl } from '../../shared/ui/HeaderActions'
@@ -44,17 +44,21 @@ const SYNTHESIZED_KINDS = new Set(['insight', 'report', 'overview'])
 
 function StaleSynthesisBanner({ item }: { item: KnowledgeItem }) {
   const [state, setState] = useState<KnowledgeStaleness | null>(null)
+  const [loadError, setLoadError] = useState('')
   const [busy, setBusy] = useState(false)
   const [outcome, setOutcome] = useState('')
 
   useEffect(() => {
     let alive = true
-    setState(null); setOutcome('')
+    setState(null); setOutcome(''); setLoadError('')
     if (!SYNTHESIZED_KINDS.has(item.item_type ?? '')) return
-    api.knowledgeStaleness(item.id).then((s) => { if (alive) setState(s) }).catch(() => {})
+    api.knowledgeStaleness(item.id).then((s) => { if (alive) setState(s) }).catch((cause) => {
+      if (alive) setLoadError(`Could not check synthesis freshness: ${cause instanceof Error ? cause.message : 'Please reload to retry.'}`)
+    })
     return () => { alive = false }
   }, [item.id, item.item_type])
 
+  if (loadError) return <FieldError>{loadError}</FieldError>
   if (!state?.stale) return null
   const n = state.new_source_items
   const changed = state.changed_sources
@@ -91,17 +95,30 @@ function StaleSynthesisBanner({ item }: { item: KnowledgeItem }) {
 }
 
 export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShowDetails, detailsOpen, detailsCount, onHeader, reading = false, onToggleReading, annotations = [], onAnnotationsChanged, insightRail }: { item: KnowledgeItem; onChanged: () => void; onDeleted: () => void; onTagClick?: (tag: string) => void; onShowDetails?: () => void; detailsOpen?: boolean; detailsCount?: number; onHeader?: (parts: { wand: React.ReactNode; actions: React.ReactNode; editing: boolean } | null) => void; reading?: boolean; onToggleReading?: () => void; annotations?: KnowledgeAnnotation[]; onAnnotationsChanged?: () => void;   insightRail?: React.ReactNode }) {
+  const currentItemId = useRef(item.id)
+  currentItemId.current = item.id
   const [full, setFull] = useState<KnowledgeItem>(item)
   const [editing, setEditing] = useState(false)
   const [editBase, setEditBase] = useState<Revisioned<KnowledgeDraft> | null>(null)
   const [knownTags, setKnownTags] = useState<string[]>([])
+  const [readErrors, setReadErrors] = useState<Record<string, string>>({})
+  const reportReadError = (key: string, message: string) => {
+    setReadErrors(previous => ({ ...previous, [key]: message }))
+  }
+  const clearReadError = (key: string) => {
+    setReadErrors(previous => { const next = { ...previous }; delete next[key]; return next })
+  }
   const startEdit = async () => {
-    if (!knownTags.length) api.knowledgeTags().then(setKnownTags).catch(() => {})
+    try {
+    if (!knownTags.length) api.knowledgeTags().then(tags => { setKnownTags(tags); clearReadError('tags') }).catch((cause) => {
+      reportReadError('tags', `Could not load tag suggestions: ${cause instanceof Error ? cause.message : 'Please retry editing.'}`)
+    })
     const src = await api.knowledgeItem(item.id)
     if (!src.revision) { setErr('This item has no current revision. Reload it before editing.'); return }
     const base = { value: knowledgeDraft(src), revision: src.revision }
     setFull(src); setDraft(base.value); setEditBase(base); setErr('')
     setEditing(true)
+    } catch (cause) { setErr(cause instanceof Error ? cause.message : 'Could not load this item for editing.') }
   }
   const [draft, setDraft] = useState<KnowledgeDraft>(() => knowledgeDraft(item))
   const [saving, setSaving] = useState(false)
@@ -143,10 +160,10 @@ export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShow
 
   useEffect(() => {
     let alive = true
-    setEditing(false); setItemIntents([]); setNodePhases({}); setIngestGraph(null)
-    getKnowledge(item.id).then((d) => { if (alive && d) { setFull(d); setProcStatus(d.processing_status ?? ''); setDraft({ title: d.title ?? '', content: d.content ?? '', summary: d.summary ?? '', tags: d.tags ?? [], item_type: d.item_type ?? d.type ?? 'note', gist_language: d.gist_language ?? '', url: d.url ?? '' }) } }).catch(() => setFull(item))
-    api.knowledgeItemIntents(item.id).then((r) => { if (alive) setItemIntents(r.outcomes || []) }).catch(() => {})
-    api.knowledgeItemGraph(item.id).then((g) => { if (alive) setIngestGraph(g) }).catch(() => {})
+    setFull(item); setReadErrors({}); setEditing(false); setItemIntents([]); setNodePhases({}); setIngestGraph(null)
+    getKnowledge(item.id).then((d) => { if (alive && !d) reportReadError('detail', 'Could not load item details. Showing the available item.'); if (alive && d) { setFull(d); setProcStatus(d.processing_status ?? ''); setDraft({ title: d.title ?? '', content: d.content ?? '', summary: d.summary ?? '', tags: d.tags ?? [], item_type: d.item_type ?? d.type ?? 'note', gist_language: d.gist_language ?? '', url: d.url ?? '' }) } }).catch((cause) => { if (alive) reportReadError('detail', `Could not load item details: ${cause instanceof Error ? cause.message : 'Please reload to retry.'}`) })
+    api.knowledgeItemIntents(item.id).then((r) => { if (alive) { setItemIntents(r.outcomes || []); clearReadError('intents') } }).catch((cause) => { if (alive) reportReadError('intents', `Could not load item outcomes: ${cause instanceof Error ? cause.message : 'Please reload to retry.'}`) })
+    api.knowledgeItemGraph(item.id).then((g) => { if (alive) { setIngestGraph(g); clearReadError('graph') } }).catch((cause) => { if (alive) reportReadError('graph', `Could not load processing graph: ${cause instanceof Error ? cause.message : 'Please reload to retry.'}`) })
     return () => { alive = false }
   }, [item.id])
 
@@ -163,9 +180,13 @@ export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShow
         else if (e.type === 'ingest_failed') setProcStatus('failed')
       } catch { /* A malformed event does not establish an outcome. */ }
       setNodePhases({})
-      getKnowledge(item.id).then((d) => { if (d) { setFull(d); setProcStatus(d.processing_status ?? '') } }).catch(() => {})
-      api.knowledgeItemGraph(item.id).then((g) => setIngestGraph(g)).catch(() => {})
-      api.knowledgeItemIntents(item.id).then((r) => setItemIntents(r.outcomes || [])).catch(() => {})
+      getKnowledge(item.id).then((d) => {
+        if (currentItemId.current !== item.id) return
+        if (d) { setFull(previous => previous.id === item.id ? d : previous); clearReadError('detail') }
+        else reportReadError('detail', 'Processing finished; item details could not refresh. Showing the available item.')
+      }).catch((cause) => { if (currentItemId.current === item.id) reportReadError('detail', `Could not refresh item details: ${cause instanceof Error ? cause.message : 'Please reload to retry.'}`) })
+      api.knowledgeItemGraph(item.id).then((g) => { if (currentItemId.current !== item.id) return; setIngestGraph(g); clearReadError('graph') }).catch((cause) => { if (currentItemId.current === item.id) reportReadError('graph', `Could not refresh processing graph: ${cause instanceof Error ? cause.message : 'Please reload to retry.'}`) })
+      api.knowledgeItemIntents(item.id).then((r) => { if (currentItemId.current !== item.id) return; setItemIntents(r.outcomes || []); clearReadError('intents') }).catch((cause) => { if (currentItemId.current === item.id) reportReadError('intents', `Could not refresh item outcomes: ${cause instanceof Error ? cause.message : 'Please reload to retry.'}`) })
       onChanged()
       es.close()
     }
@@ -333,6 +354,7 @@ export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShow
       <HeldChange guard={stale}>
       <div className="flex h-full min-h-0 flex-col gap-l">
         {err && <FieldError className="shrink-0">{err}</FieldError>}
+        {Object.entries(readErrors).map(([key, message]) => <FieldError key={key} className="shrink-0">{message}</FieldError>)}
         {titleEditable && (
           <input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} autoFocus placeholder="Title"
             className="shrink-0 w-full bg-transparent text-on-surface outline-none border-b border-outline-variant/40 pb-1.5 text-[1.0625rem] focus:border-primary" data-type="title-l" />
@@ -389,6 +411,7 @@ export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShow
       {
 }
       {err && <FieldError>{err}</FieldError>}
+      {Object.entries(readErrors).map(([key, message]) => <FieldError key={key}>{message}</FieldError>)}
 
       { }
       <StaleSynthesisBanner item={full} />
