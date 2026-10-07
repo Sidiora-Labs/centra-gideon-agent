@@ -48,6 +48,10 @@ describe('dashboard widget modules', () => {
         'every build — dead code that still costs review attention and drifts against its live ' +
         `siblings:\n  ${orphans.join('\n  ')}`,
     ).toEqual([])
+    const dashboard = sources.find(source => source.path.endsWith(join('dashboard', 'DashboardPage.tsx')))!
+    expect(dashboard.text).toContain("import { BrowseMirrorPanel } from './widgets/BrowseMirrorPanel'")
+    expect(dashboard.text).toMatch(/<Section label="Browser-control requests"[^>]*>\s*<WidgetBoundary what="browser-control requests"><BrowseMirrorPanel \/><\/WidgetBoundary>\s*<\/Section>/)
+    expect(dashboard.text.indexOf('<BrowseMirrorPanel />')).toBeLessThan(dashboard.text.indexOf('<OverviewDisclosure>'))
   })
 
   it('the widgets DashboardPage mounts are among them', () => {

@@ -13,6 +13,7 @@ import { SurfaceOverlay } from '../../shared/ui/surfaces/SurfaceOverlay'
 import { AgentWorld } from './world/AgentWorld'
 import { HeroPulse } from './widgets/HeroPulse'
 import { ActionCenter } from './widgets/ActionCenter'
+import { BrowseMirrorPanel } from './widgets/BrowseMirrorPanel'
 import { ActiveWork } from './widgets/ActiveWork'
 import { TasksWidget } from './widgets/TasksWidget'
 import { Suggestions } from './widgets/Suggestions'
@@ -75,6 +76,12 @@ export function DashboardPage(route: RouteProps) {
               </Section>
               <Section label="Active work" icon={Sparkles}>
                 <ActiveWork {...route} />
+              </Section>
+            </EntranceRegion>
+
+            <EntranceRegion>
+              <Section label="Browser-control requests" icon={Monitor}>
+                <WidgetBoundary what="browser-control requests"><BrowseMirrorPanel /></WidgetBoundary>
               </Section>
             </EntranceRegion>
 
