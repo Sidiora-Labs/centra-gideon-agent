@@ -154,7 +154,7 @@ describe('no destination skips a heading level', () => {
 
   it("the task form's section headers are h2, directly under the page h1", () => {
     const src = read('features/tasks/TaskForm.tsx')
-    expect(src).toMatch(/<h2 className="text-on-surface text-\[0\.8125rem\]" style=\{fvs\(550\)\}>\{title\}<\/h2>/)
+    expect(src).toMatch(/<h2\b[^>]*>\{title\}<\/h2>/)
     expect(src, 'no h3 section header left to skip a level').not.toMatch(/<h3/)
   })
 

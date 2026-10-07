@@ -53,10 +53,10 @@ describe('every popup container in the tree contains its item type', () => {
 
   const containers = walk(SRC).flatMap((f) => {
     const src = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-    return [...src.matchAll(/role="(menu|listbox)"/g)].map((m) => ({
+    return [...src.matchAll(/(?:role="(menu|listbox)"|role: '(menu|listbox)')/g)].map((m) => ({
       file: f.slice(SRC.length + 1),
-      role: m[1],
-      satisfied: ITEM_OF[m[1]].test(src),
+      role: m[1] ?? m[2],
+      satisfied: ITEM_OF[m[1] ?? m[2]].test(src),
     }))
   })
 
@@ -77,7 +77,7 @@ describe('every popup container in the tree contains its item type', () => {
       const hasCursor = /key === 'ArrowDown'|key === 'ArrowUp'|useMenuCursor\(|menuCursorKeydown\(/.test(src)
       const rendersRows = /(?:options|filtered|opts|items|rows)\s*\.map\(/.test(src) && /<(?:motion\.)?button/.test(src)
       if (!hasCursor || !rendersRows) return []
-      return [{ file: f.slice(SRC.length + 1), declares: /role="(?:listbox|menu|combobox|grid|tree)"/.test(src) }]
+      return [{ file: f.slice(SRC.length + 1), declares: /role="(?:listbox|menu|combobox|grid|tree|tablist)"/.test(src) }]
     })
 
     expect(cursored.length, 'the shape sweep must find the cursored lists').toBeGreaterThanOrEqual(4)

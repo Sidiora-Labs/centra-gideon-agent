@@ -35,15 +35,17 @@ describe('Markdown code parent semantics', () => {
     expect(screen.getByRole('button', { name: 'Copy diff' })).toBeInTheDocument()
   })
 
-  it('uses an actual pre parent for raw HTML code too', () => {
+  it('keeps raw HTML code inert instead of interpreting markup', () => {
     const { container } = render(<Markdown>{'<pre><code>one line</code></pre>'}</Markdown>)
-    expect(container.querySelector('pre code')).toHaveTextContent('one line')
-    expect(screen.getByRole('button', { name: 'Copy code' })).toBeInTheDocument()
+    expect(container.querySelector('pre code')).toBeNull()
+    expect(container).toHaveTextContent('<pre><code>one line</code></pre>')
+    expect(screen.queryByRole('button', { name: 'Copy code' })).toBeNull()
   })
 
   it('preserves raw preformatted text without requiring a code child', () => {
     const { container } = render(<Markdown>{'<pre>plain text</pre>'}</Markdown>)
-    expect(container.querySelector('pre')).toHaveTextContent('plain text')
+    expect(container.querySelector('pre')).toBeNull()
+    expect(container).toHaveTextContent('<pre>plain text</pre>')
   })
 
   it('preserves the explicit inline prose mode for fence input', () => {

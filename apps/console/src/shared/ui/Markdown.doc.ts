@@ -4,8 +4,9 @@ const doc: UiDoc = {
   name: 'Markdown',
   keywords: ['markdown', 'renderer', 'chat', 'message', 'code', 'latex', 'mermaid', 'widget', 'tables', 'diff'],
   description:
-    'The full markdown renderer for agent/message content: react-markdown + remark-gfm (tables, task lists, strikethrough), remark-math + rehype-katex (LaTeX), rehype-raw (inline HTML), and highlight.js (code), with ```mermaid diagrams, ```diff highlighting, copy/Run-in-terminal code affordances, safe-href-gated links, inline artifact images (with a Regenerate fallback for deleted ones), and `<widget>` blocks rendered as sandboxed theme-aware iframes. All component overrides are token-driven. Reach for it to render any trusted markdown body in the app.',
+    'The full markdown renderer for agent/message content: react-markdown + remark-gfm (tables, task lists, strikethrough), remark-math + rehype-katex (LaTeX), inert raw HTML text, and highlight.js (code), with ```mermaid diagrams, ```diff highlighting, copy/Run-in-terminal code affordances, safe-href-gated links, inline artifact images (with a Regenerate fallback for deleted ones), and `<widget>` blocks rendered as sandboxed theme-aware iframes. All component overrides are token-driven. Reach for it to render markdown bodies in the app.',
   props: [
+    { name: "inline", description: "Renders inline prose without block controls, raw HTML, or math block plugins." },
     { name: 'chatSessionKey', description: "Scopes the inline-image history lookup so a deleted image's placeholder can offer Regenerate (re-runs at the same slug; server recovers the prompt from this session); absent, the placeholder is static." },
     { name: 'children', description: 'The markdown source. Non-string input (an object/array an agent emitted) is defensively flattened to readable text instead of crashing.' },
     { name: 'citations', description: "Episodic memory manifest for the turn ({n, id, preview}[]). When supplied, `[Memory N]` tokens in the prose become chips deep-linking to the cited episode; a token with no matching entry (or a null id) degrades to plain text, never a broken link. Absent → tokens render verbatim." },
@@ -20,7 +21,7 @@ const doc: UiDoc = {
     { guidance: true, description: 'Pass `onFileClick` when file mentions should be interactive — both backticked and bare paths become clickable right where they are read.' },
     { guidance: true, description: 'Pass `citations` on chat surfaces so a memory-backed reply\'s `[Memory N]` markers become deep-link chips; resolution is by record id from the manifest, so the model can never point a citation at the wrong record.' },
     { guidance: false, description: 'Do not pre-sanitize or hand-filter hrefs — the renderer allowlists safe schemes and neutralizes javascript:/data:/vbscript: to inert text (source is trusted, but worker-authored content can echo malicious links).' },
-    { guidance: false, description: 'Do not render untrusted third-party HTML through Markdown — inline HTML passes through rehype-raw unsanitized; only `<widget>` blocks are sandboxed in iframes.' },
+    { guidance: false, description: 'Raw HTML is not parsed into page elements; use fenced code for formatted code blocks. Widget blocks use the dedicated sandboxed renderer.' },
   ],
   anatomy: ['wrapper div (flow-root when widgets present)', 'MarkdownText (ReactMarkdown with token-driven component overrides)', 'CodeBlock (highlight.js + copy / Run-in-terminal)', 'DiffBlock (+/- line tinting)', 'MermaidBlock', 'InlineArtifactImage (404 → Regenerate placeholder)', 'safe-href link / linkified file buttons', 'sandboxed `<widget>` iframe embeds'],
 }

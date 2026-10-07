@@ -46,7 +46,7 @@ describe('a mode toggle gets pressed — unless its name already says so', () =>
 
   it("PromptDetail's raw/rendered switch stays silent for the same reason", () => {
     const src = read('features/prompts/PromptDetail.tsx')
-    const at = src.indexOf('setRaw((r) => !r)')
+    const at = src.indexOf("setMode(raw ? 'rendered' : 'raw')")
     expect(at).toBeGreaterThan(-1)
     expect(src.slice(at, at + 260)).not.toMatch(/aria-pressed|aria-expanded/)
     expect(src.slice(at, at + 260), 'its LABEL flips too, not just the title').toMatch(/Rendered|Raw/)
@@ -79,12 +79,13 @@ describe('the census ceiling falls', () => {
       const state = setter.replace(/^set/, '')
       const lower = state.charAt(0).toLowerCase() + state.slice(1)
       const named = new RegExp(`(?:label|title)=\\{[^}]*\\b(?:${lower}|${state})\\b[^}]*\\?`)
-      return named.test(el)
+      const childName = new RegExp(`\\{\\s*(?:${lower}|${state})\\s*\\?` )
+      return named.test(el) || childName.test(el)
     }
     const found = walk(SRC).flatMap((abs) => {
       const src = readFileSync(abs, 'utf8')
       return [...src.matchAll(TOGGLE)].map((m) => ({
-        el: elementAround(src, m.index!),
+        el: (() => { const tag = elementAround(src, m.index!); const contentStart = src.lastIndexOf('<', m.index!) + tag.length; const close = src.indexOf('</', contentStart); return close < 0 ? tag : tag + src.slice(contentStart, close) })(),
         setter: (m[0].match(/set\w+/) ?? ['set'])[0],
         where: `${abs.slice(SRC.length + 1)}:${src.slice(0, m.index!).split('\n').length}`,
       }))

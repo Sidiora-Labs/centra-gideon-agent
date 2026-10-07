@@ -6,6 +6,7 @@ const doc: UiDoc = {
   description:
     "The app's primary side navigation — a drag-resizable, width-persisted rail. Collapse is CONTROLLED by the shell (the collapse/expand toggle lives in the main area's top-left ShellCornerLeft, not on the rail); collapsed becomes an icon-only 64px rail. On mobile it can render as a fixed overlay drawer instead of an in-flow column.",
   props: [
+    { name: "onSearch", description: "Opens search when the navigation search action is activated." },
     { name: 'items', description: 'The NavItem list, rendered top→bottom; items flagged pinBottom (e.g. Settings) are pushed to the bottom past a flex spacer.' },
     { name: 'activeId', description: 'The currently-selected item id — drives the shared-layout active pill.' },
     { name: 'onSelect', description: 'Fires with the item id when a nav item is clicked.' },

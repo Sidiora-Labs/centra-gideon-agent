@@ -45,7 +45,7 @@ export function WidgetFrame({ html, title = 'Widget', slug, messageTs, widgetInd
     catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)) }
   }
   const actions = <div className="flex items-center gap-1" role="group" aria-label={`${title} actions`}>
-    <SquareIconButton label={railOpen ? 'Close the iteration rail' : 'Iterate — tweak parameters or mark elements'} icon={SlidersHorizontal} on={railOpen} ariaExpanded={railOpen} onClick={() => setRailOpen(open => !open)} />
+    <SquareIconButton label={railOpen ? 'Close the iteration rail' : 'Iterate — tweak parameters or mark elements'} icon={SlidersHorizontal} ariaExpanded={railOpen} onClick={() => setRailOpen(open => !open)} />
     <SquareIconButton label={artifact.saved ? 'Saved — click to remove' : 'Save as artifact'} children={<Bookmark size={14} fill={artifact.saved ? 'currentColor' : 'none'} />} on={artifact.saved} loading={artifact.savePending} onClick={artifact.toggleSave} />
     <SquareIconButton label={artifact.pinned ? 'Pinned to dashboard' : 'Pin to dashboard'} icon={Pin} on={artifact.pinned} disabled={artifact.pinned} loading={artifact.pinPending} onClick={artifact.pin} />
     <SquareIconButton label="Download as HTML" icon={Download} onClick={() => void exportSource('download')} />

@@ -197,7 +197,7 @@ function ProjectPeekBody({ id, project, onOpen }: { id: string; project: Project
   </div>
 }
 function PeekSection({ label, children }: { label: string; children: React.ReactNode }) {
-  return <section className="grid gap-s"><h3 className="text-[0.75rem] text-on-surface-low" style={fvs(500)}>{label}</h3>{children}</section>
+  return <section className="grid gap-s"><h2 className="text-[0.75rem] text-on-surface-low" style={fvs(500)}>{label}</h2>{children}</section>
 }
 
 export const SHARING_POLICY_LABEL: Record<SharingPolicy, string> = {

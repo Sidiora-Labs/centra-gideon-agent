@@ -193,7 +193,7 @@ describe('the SquareIconButton state family is classified, all eleven of it', ()
       ['features/settings/MultiInstanceCard.tsx', /ariaExpanded=\{editing && props\.length > 0\}/],
       ['shared/ui/widget/WidgetFrame.tsx', /ariaExpanded=\{railOpen\}/],
       ['features/ChatPage.tsx', /ariaExpanded=\{open\}/],
-      ['shared/ui/content/ContentSurface.tsx', /ariaExpanded=\{exportOpen\}/],
+      ['shared/ui/content/ContentSurface.tsx', /ariaExpanded=\{tools\.exportOpen\}/],
     ]
     for (const [rel, re] of pairs) {
       expect(readFileSync(join(SRC, rel), 'utf8'), `${rel} must bind ${re}`).toMatch(re)

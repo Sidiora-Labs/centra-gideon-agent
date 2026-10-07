@@ -6,6 +6,12 @@ const doc: UiDoc = {
   description:
     'The one configurable message composer — used by Chat and the goal composer. A surface sheet wrapping a live-markdown editor (CodeMirror, not a <textarea>) that auto-grows to a user-resizable max, an inline pill cluster ([+] · agent · model · approval · reasoning), and a right-hand action cluster (optimize · mic · send/stop/steer/queue). The `controls` prop is the single seam that picks which pills and "+"-menu items appear; drag-and-drop file attach, focus/drag-over motion, and ↑/↓ history recall come built in.',
   props: [
+    { name: "attachments", description: "Attachment chips with their current upload state." },
+    { name: "auiModelSelector", description: "Configures the assistant UI model selector; false hides it." },
+    { name: "contextUsage", description: "Measured context usage and context window data for the context display." },
+    { name: "draftKey", description: "Scopes local draft persistence to this composer." },
+    { name: "onOpenAttachment", description: "Opens a selected attachment chip." },
+    { name: "onRemoveAttachment", description: "Removes an attachment from the draft." },
     { name: 'value', description: 'The current draft text (controlled).' },
     { name: 'onChange', description: 'Fires with the new draft on every edit.' },
     { name: 'onSend', description: 'Called to send the draft — also invoked as "steer" mid-stream and "queue" when canQueue.' },

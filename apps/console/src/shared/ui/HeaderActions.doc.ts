@@ -7,6 +7,7 @@ const docs: UiDoc[] = [
     description:
       'The one responsive header-controls cluster. Its children degrade together on a single 4-tier ladder (FULL: icon+label → TEXT: label only → ICON: icon only → OVERFLOW: a … menu) as horizontal space shrinks, measured via offscreen probes and a ResizeObserver. In OVERFLOW it keeps the highest-priority controls visible and pushes the rest into an auto-built … menu — no page hand-rolls a header overflow menu.',
     props: [
+    { name: "preferLabeledOverflow", description: "Prefers labeled overflow actions instead of collapsing secondary actions to icons." },
       { name: 'children', description: 'The header controls (HeaderControl / HeaderSegmented / HeaderModePill / Button), rendered left→right in DOM order.' },
       { name: 'className', description: 'Extra classes on the cluster container (tokens only).' },
     ],
@@ -24,6 +25,7 @@ const docs: UiDoc[] = [
     description:
       'A single overflow-aware control inside HeaderActions. It renders itself at whatever tier the cluster picks (icon+label, label-only, icon-only, or a … menu row) and self-registers its priority and menu descriptor.',
     props: [
+    { name: "preserveLabel", description: "Retains the action label and prevents this control from entering overflow." },
       { name: 'icon', description: 'Lucide icon — required to reach the ICON tier.' },
       { name: 'label', description: 'Text label; becomes tooltip + aria-label at the ICON tier.' },
       { name: 'onClick', description: 'Activation handler.' },

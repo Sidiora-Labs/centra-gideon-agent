@@ -7,6 +7,7 @@ const docs: UiDoc[] = [
     description:
       "The app top bar — sparse chrome with a left slot for context (model pill / page title) and a right slot for actions. It pads BOTH ends to clear the floating shell corners (collapse toggle left, control cluster right) so its content lays out only in the space between them and never slides under either. Theme + width controls are NOT here — they live in the shell corners.",
     props: [
+    { name: "contentWidth", description: "Optional content width in pixels used to align the header gutter." },
       { name: 'left', description: 'Left slot for context (model pill / page title / breadcrumb). Flexes and truncates so the actions never crush it.' },
       { name: 'right', description: 'Right slot for actions. Content-sized (shrink-0) so a wide action set keeps its full size.' },
       { name: 'keepCornerPadding', description: 'Keep the right corner padding even when a docked panel is open. Set on pages where a SidePanel docks BELOW this bar (e.g. the loop cockpit) so the actions still clear the floating shell corner instead of sliding under it.' },

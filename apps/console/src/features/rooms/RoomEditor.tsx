@@ -55,7 +55,7 @@ export function RoomEditor({ room, agents, maxMembers, busy = false, onClose, on
         {error && <p className="rooms-error" role="alert">{error}</p>}
         {busy && <p className="rooms-notice">{t('Stop the current turn before changing this room.')}</p>}
         <label className="rooms-field">{t('Room name')}<input ref={nameRef} value={name} maxLength={500} required onChange={event => setName(event.target.value)} placeholder={t('For example, Product studio')} disabled={busy || saving} /></label>
-        <div className="rooms-field-heading"><h3>{t('Members')} <span>{members.length}/{maxMembers}</span></h3><button type="button" className="rooms-button rooms-quiet" onClick={() => setPicker(value => !value)} disabled={busy || saving}><Plus size={15} />{t('Add members')}</button></div>
+        <div className="rooms-field-heading"><h3>{t('Members')} <span>{members.length}/{maxMembers}</span></h3><button type="button" className="rooms-button rooms-quiet" aria-expanded={picker} onClick={() => { if (!busy && !saving) setPicker(value => !value) }} disabled={busy || saving}><Plus size={15} />{t('Add members')}</button></div>
         <p className="rooms-hint">{t('Each agent brings its own expertise. Members respond in the order shown.')}</p>
         {picker && <div className="rooms-picker">
           <input aria-label={t('Find an agent')} placeholder={t('Find an agent')} value={query} onChange={event => setQuery(event.target.value)} />
