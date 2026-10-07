@@ -19,11 +19,14 @@ def _inbox(request, allowed=()):
     ):
         raise CaptureError("Unknown or repeated capture query parameter")
     state = request.app["state"]
+    inbox = request.app["capability_capture_inbox"]
+    if request.method != "GET":
+        inbox.assert_write_scope()
     if _blocks_reads_session(state, request) or (
         request.method != "GET" and _is_restricted_session(state, request)
     ):
         raise CaptureError("This session cannot access personal captures", 403)
-    return request.app["capability_capture_inbox"]
+    return inbox
 
 
 def endpoint(function):

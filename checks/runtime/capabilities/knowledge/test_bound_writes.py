@@ -44,8 +44,10 @@ def bound(tmp_path, monkeypatch):
 
 def test_capture_all_mutations_refuse_drift_and_retry_original(bound, monkeypatch):
     inbox, foreign = bound
-    original = inbox.create("bound-original-text", "An immutable source")
-    voice = inbox.save_audio("bound-original-voice", audio(), "voice.wav", "audio/wav")
+    original = asyncio.run(inbox.create("bound-original-text", "An immutable source"))
+    voice = asyncio.run(
+        inbox.save_audio("bound-original-voice", audio(), "voice.wav", "audio/wav")
+    )
     payload = {
         "request_id": "bound-route-request",
         "revision": 1,
@@ -56,9 +58,11 @@ def test_capture_all_mutations_refuse_drift_and_retry_original(bound, monkeypatc
     before_files = sorted(inbox.files_root.iterdir())
     monkeypatch.setenv("GIDEON_HOME", str(foreign))
     for operation in (
-        lambda: inbox.create("bound-new-text", "No new write"),
-        lambda: inbox.save_audio("bound-new-audio", audio(), "voice.wav", "audio/wav"),
-        lambda: inbox.route(original["id"], payload),
+        lambda: asyncio.run(inbox.create("bound-new-text", "No new write")),
+        lambda: asyncio.run(
+            inbox.save_audio("bound-new-audio", audio(), "voice.wav", "audio/wav")
+        ),
+        lambda: asyncio.run(inbox.route(original["id"], payload)),
         lambda: asyncio.run(inbox.transcribe(voice["id"])),
     ):
         with pytest.raises(CaptureError) as error:
@@ -68,9 +72,14 @@ def test_capture_all_mutations_refuse_drift_and_retry_original(bound, monkeypatc
         assert sorted(inbox.files_root.iterdir()) == before_files
     assert inbox.get(original["id"]) == original
     assert inbox.get(voice["id"]) == voice
-    assert inbox.create("bound-original-text", "An immutable source") == original
     assert (
-        inbox.save_audio("bound-original-voice", audio(), "voice.wav", "audio/wav")
+        asyncio.run(inbox.create("bound-original-text", "An immutable source"))
+        == original
+    )
+    assert (
+        asyncio.run(
+            inbox.save_audio("bound-original-voice", audio(), "voice.wav", "audio/wav")
+        )
         == voice
     )
     assert (
@@ -81,7 +90,7 @@ def test_capture_all_mutations_refuse_drift_and_retry_original(bound, monkeypatc
         is None
     )
     monkeypatch.setenv("GIDEON_HOME", str(inbox.runtime_home))
-    routed = inbox.route(original["id"], payload)
+    routed = asyncio.run(inbox.route(original["id"], payload))
     assert (
         inbox.store.get_item(routed["destination_id"])["content"] == payload["content"]
     )
@@ -90,15 +99,15 @@ def test_capture_all_mutations_refuse_drift_and_retry_original(bound, monkeypatc
         == "transcription_unavailable"
     )
     monkeypatch.setenv("GIDEON_HOME", str(foreign))
-    assert inbox.route(original["id"], payload) == routed
+    assert asyncio.run(inbox.route(original["id"], payload)) == routed
     assert not foreign.exists()
 
 
 def test_typed_completed_replay_and_pending_refusal_keep_provenance(bound, monkeypatch):
     inbox, foreign = bound
     typed = TypedCapture(inbox.store, home=inbox.runtime_home)
-    first = inbox.create("typed-completed-source", "Original one")
-    second = inbox.create("typed-pending-source", "Original two")
+    first = asyncio.run(inbox.create("typed-completed-source", "Original one"))
+    second = asyncio.run(inbox.create("typed-pending-source", "Original two"))
 
     def request(capture):
         fields = {
@@ -144,7 +153,9 @@ def test_late_first_native_write_cannot_adopt_changed_home(bound, monkeypatch):
     provider = KnowledgeCapabilityTools(
         ActionServices(state=state, spawn_background=asyncio.create_task)
     )
-    source = inbox.create("late-native-source", "Original for classification")
+    source = asyncio.run(
+        inbox.create("late-native-source", "Original for classification")
+    )
     token = set_current_session_key("dashboard:bound-native")
     monkeypatch.setenv("GIDEON_HOME", str(foreign))
     try:

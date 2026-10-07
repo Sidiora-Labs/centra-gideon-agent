@@ -187,6 +187,7 @@ class CaptureInbox:
             ) != (text, origin, audio_sha256):
                 raise CaptureError("request_id already belongs to different input", 409)
             return self.get(previous["id"])
+        self.assert_write_scope()
         if text:
             text = await _admit_text(text, "capture_text", _request)
         previous = self.db.execute(
@@ -236,14 +237,31 @@ class CaptureInbox:
             ".flac",
         } or not mime.startswith("audio/"):
             raise CaptureError("Supported audio file required", 415)
-        self.assert_write_scope()
+        from hashlib import sha256
+
         from gideon.workspace.uploads.content_intake import ApprovedFile, approve_stream
 
         if isinstance(data, ApprovedFile):
             data.require_approved()
-            return await self._save_audio(request_id, data, filename, mime)
-        if not data or len(data) > 20 * 1024 * 1024:
+            size, digest = data.size, data.digest
+        else:
+            size = len(data) if data else 0
+            digest = sha256(data).hexdigest() if size else ""
+        if not size or size > 20 * 1024 * 1024:
             raise CaptureError("Audio must contain 1 byte to 20 MiB", 413)
+        previous = self.db.execute(
+            "SELECT id,pending FROM capability_knowledge_captures WHERE request_id=?",
+            (request_id,),
+        ).fetchone()
+        if previous:
+            record = self.get(previous["id"])
+            if record["input_origin"] != "voice" or record["audio_sha256"] != digest:
+                raise CaptureError("request_id already belongs to different input", 409)
+            if previous["pending"] is None and record["audio_item_id"]:
+                return record
+        self.assert_write_scope()
+        if isinstance(data, ApprovedFile):
+            return await self._save_audio(request_id, data, filename, mime)
 
         async def chunks():
             yield data
@@ -439,6 +457,7 @@ class CaptureInbox:
             )
         if current["revision"] != payload["revision"]:
             raise CaptureError("Capture changed; reload before routing", 409)
+        self.assert_write_scope()
         await _admit_text(
             payload["title"] + "\n" + payload["content"], "capture_route", _request
         )
