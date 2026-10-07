@@ -6,14 +6,13 @@ import pytest
 
 from gideon.cognition.context import PromptAssembler
 from gideon.cognition.context_engine import (
-    AssembledContext,
-    DefaultContextEngine,
     assemble_context,
     get_engine,
     set_engine,
 )
 from gideon.cognition.memory import MemoryJournal
 from gideon.extensions.skills import ProcedureLibrary
+from gideon.sdk.context import AssembledContext, ContextEngine, DefaultContextEngine
 
 
 @pytest.fixture
@@ -149,3 +148,18 @@ def test_default_engine_hooks_are_noops():
     assert eng.ingest("k", "user", "x") is None
     assert eng.after_turn("k") is None
     assert eng.owns_compaction is False
+
+
+def test_sdk_context_engine_identity_and_native_assembly(builder):
+    import gideon.cognition.context_engine as canonical
+
+    assert AssembledContext is canonical.AssembledContext
+    assert DefaultContextEngine is canonical.DefaultContextEngine
+    assert ContextEngine is canonical.ContextEngine
+    engine = DefaultContextEngine()
+    assert isinstance(engine, ContextEngine)
+    assembled = engine.assemble(
+        builder, "SDK context request", is_new_session=True, session_key="sdk-context"
+    )
+    assert isinstance(assembled, AssembledContext)
+    assert "SDK context request" in assembled.message

@@ -18,9 +18,10 @@ from gideon.integrations.mcp_core import (
     reset_current_session_key,
     set_current_session_key,
 )
+from gideon.sdk.net import egress_refusal
 from gideon.security.guardrails.ceiling import reset_ceiling
 from gideon.security.net.client import EgressBlocked, fetch
-from gideon.security.net.guard import egress_refusal, evaluate
+from gideon.security.net.guard import evaluate
 from gideon.security.net.policy import (
     LOOPBACK_INTERNAL,
     MCP_SERVER,

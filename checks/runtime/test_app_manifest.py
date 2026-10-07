@@ -9,11 +9,11 @@ from hypothesis import strategies as st
 from gideon.extensions.apps.manifest import (
     AppManifest,
     CliConfig,
-    Dependencies,
     MarketplaceDependencies,
     SetupConfig,
     version_tuple,
 )
+from gideon.sdk.manifest import Dependencies
 
 
 @pytest.mark.parametrize(
