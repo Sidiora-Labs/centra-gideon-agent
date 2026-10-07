@@ -30,7 +30,7 @@ from gideon.sdk.channel import owner_id_for
 if TYPE_CHECKING:
     from slack_desk_runtime.settings import SlackDeskSettings
 
-    from gideon.sdk.channel import AppConfig
+    from gideon.sdk.channel import AppConfig, ChannelMessage, TrustVerdict
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,10 @@ class RuntimeServices(Protocol):
 
     @property
     def owner_id(self) -> str: ...
+
+    async def deliver_channel_inbound(
+        self, provider: str, msg: ChannelMessage, *, is_dm: bool = True
+    ) -> TrustVerdict: ...
 
 
 class SlackDeskRuntime:

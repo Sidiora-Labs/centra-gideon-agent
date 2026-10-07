@@ -42,6 +42,7 @@ from gideon.integrations.llm.catalog import (
     openai_compatible_list_models,
 )
 from gideon.integrations.llm.credentials import Credential  # noqa: F401
+from gideon.integrations.llm.events import ContextUsage
 from gideon.integrations.llm.openai import OpenAIProvider  # noqa: F401
 from gideon.integrations.llm.prompt_cache import PromptCache  # noqa: F401
 from gideon.integrations.llm.prompt_cache import (
@@ -56,6 +57,7 @@ from gideon.integrations.llm.registry import (
     ProviderEntry,
     ProviderResolutionError,
     get_default_registry,
+    served_on_this_machine,
 )
 from gideon.integrations.llm.stream_tags import make_think_splitter  # noqa: F401
 from gideon.integrations.llm.stream_tags import KIND_OUTSIDE
@@ -73,6 +75,8 @@ from gideon.sdk.provider_helpers import register_branded_app  # noqa: F401
 from gideon.security.guardrails.failure import AnswerCutOff, FirstTokenTimeout
 
 __all__ = [
+    "ContextUsage",
+    "served_on_this_machine",
     "ModelProvider",
     "FirstTokenTimeout",
     "AnswerCutOff",

@@ -303,7 +303,7 @@ def migrate_from_core() -> None:
     moved_count = 0
     decision_made = False
     try:
-        from gideon.core.config.transactions import mutate_config
+        from gideon.sdk.settings import mutate_channel_config
 
         def migrate(document: dict) -> str:
             nonlocal decision_made, leftover, moved_count
@@ -331,7 +331,7 @@ def migrate_from_core() -> None:
                 document.pop("slack", None)
             return "migrated"
 
-        outcome = mutate_config(migrate, path=cpath)
+        outcome = mutate_channel_config(migrate, path=cpath)
     except Exception:
         # LOUD: the app store may already hold the lifted keys, but the legacy
         # copies are still sitting in core config.json. The absent done-marker

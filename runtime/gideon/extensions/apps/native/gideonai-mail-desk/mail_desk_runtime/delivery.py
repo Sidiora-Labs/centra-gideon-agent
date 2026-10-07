@@ -42,13 +42,13 @@ from mail_desk_runtime.mime import build_outbound, build_references, reply_subje
 from mail_desk_runtime.smtp_client import SmtpError, SmtpSender
 
 from gideon.sdk.channel import (
+    Principal,
     atomic_write,
     is_tracked_channel,
     redact_credentials,
     redact_exfiltration_urls,
 )
 from gideon.sdk.util import app_data_dir
-from gideon.security.approval_answer import Principal
 
 logger = logging.getLogger(__name__)
 
@@ -238,7 +238,7 @@ class _PendingApproval:
         self.on_answer: Callable[[str, Principal], bool] | None = None
         self.delivery: MailDeskDelivery | None = None
         self.minimum_uid = self.uidvalidity = 0
-        from gideon.integrations.channel_delivery import (
+        from gideon.sdk.channel import (
             ONE_CALL_ANSWERS,
             ApprovalAnswer,
         )
@@ -292,10 +292,12 @@ class MailDeskDelivery:
         self._received_account = self._account_identity(settings)
 
     def approval_identity(self, channel: str, *, thread: str = "") -> dict | None:
-        from gideon.core.config.credentials import owner_id_for
-        from gideon.integrations.channel_delivery import raw_delivery_for
-        from gideon.integrations.channel_transports import get_transport
-        from gideon.integrations.channel_trust import is_allowed_sender
+        from gideon.sdk.channel import (
+            get_transport,
+            is_allowed_sender,
+            owner_id_for,
+            raw_delivery_for,
+        )
 
         owner = owner_id_for("mail-desk").strip().lower()
         if (
@@ -658,11 +660,11 @@ class MailDeskDelivery:
         transport resolves this future when an inbound message from an ALLOWED sender
         contains ``APPROVE <token>`` or ``DENY <token>`` (:meth:`resolve_reply_token`).
         ``on_prompted(pending)`` lets core race a dashboard prompt against this one."""
-        from gideon.integrations.channel_delivery import (
+        from gideon.sdk.channel import (
             ONE_CALL_ANSWERS,
+            approval_brief_for,
             offered_answers,
         )
-        from gideon.security.approval_brief import approval_brief_for
 
         identity = self.approval_identity("")
         if identity is None:
@@ -727,7 +729,7 @@ class MailDeskDelivery:
         pending.message_id, pending.thread = sent, thread_ts or sent
         self._pending[token] = pending
         shared = bool(on_prompted and on_prompted(pending))
-        from gideon.security.approval_grants import approval_window_secs
+        from gideon.sdk.channel import approval_window_secs
 
         outcome = "cancelled"
         cancelled = False
@@ -805,7 +807,7 @@ class MailDeskDelivery:
         )
         if chosen is None:
             return False
-        from gideon.security.approval_answer import on_channel
+        from gideon.sdk.channel import on_channel
 
         by = on_channel("mail-desk", sender, pending.tenant)
         if callable(pending.on_answer):

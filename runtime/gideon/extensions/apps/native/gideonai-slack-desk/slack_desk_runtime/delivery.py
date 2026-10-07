@@ -12,7 +12,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
-from gideon.integrations.channel_transports.base import ChannelTransportProvider
+from gideon.sdk.channel import ChannelTransportProvider
 
 if TYPE_CHECKING:
     from .runtime import SlackDeskRuntime
@@ -56,10 +56,12 @@ class SlackDeskDelivery:
     def approval_identity(self, channel: str) -> dict | None:
         from slack_desk_runtime import enterprise
 
-        from gideon.core.config.credentials import owner_id_for
-        from gideon.integrations.channel_delivery import raw_delivery_for
-        from gideon.integrations.channel_transports import get_transport
-        from gideon.integrations.channel_trust import is_allowed_sender
+        from gideon.sdk.channel import (
+            get_transport,
+            is_allowed_sender,
+            owner_id_for,
+            raw_delivery_for,
+        )
 
         owner = owner_id_for("slack")
         team = enterprise._validated_team_id
@@ -374,11 +376,11 @@ class SlackDeskDelivery:
             _PendingApproval,
         )
 
-        from gideon.integrations.channel_delivery import (
+        from gideon.sdk.channel import (
             ONE_CALL_ANSWERS,
+            approval_brief_for,
             offered_answers,
         )
-        from gideon.security.approval_brief import approval_brief_for
 
         identity = self.approval_identity("")
         if identity is None:

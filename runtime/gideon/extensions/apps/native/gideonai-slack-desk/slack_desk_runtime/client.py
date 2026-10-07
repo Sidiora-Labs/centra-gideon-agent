@@ -203,7 +203,10 @@ class RealSlackDeskClient(SlackDeskClientOps):
     async def auth_test(self) -> dict[str, Any]:
         """Verify the bot token (Slack ``auth.test``); returns the raw payload."""
         resp = await self._web.auth_test()
-        return dict(resp.data) if hasattr(resp, "data") else dict(resp)
+        payload = resp.data
+        if not isinstance(payload, dict):
+            raise ValueError("Slack auth.test returned a non-object payload")
+        return dict(payload)
 
     async def post_message(
         self,

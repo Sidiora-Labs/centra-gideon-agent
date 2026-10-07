@@ -41,12 +41,13 @@ from discord_desk.api import (
 )
 
 from gideon.sdk.channel import (
+    Principal,
     is_allowed_sender,
     is_tracked_channel,
+    on_channel,
     redact_credentials,
     redact_exfiltration_urls,
 )
-from gideon.security.approval_answer import Principal, on_channel
 
 logger = logging.getLogger(__name__)
 
@@ -134,10 +135,11 @@ class _PendingApproval:
     )
 
     def __init__(self, request_id: str, channel_id: str, message_id: str) -> None:
-        from gideon.integrations.channel_delivery import (
+        from gideon.sdk.channel import (
             ONE_CALL_ANSWERS,
             ApprovalAnswer,
         )
+
         self.future: asyncio.Future = asyncio.get_event_loop().create_future()
         self.channel_id = channel_id
         self.message_id = message_id
@@ -253,9 +255,7 @@ class DiscordDeskDelivery:
         self._now = _monotonic
 
     def approval_identity(self, channel: str) -> dict | None:
-        from gideon.core.config.credentials import owner_id_for
-        from gideon.integrations.channel_delivery import raw_delivery_for
-        from gideon.integrations.channel_transports import get_transport
+        from gideon.sdk.channel import get_transport, owner_id_for, raw_delivery_for
 
         owner = owner_id_for("discord")
         application = str(getattr(self._transport, "_own_application_id", "") or "")
@@ -607,11 +607,11 @@ class DiscordDeskDelivery:
         the gateway falls back to the dashboard. ``on_prompted(pending)`` lets core
         race a dashboard prompt against this one — a dashboard click resolves the
         same future."""
-        from gideon.integrations.channel_delivery import (
+        from gideon.sdk.channel import (
             ONE_CALL_ANSWERS,
+            approval_brief_for,
             offered_answers,
         )
-        from gideon.security.approval_brief import approval_brief_for
 
         identity = self.approval_identity("")
         if identity is None:
@@ -682,7 +682,7 @@ class DiscordDeskDelivery:
             except Exception:
                 logger.debug("discord: on_prompted hook failed", exc_info=True)
 
-        from gideon.security.approval_grants import approval_window_secs
+        from gideon.sdk.channel import approval_window_secs
 
         outcome = "cancelled"
         cancelled = False
@@ -756,7 +756,8 @@ def _approval_components(
     request_id: str, answers: tuple | None = None
 ) -> list[dict[str, Any]]:
     """Render exactly the answer capability offered by the native approval owner."""
-    from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
+    from gideon.sdk.channel import ONE_CALL_ANSWERS
+
     return [
         {
             "type": COMPONENT_ACTION_ROW,

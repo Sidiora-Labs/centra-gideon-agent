@@ -13,8 +13,6 @@ from typing import Any
 
 import httpx
 
-from gideon.core.turn_streams import closing_stream
-from gideon.integrations.llm.events import ContextUsage
 from gideon.sdk.embedding import EmbeddingProvider
 from gideon.sdk.local_model import LocalModel, LocalModelProvider
 from gideon.sdk.model import (
@@ -25,6 +23,7 @@ from gideon.sdk.model import (
     LOCAL_SERVED_CONTEXT_WINDOW,
     Capability,
     ConnectionResult,
+    ContextUsage,
     FirstTokenTimeout,
     LLMEvent,
     ModelCatalog,
@@ -34,6 +33,7 @@ from gideon.sdk.model import (
     ProviderEntry,
     ProviderResolutionError,
     StructuredOutput,
+    closing_stream,
     declared_context_window,
     get_default_registry,
     infer_capabilities,
@@ -302,7 +302,7 @@ class OllamaProvider(ModelProvider, EmbeddingProvider, LocalModelProvider):
                 model=name,
                 options={"endpoint": self.endpoint},
             )
-            from gideon.integrations.llm.registry import served_on_this_machine
+            from gideon.sdk.model import served_on_this_machine
 
             return LocalModel(
                 name=name,

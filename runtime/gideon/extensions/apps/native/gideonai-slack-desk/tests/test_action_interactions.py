@@ -5,7 +5,6 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from slack_desk_runtime.interactions import (
     _extract_selected_value,
     _mark_button_clicked,
@@ -18,7 +17,7 @@ from slack_desk_runtime.interactions import (
 
 class TestMarkButtonClicked:
     def test_replaces_clicked_button_with_check(self) -> None:
-        blocks = [
+        blocks: list[dict[str, object]] = [
             {"type": "section", "text": {"type": "mrkdwn", "text": "Pick one"}},
             {
                 "type": "actions",
@@ -157,7 +156,9 @@ async def test_action_button_happy_path(orch_fixture: MagicMock) -> None:
         value=f"action::{payload_json}", action_id="btn_deploy"
     )
 
-    with patch.object(interactions, "handle_message", new_callable=AsyncMock) as mock_hm:
+    with patch.object(
+        interactions, "handle_message", new_callable=AsyncMock
+    ) as mock_hm:
         await interactions._handle_options(payload, action, channel, msg_ts)
         # Let the created task run
         await asyncio.sleep(0)
@@ -185,7 +186,9 @@ async def test_extended_element_happy_path(orch_fixture: MagicMock) -> None:
     action["selected_date"] = "2026-04-10"
     action["placeholder"] = {"text": "Pick date"}
 
-    with patch.object(interactions, "handle_message", new_callable=AsyncMock) as mock_hm:
+    with patch.object(
+        interactions, "handle_message", new_callable=AsyncMock
+    ) as mock_hm:
         await interactions._handle_options(payload, action, channel, msg_ts)
         await asyncio.sleep(0)
         for t in list(orch._handler_tasks):
@@ -209,7 +212,9 @@ async def test_malformed_json_in_action_id_no_crash(orch_fixture: MagicMock) -> 
     )
     action["selected_date"] = "2026-04-10"
 
-    with patch.object(interactions, "handle_message", new_callable=AsyncMock) as mock_hm:
+    with patch.object(
+        interactions, "handle_message", new_callable=AsyncMock
+    ) as mock_hm:
         # Should not raise
         await interactions._handle_options(payload, action, channel, msg_ts)
         mock_hm.assert_not_called()
@@ -225,7 +230,9 @@ async def test_non_dict_json_in_action_id_no_crash(orch_fixture: MagicMock) -> N
     )
     action["selected_date"] = "2026-04-10"
 
-    with patch.object(interactions, "handle_message", new_callable=AsyncMock) as mock_hm:
+    with patch.object(
+        interactions, "handle_message", new_callable=AsyncMock
+    ) as mock_hm:
         await interactions._handle_options(payload, action, channel, msg_ts)
         mock_hm.assert_not_called()
 
@@ -242,14 +249,18 @@ async def test_post_message_failure_aborts(orch_fixture: MagicMock) -> None:
         value='action::{"k":"v"}', action_id="btn_x"
     )
 
-    with patch.object(interactions, "handle_message", new_callable=AsyncMock) as mock_hm:
+    with patch.object(
+        interactions, "handle_message", new_callable=AsyncMock
+    ) as mock_hm:
         await interactions._handle_options(payload, action, channel, msg_ts)
         await asyncio.sleep(0)
         mock_hm.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_standard_options_post_message_failure_aborts(orch_fixture: MagicMock) -> None:
+async def test_standard_options_post_message_failure_aborts(
+    orch_fixture: MagicMock,
+) -> None:
     """If update_message AND fallback post_blocks both fail, handle_message is never called."""
     from slack_desk_runtime import interactions
 
@@ -261,7 +272,9 @@ async def test_standard_options_post_message_failure_aborts(orch_fixture: MagicM
         value="some choice", action_id="opt_0"
     )
 
-    with patch.object(interactions, "handle_message", new_callable=AsyncMock) as mock_hm:
+    with patch.object(
+        interactions, "handle_message", new_callable=AsyncMock
+    ) as mock_hm:
         await interactions._handle_options(payload, action, channel, msg_ts)
         mock_hm.assert_not_called()
 
@@ -280,7 +293,9 @@ async def test_redaction_applied_to_payload(orch_fixture: MagicMock) -> None:
         value=f"action::{evil_url}", action_id="btn_evil"
     )
 
-    with patch.object(interactions, "handle_message", new_callable=AsyncMock) as mock_hm:
+    with patch.object(
+        interactions, "handle_message", new_callable=AsyncMock
+    ) as mock_hm:
         await interactions._handle_options(payload, action, channel, msg_ts)
         await asyncio.sleep(0)
         for t in list(orch._handler_tasks):
@@ -417,7 +432,9 @@ async def test_slack_desk_kill_now_posts_to_thread_not_session_key(
 
 
 @pytest.mark.asyncio
-async def test_slack_desk_kill_now_rejects_unauthorized(orch_fixture: MagicMock) -> None:
+async def test_slack_desk_kill_now_rejects_unauthorized(
+    orch_fixture: MagicMock,
+) -> None:
     """stop_kill_now enforces is_allowed_user() — deny-by-default."""
     from slack_desk_runtime import interactions
 
@@ -517,7 +534,9 @@ async def test_handle_stop_confirm_uses_stop_turn(orch_fixture: MagicMock) -> No
 
 
 @pytest.mark.asyncio
-async def test_handle_stop_confirm_rejects_unauthorized(orch_fixture: MagicMock) -> None:
+async def test_handle_stop_confirm_rejects_unauthorized(
+    orch_fixture: MagicMock,
+) -> None:
     """_handle_stop_confirm enforces is_allowed_user() — deny-by-default.
 
     stop_turn() can escalate to a hard kill, so the handler must re-check

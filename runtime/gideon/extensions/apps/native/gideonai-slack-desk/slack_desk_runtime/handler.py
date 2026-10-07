@@ -47,8 +47,8 @@ from gideon.sdk.channel import (
     AcpProcessDied,
     AcpTimeoutError,
     AppConfig,
+    ChannelMessage,
     ConversationLog,
-    GatewayServices,
     HistoryConsolidator,
     LLMEvent,
     ModelProvider,
@@ -56,6 +56,7 @@ from gideon.sdk.channel import (
 from gideon.sdk.channel import PromptAssembler as ContextBuilder
 from gideon.sdk.channel import (
     TriggerStore,
+    TrustVerdict,
     config_dir,
     config_path,
     delete_all_automations,
@@ -76,10 +77,6 @@ from gideon.sdk.channel import (
 if TYPE_CHECKING:
     from .delivery import SlackDeskDelivery
 
-from gideon.integrations.channel_delivery import ApprovalAnswer
-from gideon.security.approval_answer import Principal
-
-
 from slack_desk_runtime.blocks import deprecation_warning_block
 from slack_desk_runtime.client import SlackDeskClientOps
 from slack_desk_runtime.format import (
@@ -90,8 +87,9 @@ from slack_desk_runtime.format import (
     to_slack_desk_mrkdwn,
 )
 
+from gideon.sdk.channel import ApprovalAnswer
 from gideon.sdk.channel import DelegationSupervisor as SubagentManager
-from gideon.sdk.channel import Stats, Task
+from gideon.sdk.channel import Principal, Stats, Task
 from gideon.sdk.channel import voice_reply as _voice_reply_fn
 
 
@@ -557,7 +555,15 @@ _orch_cfg: AppConfig | None = None
 
 # Dashboard state reference for pushing refresh events (set by gateway).
 _dashboard_state: object | None = None
-_gateway_services: GatewayServices | None = None
+
+
+class IngressServices(Protocol):
+    async def deliver_channel_inbound(
+        self, provider: str, msg: ChannelMessage, *, is_dm: bool = True
+    ) -> TrustVerdict: ...
+
+
+_gateway_services: IngressServices | None = None
 
 
 _cached_default_agent: str | None = None  # None = not yet loaded from disk
@@ -791,12 +797,12 @@ def _set_default_agent(name: str) -> None:
     if is_sensitive_path(str(path)):
         raise ValueError(f"Refusing to write to sensitive path: {path}")
     try:
-        from gideon.core.config.transactions import mutate_config
+        from gideon.sdk.settings import mutate_channel_config
 
         def set_default_agent(data: dict) -> None:
             data["default_agent"] = name
 
-        mutate_config(set_default_agent, path=path)
+        mutate_channel_config(set_default_agent, path=path)
     except Exception as e:
         raise ValueError(f"Failed to write config: {e}") from e
     _cached_default_agent = name
@@ -839,13 +845,16 @@ class _PendingApproval:
     )
 
     def __init__(
-        self, provider: ModelProvider, request_id: str | int, session_key: str = ""
+        self,
+        provider: ModelProvider | None,
+        request_id: str | int,
+        session_key: str = "",
     ) -> None:
         self.provider = provider
         self.request_id = request_id
         self.session_key = session_key
         self.future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
-        from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
+        from gideon.sdk.channel import ONE_CALL_ANSWERS
 
         self.answers: tuple[ApprovalAnswer, ...] = ONE_CALL_ANSWERS
         self.delivery: "SlackDeskDelivery | None" = None
@@ -969,7 +978,7 @@ def _track_linked_channel(channel_id: str) -> None:
         logger.warning("Failed to track linked channel in channel_trust", exc_info=True)
 
 
-def set_gateway_services(services: GatewayServices) -> None:
+def set_gateway_services(services: IngressServices) -> None:
     """Store the GatewayServices handle (called by events.py at socket init).
 
     The linked-thread intercept routes through the platform's guarded inbound
@@ -3210,7 +3219,7 @@ async def _request_approval(
 
     key = f"{channel}:{approval_ts}"
     pending = _PendingApproval(provider, event.request_id, session_key)
-    from gideon.integrations.channel_delivery import raw_delivery_for
+    from gideon.sdk.channel import raw_delivery_for
 
     from .delivery import SlackDeskDelivery
 
@@ -3263,8 +3272,7 @@ async def handle_interaction(
     """Answer only the live offer in its authenticated workspace and destination."""
     from slack_desk_runtime.enterprise import check_message_origin
 
-    from gideon.integrations.channel_delivery import raw_delivery_for
-    from gideon.security.approval_answer import on_channel
+    from gideon.sdk.channel import on_channel, raw_delivery_for
 
     pending = _pending_approvals.get(f"{channel}:{msg_ts}")
     if pending is None or pending.future.done() or not check_message_origin(team_id):
@@ -3383,7 +3391,7 @@ def _build_approval_blocks(
     Standing permission appears only when the native approval owner offers it.
     A private channel alone does not authorize a standing grant.
     """
-    from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
+    from gideon.sdk.channel import ONE_CALL_ANSWERS
 
     answers = answers or ONE_CALL_ANSWERS
     action_ids = {

@@ -77,7 +77,13 @@ from gideon.integrations.acp.types import (
     STOP_REASON_STOPPED_BY_USER,
     is_cancelled_stop,
 )
-from gideon.integrations.channel_delivery import ChannelDelivery
+from gideon.integrations.channel_delivery import (
+    ONE_CALL_ANSWERS,
+    ApprovalAnswer,
+    ChannelDelivery,
+    offered_answers,
+    raw_delivery_for,
+)
 from gideon.integrations.channel_transports import (
     get_transport,
     register_transport,
@@ -152,7 +158,9 @@ from gideon.interfaces.dashboard.token_auth import (
 )
 from gideon.operations.stats import Stats
 from gideon.security import trust_mode
-from gideon.security.approval_brief import channel_approval_brief
+from gideon.security.approval_answer import Principal, on_channel
+from gideon.security.approval_brief import approval_brief_for, channel_approval_brief
+from gideon.security.approval_grants import approval_window_secs
 
 # ── Security + audit ──
 from gideon.security.security import (
@@ -166,6 +174,14 @@ from gideon.security.security import (
 from gideon.security.sel import sel
 
 __all__ = [
+    "ApprovalAnswer",
+    "ONE_CALL_ANSWERS",
+    "offered_answers",
+    "raw_delivery_for",
+    "Principal",
+    "on_channel",
+    "approval_brief_for",
+    "approval_window_secs",
     "AcpError",
     "AcpProcessDied",
     "AcpTimeoutError",
