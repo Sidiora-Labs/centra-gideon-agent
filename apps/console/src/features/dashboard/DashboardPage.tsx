@@ -175,9 +175,9 @@ export function DashboardPage(route: RouteProps) {
 
 export function GideonHomeIntro({ navigate }: Pick<RouteProps, 'navigate'>) {
   return <div className="mx-auto flex w-full flex-col items-center gap-s py-l text-center" style={{ maxWidth: '44rem' }}>
-    <p className="text-xs uppercase tracking-[.16em] text-on-surface-low">Your space</p>
-    <h2 className="text-3xl font-medium tracking-tight text-on-surface">What would you like to do?</h2>
-    <p className="text-sm text-on-surface-low">Start a conversation, or pick up your work.</p>
+    <p data-type="caption" className="uppercase tracking-[.16em] text-on-surface-low">Your space</p>
+    <h2 data-type="headline-l" className="font-medium tracking-tight text-on-surface">What would you like to do?</h2>
+    <p data-type="body-s" className="text-on-surface-low">Start a conversation, or pick up your work.</p>
     <div className="mt-m flex flex-col items-stretch gap-s sm:flex-row sm:items-center sm:justify-center">
       <button type="button" onClick={() => navigate('chat/new')} className="whitespace-nowrap rounded-lg bg-primary px-m py-s text-on-primary">New conversation</button>
       <button type="button" onClick={() => navigate('apps')} className="whitespace-nowrap rounded-lg border border-outline-variant px-m py-s text-on-surface">Explore apps</button>
@@ -198,7 +198,7 @@ export function OverviewDisclosure({ children }: { children: ReactNode }) {
   return <details open={open} onToggle={(event) => toggle(event.currentTarget.open)}
     className="rounded-xl border border-outline-variant/50 bg-surface-low/40 p-l">
     <summary className="cursor-pointer text-on-surface" data-type="title-m">Your overview
-      <span className="ml-s text-sm text-on-surface-low">Tasks, discoveries, activity, and your saved layout</span>
+      <span data-type="body-s" className="ml-s text-on-surface-low">Tasks, discoveries, activity, and your saved layout</span>
     </summary>
     {open && <div className="mt-l flex flex-col gap-2xl">{children}</div>}
   </details>

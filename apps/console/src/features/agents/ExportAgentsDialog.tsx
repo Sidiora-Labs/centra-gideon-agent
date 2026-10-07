@@ -76,7 +76,7 @@ export function ExportAgentsDialog({ agents, defaultAgent, initialNames, onClose
         Destination directory
         <span className="flex items-center gap-s rounded-lg border border-outline-variant/40 bg-surface-container px-m focus-within:border-primary">
           <FolderOpen size={16} className="shrink-0 text-on-surface-low" />
-          <input aria-label="Destination directory" value={destination} onChange={event => { setDestination(event.target.value); setPreview(null); setError('') }} placeholder="Default: ~/.claude/agents" className="min-w-0 flex-1 bg-transparent py-s font-mono text-sm text-on-surface outline-none placeholder:text-on-surface-low" />
+          <input data-type="body-s" aria-label="Destination directory" value={destination} onChange={event => { setDestination(event.target.value); setPreview(null); setError('') }} placeholder="Default: ~/.claude/agents" className="min-w-0 flex-1 bg-transparent py-s font-mono text-on-surface outline-none placeholder:text-on-surface-low" />
         </span>
         <span data-type="caption" className="text-on-surface-low">Writes are limited to your home directory. Existing files are never replaced.</span>
       </label>

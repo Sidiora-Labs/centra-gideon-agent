@@ -114,7 +114,7 @@ function ResearchCoverage({ loop }: { loop: GoalLoop }) {
     {error && <p role="alert" data-type="caption" className="text-danger">{error}</p>}
     {sources && sources.length > 0 && <details className="mt-s">
       <summary data-type="caption" className="cursor-pointer text-primary">View fetched pages</summary>
-      <ul className="mt-s grid gap-xs text-sm">{sources.map((source) =>
+      <ul data-type="body-s" className="mt-s grid gap-xs">{sources.map((source) =>
         <li key={source.url} className="min-w-0 truncate"><a href={source.url} target="_blank" rel="noreferrer" className="text-primary underline" title={source.url}>{source.url}</a></li>)}</ul>
     </details>}
   </section>;

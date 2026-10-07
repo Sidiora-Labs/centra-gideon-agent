@@ -110,7 +110,7 @@ function OwnerRow({ channel }: { channel: ChannelRuntime }) {
       {code ? (
         <div className="mt-3 rounded-md border border-outline-variant p-3">
           <p data-type="body-s" className="text-on-surface">Send this code from your direct message with {labelFor(channel)}:</p>
-          <code className="mt-2 block select-all text-lg font-semibold tracking-widest text-on-surface">{code}</code>
+          <code data-type="headline-s" className="mt-2 block select-all font-semibold tracking-widest text-on-surface">{code}</code>
           <p data-type="caption" className="mt-2 text-on-surface-low">It is shown once and expires in ten minutes.</p>
         </div>
       ) : null}

@@ -154,7 +154,7 @@ export function PromptDetail({ prompt, onSaved, onDeleted, editing: editingProp,
         </div>
         {err && <FieldError>{err}</FieldError>}
         <StaleWriteNotice guard={stale} what="This prompt" />
-        {baseMissing && <div role="alert" className="flex items-center gap-2 text-xs text-warning"><span>This saved draft has no matching revision.</span><Button size="sm" variant="secondary" onClick={() => void rebaseMissing()}>Refresh and rebase draft</Button></div>}
+        {baseMissing && <div data-type="caption" role="alert" className="flex items-center gap-2 text-warning"><span>This saved draft has no matching revision.</span><Button size="sm" variant="secondary" onClick={() => void rebaseMissing()}>Refresh and rebase draft</Button></div>}
         <HeldChange guard={stale}><PromptEditFields draft={draft} onChange={setDraft} Section={Section} /></HeldChange>
         <FormFooter>
           <Button variant="ghost" size="sm" onClick={discardDraft} loading={saving} disabled={saving}><X size={15} /> Cancel</Button>

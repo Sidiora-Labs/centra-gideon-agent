@@ -513,7 +513,7 @@ function StageCard({ index, count, stage, onPatch, onRemove, onMove }: {
 }
                   <TextInput ariaLabel="Task details" size="sm" value={t.description ?? ''} onChange={nextValue => patchTask(ti, { description: nextValue })}
                     placeholder="how / details (optional)…"
-                    className="min-w-0 flex-1 bg-transparent text-on-surface-low outline-none placeholder:text-on-surface-low/60 focus:ring-2 focus:ring-inset focus:ring-primary bg-transparent! border-0! text-xs!" />
+                    className="min-w-0 flex-1 bg-transparent text-on-surface-low outline-none placeholder:text-on-surface-low/60 focus:ring-2 focus:ring-inset focus:ring-primary bg-transparent! border-0!" />
                 </div>
                 <IconButton icon={X} iconSize={12} size={24} label="Remove task" onClick={() => removeTask(ti)} className="mt-1 shrink-0 text-on-surface-low hover:text-danger" />
               </div>

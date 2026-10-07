@@ -26,7 +26,7 @@ export function HypermidPanel() {
           aria-selected={view === id}
           tabIndex={view === id ? 0 : -1}
           onClick={() => setView(id)}
-          className="min-h-11 rounded-pill px-m text-sm text-on-surface-low aria-selected:bg-surface-highest aria-selected:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          className="min-h-11 rounded-pill px-m text-on-surface-low aria-selected:bg-surface-highest aria-selected:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
         {label}
       </Button>)}
     </div>

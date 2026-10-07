@@ -480,7 +480,7 @@ export function GroupBlock({ g, onOpen, onToggleServer, onRemoveServer, onAllowS
 }
       {g.kind === 'mcp' && g.server?.url?.startsWith('https://') && (g.server.oauth?.length ?? 0) > 0 && <McpOAuthControls server={g.server} />}
       {g.kind === 'mcp' && g.server?.error && <p data-type="body-s" className="mb-s text-on-surface-low">{g.server.error}</p>}
-      {g.kind === 'mcp' && g.server?.detail && <details className="mb-s"><summary data-type="caption">Details</summary><pre className="whitespace-pre-wrap break-words text-xs">{g.server.detail}</pre></details>}
+      {g.kind === 'mcp' && g.server?.detail && <details className="mb-s"><summary data-type="caption">Details</summary><pre data-type="caption" className="whitespace-pre-wrap break-words">{g.server.detail}</pre></details>}
       {g.kind === 'mcp' && g.tools.length === 0 ? (
         <div data-type="body-s" className="rounded-lg bg-surface-container px-m py-3 text-on-surface-low flex items-center gap-s">
           <Plug size={14} />

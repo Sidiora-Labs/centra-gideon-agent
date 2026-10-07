@@ -394,7 +394,7 @@ export function FilesSection({ sub, navigate, query: routeQuery, setQuery }: Rou
                         gitStatuses={statuses} onOpenFile={fileTabs.open} artifactPaths={artifactPaths}
                         onRename={onRename} onDelete={onDelete} onUpload={(entry, files) => onUpload(entry.path, files)} onCreate={createInside} />
                     : rootsLoading ? <Loading what="the file" />
-                    : <div role={rootsError ? 'alert' : undefined} className="px-m py-s text-on-surface-low text-sm">
+                    : <div data-type="body-s" role={rootsError ? 'alert' : undefined} className="px-m py-s text-on-surface-low">
                         {rootsError ? `Could not load file locations: ${rootsError}` : 'No workspace folder is available. Open a project with a valid folder, then return to Files.'}
                       </div>}
               </div>

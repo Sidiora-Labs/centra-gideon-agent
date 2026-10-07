@@ -247,7 +247,7 @@ export function SettingsNavigation({ items, current, go }: {
       : group.ids.includes(item.id)),
   })).filter((group) => group.items.length > 0)
   return <>
-    <label className="flex flex-col gap-xs border-b border-outline-variant p-m text-sm text-on-surface-low md:hidden">
+    <label data-type="label-s" className="flex flex-col gap-xs border-b border-outline-variant p-m text-on-surface-low md:hidden">
       Settings section
       <select aria-label="Settings section" value={current} onChange={(event) => go(event.target.value)}
         className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-on-surface">
@@ -259,8 +259,8 @@ export function SettingsNavigation({ items, current, go }: {
     <nav aria-label="Settings sections" className="hidden w-60 shrink-0 overflow-y-auto border-r border-outline-variant px-s py-l md:block">
       {grouped.map((group) => <section key={group.title} className="mb-l">
         <h2 className="px-s pb-xs text-[11px] uppercase tracking-widest text-on-surface-low">{group.title}</h2>
-        {group.items.map((item) => <button key={item.id} type="button" aria-current={current === item.id ? 'page' : undefined}
-          onClick={() => go(item.id)} className="block w-full rounded-lg px-s py-xs text-left text-sm text-on-surface hover:bg-surface-high aria-[current=page]:bg-surface-high">
+        {group.items.map((item) => <button data-type="label-s" key={item.id} type="button" aria-current={current === item.id ? 'page' : undefined}
+          onClick={() => go(item.id)} className="block w-full rounded-lg px-s py-xs text-left text-on-surface hover:bg-surface-high aria-[current=page]:bg-surface-high">
           {item.label}
         </button>)}
       </section>)}

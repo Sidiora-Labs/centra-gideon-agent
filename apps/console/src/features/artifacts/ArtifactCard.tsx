@@ -84,7 +84,7 @@ function LivePreview({ art, content, mode }: { art: Artifact; content: string; m
     })
     return () => { current = false }
   }, [art.kind, content, mode])
-  if (error) return <div role="alert" className="grid h-full w-full place-items-center p-3 text-center text-xs text-danger">Preview could not be rendered: {error}</div>
+  if (error) return <div data-type="caption" role="alert" className="grid h-full w-full place-items-center p-3 text-center text-danger">Preview could not be rendered: {error}</div>
   return (
     <div className="pointer-events-none h-full w-full overflow-hidden" aria-hidden>
       {srcdoc && <iframe
