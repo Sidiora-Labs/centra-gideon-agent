@@ -1,3 +1,4 @@
+import { Checkbox } from '../../shared/ui/forms'
 import { useEffect, useState } from 'react'
 import { RefreshCw, ShieldCheck, Undo2 } from 'lucide-react'
 import { api, ApiError, type HypermidAuthorityPlanWire, type HypermidAuthorityStatusWire } from '../../shared/data/api'
@@ -83,7 +84,7 @@ export function AuthorityControl({ onStatus, onCommitted }: {
       <ol className="mt-m grid gap-s">{plan.steps.map((step, index) => <li key={step} className="rounded-lg bg-surface-container px-m py-s text-sm text-on-surface">{index + 1}. {humanStep(step)}</li>)}</ol>
       {plan.blockers.length > 0 && <div role="alert" className="mt-m rounded-lg bg-danger/10 p-m text-sm text-danger"><p>Handoff is blocked:</p><ul className="mt-s list-disc pl-l">{plan.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul></div>}
       <p data-type="caption" className="mt-m break-all font-mono text-on-surface-low">Plan digest {plan.plan_digest}</p>
-      <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><input type="checkbox" checked={reviewed} onChange={(event) => setReviewed(event.target.checked)} className="size-4 accent-primary" />I reviewed this exact scope, sequence, and digest.</label>
+      <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={reviewed} onChange={(checked) => setReviewed(checked)} className="size-4 accent-primary" ariaLabel={"I reviewed this exact scope, sequence, and digest."} />I reviewed this exact scope, sequence, and digest.</label>
       {!decision?.allowed && <p className="mt-s text-sm text-on-surface-low">{decision?.reason}</p>}
       <div className="hypermid-action-bar mt-m flex flex-wrap justify-end gap-s"><Button size="sm" variant="secondary" onClick={() => { setPlan(undefined); setReviewed(false) }}>Cancel</Button>
         <Button size="sm" disabled={!decision?.allowed} disabledReason={!decision?.allowed ? decision?.reason : undefined} loading={busy === 'apply'} onClick={() => void apply()}>Apply reviewed handoff</Button></div>

@@ -30,7 +30,7 @@ describe('Hypermid encrypted recovery snapshots', () => {
   it('renders a native recovery workflow without exposing secret or credential-handle inputs', () => {
     const html = renderToStaticMarkup(<SecurityRecovery />)
     expect(html).toContain('Encrypted backup and recovery')
-    expect(html).toContain('encrypted, scope-bound recovery snapshots')
+    expect(html).toContain('encrypted, scope-bound memory exports')
     expect(html).toContain('Credential authority')
     expect(html).toContain('Artifact destination')
     expect(html).toContain('Outcome recovery')

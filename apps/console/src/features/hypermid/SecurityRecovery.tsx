@@ -1,3 +1,4 @@
+import { Checkbox, Select, TextInput } from '../../shared/ui/forms'
 import { useState } from 'react'
 import { ArchiveRestore, FileCheck2, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { api, ApiError, type HypermidSecurityPlanWire, type HypermidSecurityReceiptWire } from '../../shared/data/api'
@@ -68,8 +69,8 @@ function PlanReview({ plan, reviewed, confirmed, busy, onReviewed, onConfirmed, 
     {plan.blockers.length > 0 && <div role="alert" className="mt-m rounded-lg border border-danger/40 bg-danger/10 p-m text-sm text-danger">
       <p>This plan cannot be applied:</p><ul className="mt-s list-disc pl-l">{plan.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul></div>}
     <p data-type="caption" className="mt-m break-all font-mono text-on-surface-low">Plan digest {plan.plan_digest}</p>
-    <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><input type="checkbox" checked={reviewed} onChange={(event) => onReviewed(event.target.checked)} className="size-4 accent-primary" />I reviewed this exact scope, source evidence, steps, and digest.</label>
-    {plan.destructive && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface"><input type="checkbox" checked={confirmed} onChange={(event) => onConfirmed(event.target.checked)} className="size-4 accent-primary" />I confirm this restore may replace authoritative memory.</label>}
+    <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={reviewed} onChange={(checked) => onReviewed(checked)} className="size-4 accent-primary" ariaLabel={"I reviewed this exact scope, source evidence, steps, and digest."} />I reviewed this exact scope, source evidence, steps, and digest.</label>
+    {plan.destructive && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={confirmed} onChange={(checked) => onConfirmed(checked)} className="size-4 accent-primary" ariaLabel={"I confirm this restore may replace authoritative memory."} />I confirm this restore may replace authoritative memory.</label>}
     {!decision.allowed && <p className="mt-s text-sm text-on-surface-low">{decision.reason}</p>}
     <div className="hypermid-action-bar mt-m flex justify-end"><Button size="sm" disabled={!decision.allowed} disabledReason={!decision.allowed ? decision.reason : undefined} loading={busy} onClick={onApply}><ShieldCheck size={14} /> Apply reviewed plan</Button></div>
   </div>
@@ -175,26 +176,19 @@ export function SecurityRecovery() {
       <RowGroup><Row label="Credential authority" hint="One owner-bound credential is configured for encrypted backup and restore.">
         <div className="flex flex-wrap items-center gap-s"><StatusPill label={configured ? 'configured' : 'not configured'} tone={configured ? 'ok' : 'warn'} />
           <span className="text-sm text-on-surface-low">{credential?.label || 'Local backup key'}</span></div></Row>
-        <Row label="Action"><select value={draft.action} onChange={(event) => changeDraft({ ...initialSecurityRecoveryDraft, action: event.target.value as SecurityRecoveryAction })} aria-label="Security recovery action"
-          className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary">
-          <option value="backup">Create encrypted backup</option><option value="restore">Restore encrypted backup</option></select></Row>
+        <Row label="Action"><Select value={draft.action} onChange={(value) => changeDraft({ ...initialSecurityRecoveryDraft, action: value as SecurityRecoveryAction })} ariaLabel="Security recovery action" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "backup", label: "Create encrypted backup" }, { value: "restore", label: "Restore encrypted backup" }]} /></Row>
         {draft.action === 'backup' ? <>
-          <Row label="Artifact destination" hint="A protected local path distinct from the active store."><input value={draft.destination} onChange={(event) => changeDraft({ ...draft, destination: event.target.value })} aria-label="Encrypted backup destination" placeholder="/path/to/backup.hmbk"
-            className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
-          <Row label="Export ID" hint="Optional stable idempotency identity for this backup."><input value={draft.export_id} onChange={(event) => changeDraft({ ...draft, export_id: event.target.value })} aria-label="Backup export ID" placeholder="optional-export-id"
-            className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m font-mono text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
+          <Row label="Artifact destination" hint="A protected local path distinct from the active store."><TextInput value={draft.destination} onChange={(value) => changeDraft({ ...draft, destination: value })} ariaLabel="Encrypted backup destination" placeholder="/path/to/backup.hmbk" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
+          <Row label="Export ID" hint="Optional stable idempotency identity for this backup."><TextInput value={draft.export_id} onChange={(value) => changeDraft({ ...draft, export_id: value })} ariaLabel="Backup export ID" placeholder="optional-export-id" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m font-mono text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
         </> : <>
-          <Row label="Encrypted artifact" hint="The server opens and validates this local artifact before a plan can be reviewed."><input value={draft.artifact_path} onChange={(event) => changeDraft({ ...draft, artifact_path: event.target.value })} aria-label="Encrypted backup artifact" placeholder="/path/to/backup.hmbk"
-            className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
-          <Row label="Expected source digest" hint="Copy the source digest from the committed backup receipt."><input value={draft.source_digest} onChange={(event) => changeDraft({ ...draft, source_digest: event.target.value.trim().toLowerCase() })} aria-label="Expected backup source digest" placeholder="64 lowercase hexadecimal characters"
-            className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m font-mono text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
+          <Row label="Encrypted artifact" hint="The server opens and validates this local artifact before a plan can be reviewed."><TextInput value={draft.artifact_path} onChange={(value) => changeDraft({ ...draft, artifact_path: value })} ariaLabel="Encrypted backup artifact" placeholder="/path/to/backup.hmbk" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
+          <Row label="Expected source digest" hint="Copy the source digest from the committed backup receipt."><TextInput value={draft.source_digest} onChange={(value) => changeDraft({ ...draft, source_digest: value.trim().toLowerCase() })} ariaLabel="Expected backup source digest" placeholder="64 lowercase hexadecimal characters" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m font-mono text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
         </>}</RowGroup>
       <div className="mt-m flex justify-end"><Button size="sm" variant="secondary" disabled={!configured} disabledReason={!configured ? 'Configure the security settings before preparing a plan.' : undefined} loading={busy === 'plan'} onClick={() => void review()}>Review security plan</Button></div>
       {plan && <PlanReview plan={plan} reviewed={reviewed} confirmed={confirmed} busy={busy === 'apply'} onReviewed={setReviewed} onConfirmed={setConfirmed} onApply={() => void apply()} />}
     </Section>
     <Section title="Outcome recovery" hint="Load the authoritative job receipt. An unknown outcome must be recovered before retrying.">
-      <div className="flex flex-wrap gap-s"><input value={jobId} onChange={(event) => setJobId(event.target.value)} aria-label="Security operation job ID" placeholder="job-…"
-        className="min-h-11 min-w-0 flex-1 rounded-lg border border-outline-variant bg-surface px-m font-mono text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" />
+      <div className="flex flex-wrap gap-s"><TextInput value={jobId} onChange={(value) => setJobId(value)} ariaLabel="Security operation job ID" placeholder="job-…" className="min-h-11 min-w-0 flex-1 rounded-lg border border-outline-variant bg-surface px-m font-mono text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" />
         <Button size="sm" variant="secondary" loading={busy === 'status'} onClick={() => void status()}>Load receipt</Button></div>
       {receipt && <Receipt receipt={receipt} busy={busy} onStatus={() => void status(receipt.job_id)} onRecover={() => void recover()} />}
     </Section>

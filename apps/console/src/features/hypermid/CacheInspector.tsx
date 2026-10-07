@@ -1,3 +1,4 @@
+import { Select } from '../../shared/ui/forms'
 import { useMemo, useState } from 'react'
 import { DatabaseZap, RefreshCw } from 'lucide-react'
 import { api, type HypermidCachePlanWire, type HypermidCacheWire } from '../../shared/data/api'
@@ -67,10 +68,7 @@ export function CacheInspector() {
   return <Section title="Caches and projections" hint="Inspect freshness and recovery impact before clearing or rebuilding scoped derived state."
     right={<Button size="sm" variant="secondary" onClick={caches.refresh}><RefreshCw size={14} /> Refresh</Button>}>
     <div className="mb-m flex justify-end">
-      <select value={freshness} onChange={(event) => setFreshness(event.target.value as typeof freshness)} aria-label="Cache freshness"
-        className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary sm:w-56">
-        {FRESHNESS.map((value) => <option key={value || 'all'} value={value}>{value ? value.charAt(0).toUpperCase() + value.slice(1) : 'All cache states'}</option>)}
-      </select>
+      <div className="w-full sm:w-56"><Select value={freshness} onChange={(value) => setFreshness(value as typeof freshness)} ariaLabel="Cache freshness" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary sm:w-56" options={[...FRESHNESS.map(value => ({ value: value, label: value ? value.charAt(0).toUpperCase() + value.slice(1) : 'All cache states' }))]} /></div>
     </div>
     {caches.error && !caches.data ? <LoadError what="Hypermid caches" error={caches.error} onRetry={caches.refresh} />
       : !caches.data ? <ListSkeleton what="Hypermid caches" />

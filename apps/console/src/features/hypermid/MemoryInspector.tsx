@@ -8,7 +8,7 @@ import { EmptyState, ListSkeleton, LoadError } from '../../shared/ui/ListScaffol
 import { ResultAnnouncement } from '../../shared/ui/ListControls'
 import { SearchField } from '../../shared/ui/SearchField'
 import { Surface } from '../../shared/ui/Surface'
-import { TextArea } from '../../shared/ui/forms'
+import { TextArea, Select } from '../../shared/ui/forms'
 import { StatusPill } from '../settings/bento'
 import { Section } from '../settings/settingsUI'
 import { beginConflictDraft, inspectionQueryKey, reapplyConflict, reloadConflict, retainRejectedDraft, type ConflictDraft } from './hypermidState'
@@ -136,10 +136,7 @@ export function MemoryInspector() {
     right={<Button size="sm" variant="secondary" onClick={memory.refresh}><RefreshCw size={14} /> Refresh</Button>}>
     <div className="mb-m grid gap-s sm:grid-cols-[minmax(0,1fr)_12rem]">
       <SearchField value={query} onChange={setQuery} placeholder="Search scoped memory" ariaLabel="Search Hypermid memory" />
-      <select value={kind} onChange={(event) => setKind(event.target.value as typeof kind)} aria-label="Memory kind"
-        className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary">
-        {KINDS.map((value) => <option key={value || 'all'} value={value}>{value ? value.replaceAll('_', ' ') : 'All memory types'}</option>)}
-      </select>
+      <Select value={kind} onChange={(value) => setKind(value as typeof kind)} ariaLabel="Memory kind" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[...KINDS.map(value => ({ value: value, label: value ? value.replaceAll('_', ' ') : 'All memory types' }))]} />
     </div>
     <ResultAnnouncement count={memory.data?.items.length ?? 0} noun="memories" singular="memory" active={!!(query.trim() || kind) && !memory.revalidating && !memory.error && !!memory.data && memory.data.state !== 'unavailable' && memory.data.state !== 'unreadable'} />
     {memory.error && !memory.data ? <LoadError what="Hypermid memory" error={memory.error} onRetry={memory.refresh} />

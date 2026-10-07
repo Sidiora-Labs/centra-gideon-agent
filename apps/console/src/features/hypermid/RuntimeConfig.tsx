@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from 'react'
+import { Select } from '../../shared/ui/forms'
+import { useEffect, useState } from 'react'
 import { AlertTriangle, Clock3, RefreshCw } from 'lucide-react'
 import { api, ApiError, type HypermidRuntimeConfigValueWire } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
@@ -17,7 +18,6 @@ const MODES: Array<{ value: HypermidRuntimeConfigValueWire['mode']; label: strin
 ]
 
 export function RuntimeConfig() {
-  const modeReasonId = useId()
   const config = useQuery('hypermid:config:runtime', () => api.hypermidRuntimeConfig())
   const [state, setState] = useState<RevisionedDraft<HypermidRuntimeConfigValueWire>>()
   const [saving, setSaving] = useState(false)
@@ -56,12 +56,7 @@ export function RuntimeConfig() {
       <RowGroup>
         <Row label="Effective source" hint={`Policy revision ${config.data.policy_revision}`}><StatusPill label={config.data.source.replaceAll('_', ' ')} tone="muted" /></Row>
         <Row label="Mode" hint={MODES.find((mode) => mode.value === state.draft.mode)?.detail}>
-          <select value={state.draft.mode} onChange={(event) => { if (modeUnavailable) return; setDraft({ mode: event.target.value as HypermidRuntimeConfigValueWire['mode'] }) }}
-            aria-disabled={!config.data.editable || authorityOwnsWrites} aria-describedby={modeUnavailable ? modeReasonId : undefined} aria-label="Hypermid runtime mode"
-            className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary aria-disabled:opacity-50">
-            {MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
-          </select>
-          {modeUnavailable && <span id={modeReasonId} className="sr-only">{modeReason}</span>}
+          <Select value={state.draft.mode} onChange={(value) => { if (modeUnavailable) return; setDraft({ mode: value as HypermidRuntimeConfigValueWire['mode'] }) }} ariaLabel="Hypermid runtime mode" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary aria-disabled:opacity-50" options={[...MODES.map(mode => ({ value: mode.value, label: mode.label }))]} readOnly={modeUnavailable} readOnlyReason={modeReason} />
         </Row>
         {state.draft.mode === 'primary' && <Row label="Authority handoff" hint="After Primary mode reaches the safe turn boundary, review the separate writer handoff below.">
           <span className="inline-flex items-center gap-xs text-sm text-warn"><Clock3 size={14} /> Writer review required</span>
@@ -73,16 +68,10 @@ export function RuntimeConfig() {
     <Section title="Strictness" hint="These policies govern overflow and refusal without changing the runtime mode.">
       <RowGroup>
         <Row label="When context overflows">
-          <select value={state.draft.overflow_policy} onChange={(event) => setDraft({ overflow_policy: event.target.value as HypermidRuntimeConfigValueWire['overflow_policy'] })}
-            aria-label="Context overflow policy" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary">
-            <option value="reclaim_then_refuse">Reclaim, then refuse</option><option value="refuse_immediately">Refuse immediately</option>
-          </select>
+          <Select value={state.draft.overflow_policy} onChange={(value) => setDraft({ overflow_policy: value as HypermidRuntimeConfigValueWire['overflow_policy'] })} ariaLabel="Context overflow policy" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "reclaim_then_refuse", label: "Reclaim, then refuse" }, { value: "refuse_immediately", label: "Refuse immediately" }]} />
         </Row>
         <Row label="When a projection is refused">
-          <select value={state.draft.refusal_policy} onChange={(event) => setDraft({ refusal_policy: event.target.value as HypermidRuntimeConfigValueWire['refusal_policy'] })}
-            aria-label="Projection refusal policy" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary">
-            <option value="refuse">Refuse the turn</option><option value="compatible_last_known_good">Use compatible last known good</option><option value="host_passthrough">Use Gideon pass-through</option>
-          </select>
+          <Select value={state.draft.refusal_policy} onChange={(value) => setDraft({ refusal_policy: value as HypermidRuntimeConfigValueWire['refusal_policy'] })} ariaLabel="Projection refusal policy" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "refuse", label: "Refuse the turn" }, { value: "compatible_last_known_good", label: "Use compatible last known good" }, { value: "host_passthrough", label: "Use Gideon pass-through" }]} />
         </Row>
       </RowGroup>
     </Section>

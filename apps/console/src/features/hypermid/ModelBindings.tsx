@@ -1,3 +1,4 @@
+import { Select } from '../../shared/ui/forms'
 import { useEffect, useState } from 'react'
 import { CheckCircle2, Gauge, RefreshCw, Server, TriangleAlert } from 'lucide-react'
 import { api, ApiError, type HypermidModelBindingPlanWire, type HypermidModelBindingsWire, type HypermidModelWire } from '../../shared/data/api'
@@ -70,10 +71,7 @@ export function ModelBindings() {
       const ready = selected ? modelIsReady(selected) : false
       return <Row key={duty.id} label={duty.label} hint={`Required check: ${duty.required_probe}`}>
         <div className="flex flex-wrap items-center justify-end gap-s">
-          <select value={selectedId} onChange={(event) => void choose(duty.id, event.target.value)} aria-label={`${duty.label} model`}
-            className="min-h-11 max-w-64 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary">
-            <option value="">Choose a model</option>{data.models.map((model) => <option key={model.id} value={model.id}>{model.display_name || model.id} · {model.provider_id}</option>)}
-          </select>
+          <div className="w-full max-w-64"><Select value={selectedId} onChange={(value) => void choose(duty.id, value)} ariaLabel={`${duty.label} model`} className="min-h-11 max-w-64 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "", label: "Choose a model" }, ...data.models.map(model => ({ value: model.id, label: `${model.display_name || model.id} · ${model.provider_id}` }))]} /></div>
           {selected && <StatusPill label={ready ? 'probe ready' : selected.health === 'unknown' ? 'readiness unknown' : selected.health} tone={ready ? 'ok' : 'warn'} />}
           {selected && !ready && <Button size="sm" variant="secondary" loading={busy === `probe:${selected.id}`} onClick={() => void probe(selected)}><Gauge size={14} /> Run required probe</Button>}
         </div>

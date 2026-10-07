@@ -1,3 +1,4 @@
+import { Select } from '../../shared/ui/forms'
 import { useEffect, useMemo, useState } from 'react'
 import { Activity, AlertTriangle, ChevronRight, MessageSquare, RefreshCw } from 'lucide-react'
 import { api, type HypermidPrimaryContextInspectionWire, type HypermidSessionDetailWire, type HypermidSessionWire } from '../../shared/data/api'
@@ -125,10 +126,7 @@ export function SessionInspector() {
     right={<Button size="sm" variant="secondary" onClick={sessions.refresh}><RefreshCw size={14} /> Refresh</Button>}>
     <div className="mb-m grid gap-s sm:grid-cols-[minmax(0,1fr)_12rem]">
       <SearchField value={text} onChange={setText} placeholder="Search sessions" ariaLabel="Search Hypermid sessions" />
-      <select value={state} onChange={(event) => setState(event.target.value as typeof state)} aria-label="Session state"
-        className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary">
-        {SESSION_STATES.map((value) => <option key={value || 'all'} value={value}>{value ? value.charAt(0).toUpperCase() + value.slice(1) : 'All states'}</option>)}
-      </select>
+      <Select value={state} onChange={(value) => setState(value as typeof state)} ariaLabel="Session state" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[...SESSION_STATES.map(value => ({ value: value, label: value ? value.charAt(0).toUpperCase() + value.slice(1) : 'All states' }))]} />
     </div>
     <ResultAnnouncement count={sessions.data?.items.length ?? 0} noun="sessions" active={!!(text.trim() || state) && !sessions.revalidating && !sessions.error && !!sessions.data && sessions.data.state !== 'unavailable' && sessions.data.state !== 'unreadable'} />
     {sessions.error && !sessions.data ? <LoadError what="Hypermid sessions" error={sessions.error} onRetry={sessions.refresh} />

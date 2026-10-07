@@ -5,7 +5,7 @@ import { useQuery } from '../../shared/data/data'
 import { Button } from '../../shared/ui/Button'
 import { EmptyState, FormSkeleton, LoadError } from '../../shared/ui/ListScaffold'
 import { confirm } from '../../shared/ui/dialog'
-import { TextInput } from '../../shared/ui/forms'
+import { TextInput, Select, Checkbox } from '../../shared/ui/forms'
 import { Surface } from '../../shared/ui/Surface'
 import { StatusPill } from '../settings/bento'
 import { Row, RowGroup, Section } from '../settings/settingsUI'
@@ -91,14 +91,11 @@ export function RemoteAccess() {
         <Row label="TLS endpoint" hint={endpointError || 'Explicit host and port. TLS is mandatory; credentials and private keys do not belong here.'}><TextInput value={endpoint} onChange={setEndpoint} ariaLabel="TLS endpoint" placeholder="tcp://hypermid.example.net:443" size="sm" /></Row>
         <Row label="Server name" hint="The certificate name this device must verify."><TextInput value={serverName} onChange={setServerName} ariaLabel="TLS server name" placeholder="hypermid.example.net" size="sm" /></Row>
         <Row label="Device name" hint="A human-readable name you will recognize when revoking access."><TextInput value={deviceName} onChange={setDeviceName} ariaLabel="Device name" placeholder="My phone" size="sm" /></Row>
-        <Row label="Expires after"><select value={expiryHours} onChange={(event) => setExpiryHours(event.target.value)} aria-label="Enrollment expiry"
-          className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary">
-          <option value="1">1 hour</option><option value="24">1 day</option><option value="168">7 days</option>
-        </select></Row>
+        <Row label="Expires after"><Select value={expiryHours} onChange={(value) => setExpiryHours(value)} ariaLabel="Enrollment expiry" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "1", label: "1 hour" }, { value: "24", label: "1 day" }, { value: "168", label: "7 days" }]} /></Row>
       </RowGroup>
       <fieldset className="mt-m"><legend className="mb-s text-sm text-on-surface">Allowed capabilities</legend>
         <div className="grid gap-s sm:grid-cols-2">{REMOTE_CAPABILITIES.map((capability) => <label key={capability.id} className="hypermid-touch flex cursor-pointer items-center gap-s rounded-lg bg-surface-container px-m text-sm text-on-surface">
-          <input type="checkbox" checked={capabilities.includes(capability.id)} onChange={(event) => toggleCapability(capability.id, event.target.checked)} className="size-4 accent-primary" />{capability.label}
+          <Checkbox checked={capabilities.includes(capability.id)} onChange={(checked) => toggleCapability(capability.id, checked)} className="size-4 accent-primary" ariaLabel={capability.label} />{capability.label}
         </label>)}</div>
       </fieldset>
       <div className="mt-m flex justify-end"><Button size="sm" disabled={!endpoint || !serverName.trim() || !deviceName.trim() || !capabilities.length || Boolean(endpointError)} disabledReason={!endpoint ? 'Enter the remote endpoint.' : endpointError || (!serverName.trim() ? 'Enter a server name.' : !deviceName.trim() ? 'Enter a device name.' : !capabilities.length ? 'Select at least one read capability.' : undefined)} loading={busy === 'plan'} onClick={() => void review()}><ShieldCheck size={14} /> Review remote access</Button></div>

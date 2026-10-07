@@ -3,7 +3,7 @@ import { Pause, Play, RefreshCw } from 'lucide-react'
 import { api, type HypermidCursorWire } from '../../shared/data/api'
 import { Button } from '../../shared/ui/Button'
 import { EmptyState, FormSkeleton } from '../../shared/ui/ListScaffold'
-import { TextInput } from '../../shared/ui/forms'
+import { TextInput, Select } from '../../shared/ui/forms'
 import { Surface } from '../../shared/ui/Surface'
 import { Section } from '../settings/settingsUI'
 import { mergeLogPage, type HypermidLogBuffer } from './diagnosticsState'
@@ -49,10 +49,7 @@ export function LiveLogs() {
   }
   return <Section title="Live logs" hint="Bounded and redacted before display. Pause freezes this view while collection continues.">
     <div className="mb-m grid gap-s sm:grid-cols-[12rem_minmax(0,1fr)_auto]">
-      <select value={severity} onChange={(event) => setSeverity(event.target.value)} aria-label="Log severity"
-        className="min-h-11 min-w-0 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary">
-        <option value="">All severities</option><option value="error">Errors</option><option value="warning">Warnings</option><option value="info">Information</option><option value="debug">Debug</option>
-      </select>
+      <Select value={severity} onChange={(value) => setSeverity(value)} ariaLabel="Log severity" className="min-h-11 min-w-0 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "", label: "All severities" }, { value: "error", label: "Errors" }, { value: "warning", label: "Warnings" }, { value: "info", label: "Information" }, { value: "debug", label: "Debug" }]} />
       <TextInput value={component} onChange={setComponent} ariaLabel="Log component" placeholder="Filter by component" size="sm" />
       <div className="flex flex-wrap gap-s"><Button size="sm" variant="secondary" onClick={togglePause}>{paused ? <Play size={14} /> : <Pause size={14} />}{paused ? 'Resume view' : 'Pause view'}</Button>
         <Button size="sm" variant="secondary" onClick={() => void load(true)}><RefreshCw size={14} /> Refresh</Button></div>

@@ -1,3 +1,4 @@
+import { TextInput, Select, Checkbox } from '../../shared/ui/forms'
 import { useEffect, useState } from 'react'
 import { ArchiveRestore, FileCheck2, RefreshCw, RotateCcw, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { api, ApiError, type HypermidLifecycleAction } from '../../shared/data/api'
@@ -39,22 +40,16 @@ function bytes(value: number): string {
 
 function LifecycleFields({ draft, onChange }: { draft: LifecycleDraft; onChange: (next: LifecycleDraft) => void }) {
   if (draft.action === 'install' || draft.action === 'update') return <Row label="Target release" hint="The daemon validates platform, compatibility, space, restart, migration, and rollback requirements.">
-    <input value={draft.target_version} onChange={(event) => onChange({ ...draft, target_version: event.target.value })} aria-label="Target release"
-      className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" placeholder="1.2.3" />
+    <TextInput value={draft.target_version} onChange={(value) => onChange({ ...draft, target_version: value })} ariaLabel="Target release" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" placeholder="1.2.3" />
   </Row>
   if (draft.action === 'uninstall') return <Row label="User data" hint="Runtime wiring and user data remain separate. Purge requires a second confirmation after plan review.">
-    <select value={draft.data_disposition} onChange={(event) => onChange({ ...draft, data_disposition: event.target.value as DataDisposition })} aria-label="Uninstall data disposition"
-      className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary">
-      <option value="retain">Retain user data</option><option value="export">Export before uninstall</option><option value="purge">Permanently purge user data</option>
-    </select>
+    <Select value={draft.data_disposition} onChange={(value) => onChange({ ...draft, data_disposition: value as DataDisposition })} ariaLabel="Uninstall data disposition" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "retain", label: "Retain user data" }, { value: "export", label: "Export before uninstall" }, { value: "purge", label: "Permanently purge user data" }]} />
   </Row>
   if (draft.action === 'migrate' || draft.action === 'restore') return <Row label="Verified source" hint="The daemon stages and verifies this source before any visible state changes.">
-    <input value={draft.source} onChange={(event) => onChange({ ...draft, source: event.target.value })} aria-label="Lifecycle source"
-      className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" placeholder="/path/to/artifact" />
+    <TextInput value={draft.source} onChange={(value) => onChange({ ...draft, source: value })} ariaLabel="Lifecycle source" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" placeholder="/path/to/artifact" />
   </Row>
   if (draft.action === 'export') return <Row label="Export destination" hint="The verified export excludes credentials, local authentication material, and rebuildable derivatives.">
-    <input value={draft.destination} onChange={(event) => onChange({ ...draft, destination: event.target.value })} aria-label="Export destination"
-      className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" placeholder="/path/to/export" />
+    <TextInput value={draft.destination} onChange={(value) => onChange({ ...draft, destination: value })} ariaLabel="Export destination" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" placeholder="/path/to/export" />
   </Row>
   return <Row label="Rollback source" hint="The daemon selects only previously verified rollback material.">
     <span className="text-sm text-on-surface-low">No local override. Review the daemon inventory and digest before apply.</span>
@@ -127,9 +122,9 @@ function PlanReview({ plan, reviewed, destructiveConfirmed, purgeConfirmed, busy
     {plan.blockers.length > 0 && <div role="alert" className="mt-m rounded-lg border border-danger/40 bg-danger/10 p-m"><p className="text-sm text-on-surface">This plan cannot be applied:</p>
       <ul className="mt-s list-disc pl-l text-sm text-on-surface-low">{plan.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul></div>}
     <p data-type="caption" className="mt-m break-all font-mono text-on-surface-low">Plan digest {plan.plan_digest}</p>
-    <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><input type="checkbox" checked={reviewed} onChange={(event) => onReviewed(event.target.checked)} className="size-4 accent-primary" />I reviewed this exact scope, inventory, plan, and digest.</label>
-    {plan.destructive && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface"><input type="checkbox" checked={destructiveConfirmed} onChange={(event) => onDestructive(event.target.checked)} className="size-4 accent-primary" />I confirm the listed destructive effects.</label>}
-    {plan.data_disposition === 'purge' && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface"><input type="checkbox" checked={purgeConfirmed} onChange={(event) => onPurge(event.target.checked)} className="size-4 accent-primary" />I separately confirm permanent user-data purge.</label>}
+    <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={reviewed} onChange={(checked) => onReviewed(checked)} className="size-4 accent-primary" ariaLabel={"I reviewed this exact scope, inventory, plan, and digest."} />I reviewed this exact scope, inventory, plan, and digest.</label>
+    {plan.destructive && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={destructiveConfirmed} onChange={(checked) => onDestructive(checked)} className="size-4 accent-primary" ariaLabel={"I confirm the listed destructive effects."} />I confirm the listed destructive effects.</label>}
+    {plan.data_disposition === 'purge' && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={purgeConfirmed} onChange={(checked) => onPurge(checked)} className="size-4 accent-primary" ariaLabel={"I separately confirm permanent user-data purge."} />I separately confirm permanent user-data purge.</label>}
     {!decision.allowed && <p className="mt-s text-sm text-on-surface-low">{decision.reason}</p>}
     <div className="hypermid-action-bar mt-m flex justify-end"><Button size="sm" disabled={!decision.allowed} disabledReason={!decision.allowed ? decision.reason : undefined} loading={busy} onClick={onApply}><ShieldCheck size={14} /> Apply reviewed plan</Button></div>
   </div>
@@ -252,17 +247,14 @@ export function Lifecycle() {
   const selected = LIFECYCLE_ACTIONS.find((item) => item.id === draft.action)!
   return <div><PanelHeader title="Lifecycle" hint="Install, update, move, export, restore, or remove Hypermid through daemon-authored plans and recoverable receipts." />
     <Section title="Prepare a lifecycle plan" hint="Inputs select intent only. The authenticated daemon determines scope, inventory, blockers, staging, and exact effects.">
-      <RowGroup><Row label="Action" hint={selected.detail}><select value={draft.action} onChange={(event) => changeDraft({ ...initialDraft, action: event.target.value as HypermidLifecycleAction })} aria-label="Lifecycle action"
-        className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary">
-        {LIFECYCLE_ACTIONS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></Row>
+      <RowGroup><Row label="Action" hint={selected.detail}><Select value={draft.action} onChange={(value) => changeDraft({ ...initialDraft, action: value as HypermidLifecycleAction })} ariaLabel="Lifecycle action" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[...LIFECYCLE_ACTIONS.map(item => ({ value: item.id, label: item.label }))]} /></Row>
         <LifecycleFields draft={draft} onChange={changeDraft} /></RowGroup>
       <div className="mt-m flex justify-end"><Button size="sm" variant="secondary" loading={busy === 'plan'} onClick={() => void review()}>Review lifecycle plan</Button></div>
       {plan && <PlanReview plan={plan} reviewed={reviewed} destructiveConfirmed={destructiveConfirmed} purgeConfirmed={purgeConfirmed} busy={busy === 'apply'}
         onReviewed={setReviewed} onDestructive={setDestructiveConfirmed} onPurge={setPurgeConfirmed} onApply={() => void apply()} />}
     </Section>
     <Section title="Receipt recovery" hint="Reconnect using a job ID, then recover daemon journal state before deciding to resume or roll back.">
-      <div className="flex flex-wrap gap-s"><input value={jobId} onChange={(event) => setJobId(event.target.value)} aria-label="Lifecycle job ID"
-        className="min-h-11 min-w-0 flex-1 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" />
+      <div className="flex flex-wrap gap-s"><TextInput value={jobId} onChange={(value) => setJobId(value)} ariaLabel="Lifecycle job ID" className="min-h-11 min-w-0 flex-1 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" />
         <Button size="sm" variant="secondary" loading={busy === 'status'} onClick={() => void status()}>Load receipt</Button>
         <Button size="sm" variant="secondary" loading={busy === 'recover'} onClick={() => void recover()}>Recover state</Button></div>
       {receipt && <RecoveryReceipt receipt={receipt} recoveryState={recoveryState} busy={busy} onCheck={() => void status(receipt.job_id)} onRecover={() => void recover()}

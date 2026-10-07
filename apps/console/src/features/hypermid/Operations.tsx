@@ -1,3 +1,4 @@
+import { Checkbox, Select, TextInput } from '../../shared/ui/forms'
 import { useEffect, useState } from 'react'
 import { Activity, Ban, CheckCircle2, FileClock, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react'
 import {
@@ -138,10 +139,10 @@ function PlanReview({ plan, reviewed, destructiveConfirmed, onReviewed, onDestru
     </div>}
     <p data-type="caption" className="mt-m break-all font-mono text-on-surface-low">Plan digest {plan.plan_digest}</p>
     <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface">
-      <input type="checkbox" checked={reviewed} onChange={(event) => onReviewed(event.target.checked)} className="size-4 accent-primary" />I reviewed this exact plan and digest.
+      <Checkbox checked={reviewed} onChange={(checked) => onReviewed(checked)} className="size-4 accent-primary" ariaLabel={"I reviewed this exact plan and digest."} />I reviewed this exact plan and digest.
     </label>
     {plan.destructive && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface">
-      <input type="checkbox" checked={destructiveConfirmed} onChange={(event) => onDestructive(event.target.checked)} className="size-4 accent-primary" />I confirm the listed destructive effects.
+      <Checkbox checked={destructiveConfirmed} onChange={(checked) => onDestructive(checked)} className="size-4 accent-primary" ariaLabel={"I confirm the listed destructive effects."} />I confirm the listed destructive effects.
     </label>}
     {!decision.allowed && <p className="mt-s text-sm text-on-surface-low">{decision.reason}</p>}
     <div className="hypermid-action-bar mt-m flex justify-end"><Button size="sm" disabled={!decision.allowed} disabledReason={!decision.allowed ? decision.reason : undefined} loading={busy} onClick={onApply}><ShieldCheck size={14} /> Apply reviewed plan</Button></div>
@@ -229,16 +230,13 @@ function Maintenance() {
   const selected = MAINTENANCE_ACTIONS.find((item) => item.id === action)!
   return <Section title="Maintenance" hint="Every mutation begins with an expiring daemon plan and ends with an authoritative receipt.">
     <div className="grid gap-m sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"><label className="grid gap-xs text-sm text-on-surface">
-      Action<select value={action} onChange={(event) => { setAction(event.target.value as MaintenanceAction); setPlan(undefined); setReviewed(false) }}
-        className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary">
-        {MAINTENANCE_ACTIONS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select>
+      Action<Select value={action} onChange={(value) => { setAction(value as MaintenanceAction); setPlan(undefined); setReviewed(false) }} className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[...MAINTENANCE_ACTIONS.map(item => ({ value: item.id, label: item.label }))]} />
       <span data-type="caption" className="text-on-surface-low">{selected.detail}</span></label>
       <Button size="sm" variant="secondary" loading={busy === 'plan'} onClick={() => void review()}>Review plan</Button></div>
     {plan && <PlanReview plan={plan} reviewed={reviewed} destructiveConfirmed={destructiveConfirmed} onReviewed={setReviewed}
       onDestructive={setDestructiveConfirmed} busy={busy === 'apply'} onApply={() => void apply()} />}
     <div className="mt-l rounded-lg border border-outline-variant p-m"><label className="grid gap-xs text-sm text-on-surface">
-      Recover a receipt<div className="flex flex-wrap gap-s"><input value={jobId} onChange={(event) => setJobId(event.target.value)} aria-label="Maintenance job ID"
-        className="min-h-11 min-w-0 flex-1 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" />
+      Recover a receipt<div className="flex flex-wrap gap-s"><TextInput value={jobId} onChange={(value) => setJobId(value)} ariaLabel="Maintenance job ID" className="min-h-11 min-w-0 flex-1 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" />
       <Button size="sm" variant="secondary" loading={busy === 'refresh'} onClick={() => void refreshReceipt()}>Recover receipt</Button></div></label></div>
     {receipt && <Receipt receipt={receipt} busy={busy} onRefresh={() => void refreshReceipt(receipt.job_id)} onCancel={() => void cancel()} />}
     {error && <p role="alert" className="mt-m flex items-start gap-s text-sm text-danger"><TriangleAlert size={16} className="mt-0.5 shrink-0" />{error}</p>}

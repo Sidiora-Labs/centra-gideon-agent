@@ -1,3 +1,4 @@
+import { Checkbox } from '../../shared/ui/forms'
 import { useState } from 'react'
 import { Clock3, FileCheck2, RefreshCw, ShieldQuestion } from 'lucide-react'
 import {
@@ -67,7 +68,7 @@ function PlanReview({ plan, reviewed, busy, onReviewed, onCancel, onReconcile }:
     <p data-type="caption" className="mt-xs break-all font-mono text-on-surface-low">Provider proof digest {plan.provider_proof_digest}</p>
     {plan.result_digest && <p data-type="caption" className="mt-xs break-all font-mono text-on-surface-low">Result digest {plan.result_digest}</p>}
     <p data-type="caption" className="mt-xs break-all font-mono text-on-surface-low">Plan digest {plan.plan_digest}</p>
-    <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><input type="checkbox" checked={reviewed} onChange={(event) => onReviewed(event.target.checked)} className="size-4 accent-primary" />I reviewed this exact operation, scope, proposed outcome, and evidence digest.</label>
+    <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={reviewed} onChange={(checked) => onReviewed(checked)} className="size-4 accent-primary" ariaLabel={"I reviewed this exact operation, scope, proposed outcome, and evidence digest."} />I reviewed this exact operation, scope, proposed outcome, and evidence digest.</label>
     <div className="hypermid-action-bar mt-m flex flex-wrap justify-end gap-s"><Button size="sm" variant="secondary" onClick={onCancel}>Cancel</Button>
       <Button size="sm" disabled={!reviewed} disabledReason={!reviewed ? 'Review this exact operation, scope, outcome, and evidence digest first.' : undefined} loading={busy} onClick={onReconcile}><FileCheck2 size={14} /> Record reviewed outcome</Button></div>
   </div>
