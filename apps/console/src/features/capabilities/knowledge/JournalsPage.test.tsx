@@ -16,6 +16,7 @@ beforeAll(async () => {
   })
   let errors = ''
   child.stderr?.on('data', chunk => { errors += String(chunk) })
+  let token = ''
   const origin = await new Promise<string>((done, fail) => {
     let buffer = ''
     const timeout = setTimeout(() => fail(new Error(errors || 'Capture application startup timed out')), 15000)
@@ -24,11 +25,21 @@ beforeAll(async () => {
       buffer += String(chunk)
       for (const line of buffer.split('\n')) {
         if (!line.startsWith('{"port":')) continue
-        try { const { port } = JSON.parse(line); clearTimeout(timeout); done(`http://127.0.0.1:${port}`) } catch { /* Wait for complete address. */ }
+        try { const ready = JSON.parse(line); if (typeof ready.token !== 'string' || !ready.token) throw new Error('Missing native owner token'); token = ready.token; clearTimeout(timeout); done(`http://127.0.0.1:${ready.port}`) } catch { /* Wait for complete address. */ }
       }
     })
   })
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  const refused = await originalFetch(origin + '/api/capabilities/knowledge/journals')
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const target = typeof input === 'string' && input.startsWith('/') ? origin + input : input
+    const url = target instanceof Request ? target.url : String(target)
+    const headers = new Headers(target instanceof Request ? target.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${token}`)
+    return originalFetch(target, { ...init, headers })
+  }
 }, 20000)
 afterEach(cleanup)
 afterAll(async () => {

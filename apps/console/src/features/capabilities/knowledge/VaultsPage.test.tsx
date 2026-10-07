@@ -20,12 +20,23 @@ beforeAll(async () => {
   child = spawn(process.env.GIDEON_TEST_PYTHON || '/tmp/gideon-runtime-venv/bin/python', [resolve(root, 'checks/runtime/capabilities/knowledge/vaults_ui_server.py')], { cwd: root, env: { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] })
   let errors = ''
   child.stderr?.on('data', chunk => { errors += String(chunk) })
+  let token = ''
   const origin = await new Promise<string>((done, fail) => {
     let buffer = ''; const timeout = setTimeout(() => fail(new Error(errors || 'Vault app startup timed out')), 15000)
     child.on('exit', code => { clearTimeout(timeout); fail(new Error(`Vault app exited ${code}: ${errors}`)) })
-    child.stdout?.on('data', chunk => { buffer += String(chunk); for (const line of buffer.split('\n')) { if (!line.startsWith('{"port":')) continue; try { const { port } = JSON.parse(line); clearTimeout(timeout); done(`http://127.0.0.1:${port}`) } catch { /* wait */ } } })
+    child.stdout?.on('data', chunk => { buffer += String(chunk); for (const line of buffer.split('\n')) { if (!line.startsWith('{"port":')) continue; try { const ready = JSON.parse(line); if (typeof ready.token !== 'string' || !ready.token) throw new Error('Missing native owner token'); token = ready.token; clearTimeout(timeout); done(`http://127.0.0.1:${ready.port}`) } catch { /* wait */ } } })
   })
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  const refused = await originalFetch(origin + '/api/capabilities/knowledge/vaults')
+  expect(refused.status).toBe(403)
+  expect(await refused.json()).toMatchObject({ error: 'Token required' })
+  globalThis.fetch = (input, init) => {
+    const target = typeof input === 'string' && input.startsWith('/') ? origin + input : input
+    const url = target instanceof Request ? target.url : String(target)
+    const headers = new Headers(target instanceof Request ? target.headers : undefined)
+    new Headers(init?.headers).forEach((value, key) => headers.set(key, value))
+    if (new URL(url).origin === origin) headers.set('Authorization', `Bearer ${token}`)
+    return originalFetch(target, { ...init, headers })
+  }
 }, 20000)
 afterEach(cleanup)
 afterAll(async () => { globalThis.fetch = originalFetch; if (child?.exitCode === null) { const stopped = new Promise<void>(done => child.once('exit', () => done())); child.kill('SIGTERM'); await stopped } rmSync(home, { recursive: true, force: true }) })
