@@ -134,7 +134,7 @@ function CatalogPage({ apiRoot = base, ingredientId, onSelectIngredient }: { api
           <label className="block">Tags (comma separated)<input className={control} value={draft.tags} onChange={e => setDraft({ ...draft, tags: e.target.value })} /></label>
           <label className="block">Source references<textarea className={control} placeholder="artifact:slug or knowledge:id, one per line" value={draft.sources} onChange={e => setDraft({ ...draft, sources: e.target.value })} /></label>
           <label className="block">Relations<textarea className={control} placeholder="related:ingredient-id or contains:ingredient-id" value={draft.relations} onChange={e => setDraft({ ...draft, relations: e.target.value })} /></label>
-          <Button type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save ingredient'}</Button>
+          <Button type="submit" disabled={busy} loading={busy} loadingLabel="Saving…">Save ingredient</Button>
         </form>
         {selected && <p className="break-all text-on-surface-low">ID: {selected.id}</p>}
         {selected?.source_status?.map(ref => <p key={`${ref.kind}:${ref.id}`} className="break-all">{ref.kind}:{ref.id} — {ref.missing ? 'Source missing' : 'Source available'}</p>)}

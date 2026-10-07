@@ -95,8 +95,8 @@ export function ImportStep({ onDone, onSkip }: {
 
               {busy && job && <div role="status" className="grid gap-s rounded-lg border border-outline-var p-s">
                 <p>{job.phase === 'scanning' ? 'Preparing selected items…' : `Imported ${job.done} of ${job.total}${job.current ? ` · ${job.current}` : ''}`}</p>
-                <Button variant="secondary" size="sm" disabled={job.stopping} onClick={stop}>
-                  {job.stopping ? 'Stopping after this item…' : 'Stop after this item'}
+                <Button variant="secondary" size="sm" disabled={job.stopping} loading={job.stopping} loadingLabel="Stopping after this item…" onClick={stop}>
+                  Stop after this item
                 </Button>
               </div>}
 

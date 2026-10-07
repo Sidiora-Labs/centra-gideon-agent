@@ -1,4 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+import { createElement } from 'react'
+import { render, screen, fireEvent } from '@testing-library/react'
+import { Button } from './Button'
+import { controlAvailability } from './controlState'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -144,19 +148,24 @@ const census = () => {
 describe('the `aria-busy` exemption is measured, not asserted by comment', () => {
   it('🔑 THE PREMISE: Button publishes aria-busy from `loading`, NOT from `disabled`', () => {
     const btn = code(join(SRC, "shared/ui", 'Button.tsx'))
-    expect(btn, 'aria-busy comes from loading').toMatch(/aria-busy=\{loading \|\| undefined\}/)
+    expect(btn, 'Button uses the canonical state helper').toContain('controlAvailability(disabled, loading, disabledReason)')
+    expect(btn, 'Button publishes the helper busy state').toContain('aria-busy={state.busy}')
+    expect(controlAvailability(false, true).busy).toBe(true)
+    expect(controlAvailability(true, false).busy).toBeUndefined()
     expect(btn, 'and NOT from the disabled gate').not.toMatch(/aria-busy=\{[^}]*\bdisabled\b/)
     expect(btn, '`loading` and `disabled` are independent inputs to one off-state')
-      .toMatch(/const off = !!disabled \|\| loading/)
+      .toContain('disabled={state.nativeDisabled}')
+    expect(controlAvailability(true, false).blocked).toBe(true)
+    expect(controlAvailability(false, true).blocked).toBe(true)
   })
 
   it('🔴 the two rails no longer claim the exemption they never checked', () => {
     const triage = readFileSync(join(SRC, "shared/ui", 'disabledReasonTriage.test.ts'), 'utf8')
     expect(triage, 'the false exemption criterion is gone').not.toMatch(/aria-busy` already announces/)
-    expect(triage, 'and it says what is actually true instead').toMatch(/announces nothing|no `aria-busy`|NOT announced/)
+    expect(triage, 'busy-only disabled callers need explicit loading or a reason').toContain('!/\\bloading=/.test(tag)')
     const raw = readFileSync(join(SRC, "shared/ui", 'rawSoftOffContract.test.ts'), 'utf8')
     expect(raw, 'the false exemption criterion is gone').not.toMatch(/`aria-busy` already says so/)
-    expect(raw, 'and it says what is actually true instead').toMatch(/announces nothing|no `aria-busy`|NOT announced/)
+    expect(raw, 'the raw control triage separates busy conditions without claiming aria-busy').toContain('.some((c) => !BUSY.test(c))')
   })
 
   it('finds the population it is filtering (not vacuously green)', () => {
@@ -205,6 +214,27 @@ describe('the `aria-busy` exemption is measured, not asserted by comment', () =>
 })
 
 describe('a slow action can name what it is doing AND announce it', () => {
+  it('renders busy state with an unchanged action name, a readable progress label and blocked repeat activation', () => {
+    const action = vi.fn()
+    const view = render(createElement(Button, { children: 'Save item', loading: true, loadingLabel: 'Saving…', onClick: action }, 'Save item'))
+    const button = screen.getByRole('button', { name: 'Save item' })
+    expect(button).toHaveAttribute('aria-busy', 'true')
+    expect(button).toBeDisabled()
+    expect(button).not.toHaveClass('disabled:opacity-40')
+    expect(button).toHaveAccessibleDescription('Saving…')
+    const overlay = button.querySelector('[aria-hidden]')
+    expect(overlay).toHaveTextContent('Saving…')
+    fireEvent.click(button)
+    expect(action).not.toHaveBeenCalled()
+    view.rerender(createElement(Button, { children: 'Save item', disabled: true, onClick: action }, 'Save item'))
+    expect(button).not.toHaveAttribute('aria-busy')
+    expect(button).toHaveClass('disabled:opacity-40')
+    view.rerender(createElement(Button, { children: 'Save item', onClick: action }, 'Save item'))
+    expect(button).not.toBeDisabled()
+    fireEvent.click(button)
+    expect(action).toHaveBeenCalledOnce()
+  })
+
   const VERBS: Array<[string, string]> = [
     ['features/settings/MemoryPanel.tsx', 'Dreaming…'],
     ['features/settings/MemoryPanel.tsx', 'Linking…'],
@@ -220,10 +250,10 @@ describe('a slow action can name what it is doing AND announce it', () => {
     const btn = code(join(SRC, "shared/ui", 'Button.tsx'))
     expect(btn, 'the prop exists').toMatch(/loadingLabel\?: string/)
     expect(btn, 'and is destructured, not just declared').toMatch(/loading = false, loadingLabel,/)
-    expect(btn, 'rendered only when given, so every existing caller is unaffected')
-      .toMatch(/\{loadingLabel \? \(/)
-    expect(btn, 'a long verb truncates rather than overflowing the pill it is positioned over')
-      .toMatch(/min-w-0 items-center gap-s/)
+    expect(btn, 'label and busy state reach the shared content renderer').toContain('<ControlContent busy={loading} label={loadingLabel}>')
+    const content = code(join(SRC, 'shared/ui/controlContent.tsx'))
+    expect(content, 'the optional label is rendered only when given').toMatch(/\{label && <span/)
+    expect(content, 'a long verb truncates within the pill').toMatch(/min-w-0 max-w-full items-center gap-s/)
   })
 
   it('🔴 a labelled busy state is NOT dimmed to 40% — the word has to be readable', () => {
@@ -231,7 +261,7 @@ describe('a slow action can name what it is doing AND announce it', () => {
     expect(btn, 'the labelled case drops the dim and keeps the click refusal')
       .toMatch(/loading && loadingLabel \? 'disabled:pointer-events-none'/)
     expect(btn, 'and the bare case still dims exactly as before')
-      .toMatch(/: 'disabled:opacity-40 disabled:pointer-events-none'/)
+      .toMatch(/: 'disabled:pointer-events-none disabled:opacity-40'/)
     expect(btn, 'no competing opacity utility was added instead').not.toMatch(/disabled:opacity-100/)
   })
 
@@ -265,8 +295,8 @@ describe('a slow action can name what it is doing AND announce it', () => {
   })
 
   it('🪤 the overlay stays aria-hidden — the accessible name must remain the ACTION', () => {
-    const btn = code(join(SRC, "shared/ui", 'Button.tsx'))
-    const overlay = btn.slice(btn.indexOf('{loading && ('), btn.indexOf('</AnimatePresence>'))
+    const content = code(join(SRC, "shared/ui", 'controlContent.tsx'))
+    const overlay = content.slice(content.indexOf('{busy &&'), content.indexOf('</AnimatePresence>'))
     expect(overlay, 'the loading overlay must be decorative').toMatch(/aria-hidden/)
     expect(overlay, 'and must not become a label').not.toMatch(/aria-label|sr-only/)
   })
