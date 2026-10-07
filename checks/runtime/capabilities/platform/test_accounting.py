@@ -387,7 +387,31 @@ async def test_signed_http_and_native_read_canonical_accounting(home):
         assert result["rows"][0]["input_tokens"] == 100
         assert (await client.get(PREFIX, params={"days": "bad"})).status == 400
         assert (await client.post(PREFIX, json={})).status == 405
-        fixture = (FIXTURES / "claude_code_usage.jsonl").read_text()
+        records: list[dict[str, object] | str] = []
+        for line in (FIXTURES / "claude_code_usage.jsonl").read_text().splitlines():
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                records.append(line)
+        dated = [
+            record
+            for record in records
+            if isinstance(record, dict) and isinstance(record.get("timestamp"), str)
+        ]
+        latest = max(
+            datetime.fromisoformat(str(record["timestamp"]).replace("Z", "+00:00"))
+            for record in dated
+        )
+        shift = datetime.now(timezone.utc) - timedelta(minutes=5) - latest
+        for record in dated:
+            original = datetime.fromisoformat(
+                str(record["timestamp"]).replace("Z", "+00:00")
+            )
+            record["timestamp"] = (original + shift).isoformat()
+        fixture = "\n".join(
+            record if isinstance(record, str) else json.dumps(record)
+            for record in records
+        ) + "\n"
         imported = await client.post(
             PREFIX + "/import",
             params={"token": token},
@@ -400,6 +424,7 @@ async def test_signed_http_and_native_read_canonical_accounting(home):
         assert imported.status == 201
         receipt = await imported.json()
         assert receipt["imported_records"] == 2
+        assert receipt["invalid_lines"] == 1
         assert receipt["priced"] is False
         duplicate = await client.post(
             PREFIX + "/import",
@@ -422,7 +447,10 @@ async def test_signed_http_and_native_read_canonical_accounting(home):
                 },
             )
         ).status == 400
-        projected = await (await client.get(PREFIX, params={"token": token})).json()
+        projected = await (
+            await client.get(PREFIX, params={"token": token, "days": "1"})
+        ).json()
+        assert projected["turns"] == 3
         assert projected["imported_turns"] == 2
         provider = create_provider()
         native = await provider.invoke("platform_usage_accounting", {"days": 1})
