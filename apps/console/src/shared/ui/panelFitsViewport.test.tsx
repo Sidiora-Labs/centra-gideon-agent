@@ -1,7 +1,8 @@
+import { SidePanel } from './SidePanel'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { renderHook, act } from '@testing-library/react'
+import { renderHook, act, render, screen } from '@testing-library/react'
 import { useResizablePanel } from './useResizablePanel'
 
 
@@ -89,7 +90,26 @@ describe('the two right-docked panels both render the clamped width', () => {
 
   it('SidePanel now takes the clamp from the primitive instead of its own copy', () => {
     const src = read('shared/ui/SidePanel.tsx')
-    expect(src).toMatch(/fitWidth: dockW/)
+    expect(src).toMatch(/const \{ fitWidth, onHandleDown, onHandleKey, min, max \} = useResizablePanel/)
+    expect(src).toContain('const dockW = Math.min(fitWidth, dockMaxWidth())')
+    expect(src).toContain('Math.floor(workspaceWidth / 2)')
+    expect(src).toContain('animate={{ width: dockW, opacity: 1 }}')
+    expect(src).toContain('style={{ width: dockW }}')
+    const originalWidth = window.innerWidth
+    const key = 'actual-sidepanel-fit'
+    try {
+      setViewport(1600)
+      localStorage.setItem(key, '720')
+      const { container, unmount } = render(<SidePanel title="Inspector" storeKey={key} onClose={() => {}}>Panel content</SidePanel>)
+      expect(container.querySelector('[style="width: 720px;"]')).toBeTruthy()
+      setViewport(1024)
+      expect(screen.getByRole('separator')).toHaveAttribute('aria-valuemax', '512')
+      expect(container.querySelector('[style="width: 512px;"]')).toBeTruthy()
+      unmount()
+    } finally {
+      localStorage.removeItem(key)
+      setViewport(originalWidth)
+    }
     expect(src, 'the local viewport state must be gone').not.toMatch(/setViewportW/)
     expect(src, 'and its hand-rolled clamp with it').not.toMatch(/Math\.min\(width, Math\.max\(0, viewportW/)
   })

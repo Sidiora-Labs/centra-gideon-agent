@@ -161,18 +161,8 @@ describe('a section glyph is muted unless it marks something live', () => {
     for (const n of readdirSync(DIR)) {
       if (!/\.tsx$/.test(n) || /\.(test|doc)\.tsx$/.test(n)) continue
       const src = clean(readFileSync(join(DIR, n), 'utf8'))
-      for (const m of src.matchAll(/<Section\b/g)) {
-        let depth = 0
-        for (let i = m.index! + m[0].length; i < src.length; i++) {
-          const c = src[i]
-          if (c === '{') depth++
-          else if (c === '}') depth--
-          else if (c === '>' && depth === 0) {
-            const tag = src.slice(m.index!, i + 1)
-            if (/\sicon=/.test(tag)) out.push({ file: n, tag, muted: /iconTone="muted"/.test(tag) })
-            break
-          }
-        }
+      for (const tag of jsxTags(src, nativeBindings(src, 'Section'))) {
+        if (tag.attributes.has('icon')) out.push({ file: n, tag: tag.tag, muted: tag.attributes.get('iconTone') === '"muted"' })
       }
     }
     return out
@@ -187,6 +177,12 @@ describe('a section glyph is muted unless it marks something live', () => {
     const coral = sections.filter((s) => !s.muted).map((s) => s.file)
     expect([...new Set(coral)].sort(), 'coral means "alive/active/primary" — not a category glyph')
       .toEqual([...CORAL_IS_MEANT_HERE].sort())
+    const { container } = render(<Section title="Secrets" icon={Boxes} iconTone="muted">Values</Section>)
+    expect(container.querySelector('h2 svg')).toHaveClass('text-on-surface-low')
+    expect(container.querySelector('h2')).toHaveAttribute('data-type', 'title-m')
+    const tokens = readFileSync(join(DIR, '../../shared/theme/tokens.css'), 'utf8')
+    expect(tokens).toMatch(/\[data-type="title-m"\][^}]*font-size:\s*0\.9375rem/)
+
   })
 
   it('the three that were muted stay muted', () => {

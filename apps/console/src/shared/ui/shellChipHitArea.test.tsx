@@ -1,3 +1,5 @@
+import { jsxTags } from '../testing/jsxContracts'
+import { namedOwner } from '../testing/sourceOwners'
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -19,7 +21,14 @@ describe('the degraded chip is a 24px target on every route', () => {
   })
 
   it('keeps the accessible name it needs when icon-only', () => {
-    expect(src).toMatch(/aria-label=\{isMobile \? summary : undefined\}/)
+    const owner = namedOwner(src, 'DegradedChip')
+    const trigger = jsxTags(owner, ['button'])[0]
+    expect(trigger.attributes.get('aria-label')).toBe('{isMobile ? state.summary : undefined}')
+    expect(owner).toContain('const state = degradedPresentation(reading)')
+    expect(trigger.element).toContain('{!isMobile && <span>{state.summary}</span>}')
+    expect(trigger.attributes.get('className')).toMatch(/\bmin-h-6\b/)
+    expect(readFileSync(join(SRC, '../../../node_modules/tailwindcss/theme.css'), 'utf8')).toContain('--spacing: 0.25rem;')
+    expect(6 * 0.25 * 16, 'native spacing at the default 16px root is a 24px minimum').toBe(24)
   })
 })
 

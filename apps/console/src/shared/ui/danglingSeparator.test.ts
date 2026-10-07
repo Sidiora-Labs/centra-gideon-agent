@@ -1,3 +1,8 @@
+import { createElement } from 'react'
+import { render, screen } from '@testing-library/react'
+import { AgentCard } from '../vendor/assistant-ui/elements/agent-card'
+import { jsxTags } from '../testing/jsxContracts'
+import { namedOwner } from '../testing/sourceOwners'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -16,9 +21,19 @@ describe('the agents meta line cannot strand its separator', () => {
   })
 
   it('gates the dot on the model that it separates from', () => {
-    expect(src, 'the model is optional, so the separator must be too').toMatch(
-      /\{agent\.model \? '· ' : ''\}\{agent\.description\}/,
-    )
+    const owner = namedOwner(src, 'NativeRow')
+    expect(src).toContain("import { AgentCard } from '../../shared/vendor/assistant-ui/elements/agent-card'")
+    const card = jsxTags(owner, ['AgentCard'])[0]
+    expect(card.attributes.get('model')).toBe('{agent.model}')
+    expect(card.attributes.get('description')).toBe("{agent.description ?? ''}")
+    const { rerender, container } = render(createElement(AgentCard, { name: 'Writer', description: 'Drafts reports', provider: 'Native', skills: [] }))
+    expect(screen.getByText('Drafts reports').tagName).toBe('P')
+    expect(container.textContent).not.toMatch(/[·•]/)
+    rerender(createElement(AgentCard, { name: 'Writer', description: 'Drafts reports', provider: 'Native', model: 'model-a', skills: [] }))
+    expect(screen.getByText('Drafts reports').tagName).toBe('P')
+    expect(screen.getByText('model-a')).toBeTruthy()
+    expect(screen.getByText('Drafts reports')).not.toContainElement(screen.getByText('model-a'))
+    expect(container.textContent).not.toMatch(/[·•]/)
   })
 
   it('no longer hard-codes the dot onto the description', () => {

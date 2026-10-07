@@ -1,3 +1,6 @@
+import { createElement } from 'react'
+import { render, screen } from '@testing-library/react'
+import { LoadError } from './ListScaffold'
 import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -42,7 +45,15 @@ describe("LoadError's what composes a grammatical headline", () => {
   })
 
   it('every value is lowercase-leading unless it is a proper noun', () => {
-    const shouty = values.filter((v) => /^[A-Z]{2,}/.test(v.value)).map((v) => `${v.rel}: ${v.value}`)
+    // Initialisms name the actual catalog/transport rather than shouting a common noun.
+    const initialisms = new Set(['API', 'MCP'])
+    const shouty = values.filter((v) => /^[A-Z]{2,}/.test(v.value) && !initialisms.has(v.value.split(' ')[0])).map((v) => `${v.rel}: ${v.value}`)
+    expect(values.some((v) => v.value === 'API catalog')).toBe(true)
+    expect(values.some((v) => v.value === 'MCP servers')).toBe(true)
+    const { rerender } = render(createElement(LoadError, { what: 'API catalog' }))
+    expect(screen.getByRole('heading', { name: "Couldn't load your API catalog" })).toBeTruthy()
+    rerender(createElement(LoadError, { what: 'MCP servers' }))
+    expect(screen.getByRole('heading', { name: "Couldn't load your MCP servers" })).toBeTruthy()
     expect(shouty, 'no SHOUTING nouns').toEqual([])
   })
 
