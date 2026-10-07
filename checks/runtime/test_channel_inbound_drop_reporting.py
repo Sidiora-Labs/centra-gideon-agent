@@ -449,7 +449,9 @@ def test_the_pairing_short_circuit_reports_through_the_same_owner(caplog):
     assert "policy=-" in msg and "pair or allow this sender" not in msg
 
 
-def test_no_inbound_verdict_is_returned_without_passing_through_the_one_reporter():
+def test_no_inbound_verdict_is_returned_without_passing_through_the_one_reporter(
+    monkeypatch, caplog
+):
     """Every mint site reads ``return report_inbound_verdict(...)`` — checked, not trusted.
 
     ``guard_inbound`` shipped with five bare ``return TrustVerdict(...)`` statements and
@@ -487,6 +489,45 @@ def test_no_inbound_verdict_is_returned_without_passing_through_the_one_reporter
             f"{name} returns a verdict without reporting it — route it through "
             "channel_trust.report_inbound_verdict so the drop is not silent"
         )
+
+    from types import SimpleNamespace
+
+    from gideon.integrations import channel_transports
+
+    provider = "reporter-owner-test"
+    transport = SimpleNamespace(
+        capabilities=lambda: SimpleNamespace(inbound=True, owner_pairing=True)
+    )
+    monkeypatch.setattr(
+        channel_transports,
+        "get_transport",
+        lambda name: transport if name == provider else None,
+    )
+    code = ct.create_owner_pairing_code(provider)
+    caplog.clear()
+    sender = "new-owner-identity"
+    verdict = ct.guard_inbound(
+        None,
+        provider,
+        sender,
+        channel_id="direct-owner-thread",
+        is_dm=True,
+        text=code,
+    )
+    assert verdict.allowed is False
+    assert verdict.reason == "owner_paired"
+    assert verdict.canned_reply == ct.CANNED_OWNER_PAIRED_REPLY
+    assert verdict.meta == {"owner_paired": True}
+    assert ct.owner_ref(provider)["owner_id"] == sender
+    assert not ct.owner_pairing_code_outstanding(provider)
+    emitted = lines(caplog)
+    assert len(emitted) == 1
+    logger_name, level, message = emitted[0]
+    assert logger_name == "gideon.integrations.channel_trust"
+    assert level == "INFO"
+    assert "reason=owner_paired" in message
+    assert "sender=<paired-owner>" in message
+    assert code not in message and sender not in message
 
 
 def test_the_log_line_never_carries_the_message_body(caplog):

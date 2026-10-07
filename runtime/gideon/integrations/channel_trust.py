@@ -875,11 +875,18 @@ def guard_inbound(
         and owner_pairing_code_outstanding(provider)
     ):
         if redeem_owner_pairing_code(provider, sender_id, candidate, sender_name):
-            return TrustVerdict(
-                False,
-                "owner_paired",
-                canned_reply=CANNED_OWNER_PAIRED_REPLY,
-                meta={"owner_paired": True},
+            return report_inbound_verdict(
+                provider,
+                TrustVerdict(
+                    False,
+                    "owner_paired",
+                    canned_reply=CANNED_OWNER_PAIRED_REPLY,
+                    meta={"owner_paired": True},
+                ),
+                sender_id=sender_id,
+                channel_id=channel_id,
+                is_dm=is_dm,
+                policy=policy,
             )
     decision = context.known_verdict(policy, text)
     if decision is None:
