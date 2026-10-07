@@ -337,7 +337,6 @@ async def test_real_api_contract_snapshots_for_native_sorting_consumer(
         api_inbox_sort,
         api_inbox_status,
     )
-
     from gideon.interfaces.dashboard.token_auth import (
         generate_token,
         token_auth_middleware,

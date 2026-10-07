@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { branchIndexOf } from './branchLineage'
 import { deriveSessionMarkers, EXCERPT_MAX, LABEL_MAX } from './sessionMarkers'
 import { assistantTurn, hydrateTurns, userTurn, type ChatTurn, type HistMsg } from './chatTypes'
@@ -273,21 +275,43 @@ describe('deriveSessionMarkers — ordering', () => {
   })
 })
 
-describe('deriveSessionMarkers — agrees with the durable backend index', () => {
-  const fixture = JSON.parse(
-    readFileSync(join(process.cwd(), '../../checks/runtime/fixtures/chat_index_parity.json'), 'utf8'),
-  ) as { messages: HistMsg[]; expected: Record<string, unknown>[] }
+describe('deriveSessionMarkers — consumes reopened canonical conversation history', () => {
+  let home: string
+  let fixture: { messages: HistMsg[]; journal: string }
+  beforeAll(() => {
+    home = mkdtempSync(join(tmpdir(), 'gideon-marker-history-'))
+    const root = resolve(process.cwd(), '../..')
+    const output = execFileSync(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/persisted_chat_history.py'], {
+      cwd: root, env: { ...process.env, PYTHONPATH: join(root, 'runtime'), GIDEON_HOME: home }, encoding: 'utf8', timeout: 20_000,
+    })
+    fixture = JSON.parse(output) as typeof fixture
+    const durable = readFileSync(join(home, fixture.journal), 'utf8').trim().split('\n').map(line => JSON.parse(line) as { _type?: string; source_event_id?: string })
+    expect(durable[0]._type).toBe('metadata')
+    expect(durable.slice(1)).toEqual(fixture.messages)
+    expect(durable.slice(1)).toHaveLength(8)
+    expect(durable.slice(1).every(row => row.source_event_id?.startsWith('event:'))).toBe(true)
+  })
+  afterAll(() => { if (home) rmSync(home, { recursive: true, force: true }) })
 
-  it('derives the shared vector marker for marker, coordinates included', () => {
+  it('projects saved messages and event metadata into explicit marker coordinates', () => {
     const markers = deriveSessionMarkers(hydrateTurns(fixture.messages))
     expect(markers.map((m) => ({
       id: m.id, kind: m.kind, label: m.label, role: m.role,
       turn_index: m.turnIndex, jump_index: m.jumpIndex, failed_tool: m.failedTool,
-    }))).toEqual(fixture.expected)
+    }))).toEqual([
+      { id: 't0', kind: 'turn', label: 'Inspect saved history', role: 'user', turn_index: 0, jump_index: 0, failed_tool: false },
+      { id: 't1', kind: 'turn', label: 'First response Second response', role: 'assistant', turn_index: 1, jump_index: 2, failed_tool: false },
+      { id: 't2', kind: 'turn', label: 'Retry safely', role: 'user', turn_index: 2, jump_index: 3, failed_tool: false },
+      { id: 't3', kind: 'turn', label: 'Stopped safely', role: 'assistant', turn_index: 3, jump_index: 4, failed_tool: true },
+      { id: 't3s0', kind: 'approval', label: 'Terminal', role: 'assistant', turn_index: 3, jump_index: 4, failed_tool: true },
+      { id: 't3s1', kind: 'tool', label: 'Terminal', role: 'assistant', turn_index: 3, jump_index: 4, failed_tool: true },
+      { id: 't3s2', kind: 'error', label: 'The command failed', role: 'assistant', turn_index: 3, jump_index: 4, failed_tool: true },
+    ])
   })
 
-  it('every jump coordinate is the one forking that turn would take', () => {
+  it('retains the fork coordinates after reopening merged assistant records', () => {
     const turns = hydrateTurns(fixture.messages)
+    expect(turns.map((_, index) => branchIndexOf(turns, index))).toEqual([0, 2, 3, 4])
     for (const m of deriveSessionMarkers(turns)) expect(m.jumpIndex).toBe(branchIndexOf(turns, m.turnIndex))
   })
 })
