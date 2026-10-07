@@ -6,6 +6,7 @@ separately by the message-source providers in ``gideon.integrations.inbox_provid
 """
 
 import asyncio
+import copy
 import json
 import logging
 import threading
@@ -607,7 +608,7 @@ class InboxStore:
                 atomic_write(target, json.dumps(document, indent=2), mode=0o600)
             self._dirty = False
             self._baseline_items = {
-                identity: dict(row) for identity, row in merged_items.items()
+                identity: copy.deepcopy(row) for identity, row in merged_items.items()
             }
             self.items = {
                 identity: InboxItem.from_dict(row)
@@ -713,7 +714,7 @@ class InboxStore:
             return None
         item.set_status_for(owner, status)
         self.save()
-        return item
+        return self.items.get(item_id)
 
     def cleanup_by_retention(self, retention_days: int = 90) -> int:
         """Delete items older than *retention_days*, regardless of status.

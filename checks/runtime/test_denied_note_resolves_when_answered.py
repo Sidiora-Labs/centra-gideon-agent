@@ -32,31 +32,37 @@ async def _pending(state, approval_id):
         if entry is not None:
             return entry
         await asyncio.sleep(0.005)
-    raise AssertionError("approval request did not enter the real dashboard registry")
+    raise AssertionError(
+        f"approval request did not enter the real dashboard registry: {state._pending_approvals}; transcripts: {[s.messages for s in state._sessions.values()]}"
+    )
 
 
 @pytest.mark.asyncio
 async def test_only_exact_owner_retried_call_resolves_the_original_note(
     tmp_path, monkeypatch
 ):
+    import uuid
+
+    from gideon.automation.workflows import store
+    from gideon.automation.workflows.models import RunStatus, WorkflowRun
+    from gideon.interfaces.dashboard.auto_denials import bind_current_reentry_call
+    from gideon.security.approval_answer import APP
+
     home = tmp_path / "gideon"
     home.mkdir()
     monkeypatch.setenv("GIDEON_HOME", str(home))
     state = _state(home)
     principal = Principal(OWNER, "owner-session")
+    foreign = Principal(APP, "untrusted-app")
     state.get_or_create_session(principal.label)
-    run_id = "run-retry"
-    node_id = "extract"
-    from gideon.automation.workflows import store
-    from gideon.automation.workflows.models import RunStatus, WorkflowRun
-
+    run_id, node_id = "run-retry", "extract"
     store.create(
         WorkflowRun(
             id=run_id, workflow_name="denied-call-retry", status=RunStatus.RUNNING
         )
     )
     session = f"workflow:{run_id}:{node_id}"
-    source = session
+    chat_session = state.get_or_create_session(session)
     tool_input = json.dumps({"query": "find the recorded result"})
     fingerprint = call_fingerprint("search", tool_input)
     note_id = record_auto_denial(
@@ -66,48 +72,101 @@ async def test_only_exact_owner_retried_call_resolves_the_original_note(
         tool="search",
         fingerprint=fingerprint,
         reason="expired",
-        source=source,
+        source=session,
     )
     assert note_id
-
-    approval_id = f"{session}:call-retry"
-
-    async def retry(call_input):
-        with owner_reentry_attempt(
-            state,
-            note_id,
-            principal,
-            origin_kind="workflow",
-            origin_id=run_id,
-            node_id=node_id,
-            attempt_id="rewind:root.extract:1:1",
-        ):
-            return await state.request_approval(
-                approval_id,
-                source,
-                "search",
-                tool_input=call_input,
-                session=session,
-                asked_by=f"run:{run_id}",
-            )
-
-    task = asyncio.create_task(retry(tool_input))
-    pending = await _pending(state, approval_id)
-    assert pending["_auto_denied_note_id"] == note_id
-    assert pending["_call_fingerprint"] == fingerprint
-    assert pending["_auto_denied_origin_kind"] == "workflow"
-    assert pending["_auto_denied_origin_id"] == run_id
-    assert pending["_auto_denied_attempt_id"] == "rewind:root.extract:1:1"
-    assert (
-        state.resolve_approval_revision(
-            approval_id, True, pending["revision"], by=principal
-        )
-        == "resolved"
+    reentry = dict(
+        origin_kind="workflow",
+        origin_id=run_id,
+        node_id=node_id,
+        attempt_id="rewind:root.extract:1:1",
+        session=session,
     )
-    assert await task is True
+    with owner_reentry_attempt(state, note_id, foreign, **reentry) as refused:
+        assert refused is None
+        assert bind_current_reentry_call(state, fingerprint, session=session) is None
+    with owner_reentry_attempt(state, note_id, principal, **reentry) as active:
+        assert active is not None
+        assert (
+            bind_current_reentry_call(
+                state,
+                call_fingerprint("search", {"query": "mismatch"}),
+                session=session,
+            )
+            is None
+        )
+        other_state = _state(home)
+        assert (
+            bind_current_reentry_call(other_state, fingerprint, session=session) is None
+        )
+        assert (
+            bind_current_reentry_call(state, fingerprint, session="different-session")
+            is None
+        )
+        bound = bind_current_reentry_call(state, fingerprint, session=session)
+        assert bound is active
+        assert bind_current_reentry_call(state, fingerprint, session=session) is None
+
+        request_id = uuid.uuid4().hex
+        state.broadcast_ws(
+            "approval",
+            {
+                "session": session,
+                "id": request_id,
+                "tool": "search",
+                "tool_input": tool_input,
+                "_call_fingerprint": fingerprint,
+                "_auto_denied_note_id": bound.note_id,
+                "_auto_denied_origin_kind": bound.origin_kind,
+                "_auto_denied_origin_id": bound.origin_id,
+                "_auto_denied_attempt_id": bound.attempt_id,
+                "_auto_denied_node_id": bound.node_id,
+            },
+        )
+        future = asyncio.get_running_loop().create_future()
+        chat_session._approval_futures[request_id] = future
+        approval_id = f"{session}:{request_id}"
+        pending = await _pending(state, approval_id)
+        assert pending["_auto_denied_note_id"] == note_id
+        assert pending["_call_fingerprint"] == fingerprint
+        assert pending["_auto_denied_origin_kind"] == "workflow"
+        assert pending["_auto_denied_origin_id"] == run_id
+        assert pending["_auto_denied_attempt_id"] == reentry["attempt_id"]
+        assert (
+            state.resolve_approval_revision(
+                approval_id, True, "stale-revision", by=principal
+            )
+            == "revision_conflict"
+        )
+        assert not future.done()
+        assert (
+            state.resolve_approval_revision(
+                approval_id, True, pending["revision"], by=foreign
+            )
+            != "resolved"
+        )
+        assert not future.done()
+        assert state._inbox_svc.inbox.items[note_id].status_for("") not in {
+            ItemStatus.HANDLED.value,
+            ItemStatus.DISMISSED.value,
+        }
+        assert (
+            state.resolve_approval_revision(
+                approval_id, True, pending["revision"], by=principal
+            )
+            == "resolved"
+        )
+        assert await future == "approved"
+        chat_session._approval_futures.pop(request_id)
     row = state._inbox_svc.inbox.items[note_id]
     assert row.status_for("") == ItemStatus.HANDLED.value
     assert row.refs["auto_denied_outcome"] == "approved"
+    durable = InboxStore(path=home / "inbox.json")
+    durable.load()
+    assert durable.items[note_id].status_for("") == ItemStatus.HANDLED.value
+    with owner_reentry_attempt(state, note_id, principal, **reentry) as closed:
+        assert closed is None
+        assert bind_current_reentry_call(state, fingerprint, session=session) is None
 
     wrong_input = json.dumps({"query": "different call"})
     second_id = record_auto_denial(
@@ -117,29 +176,39 @@ async def test_only_exact_owner_retried_call_resolves_the_original_note(
         tool="search",
         fingerprint=call_fingerprint("search", wrong_input),
         reason="expired",
-        source=source,
+        source=session,
     )
     assert second_id and second_id != note_id
-    wrong_approval_id = f"{session}:wrong-call"
-    wrong_task = asyncio.create_task(
-        state.request_approval(
-            wrong_approval_id,
-            source,
-            "search",
-            tool_input=wrong_input,
-            session=session,
-            asked_by=f"run:{run_id}",
+    assert (
+        bind_current_reentry_call(
+            state, call_fingerprint("search", wrong_input), session=session
         )
+        is None
     )
-    wrong_pending = await _pending(state, wrong_approval_id)
+    wrong_request = uuid.uuid4().hex
+    state.broadcast_ws(
+        "approval",
+        {
+            "session": session,
+            "id": wrong_request,
+            "tool": "search",
+            "tool_input": wrong_input,
+            "_call_fingerprint": call_fingerprint("search", wrong_input),
+        },
+    )
+    wrong_future = asyncio.get_running_loop().create_future()
+    chat_session._approval_futures[wrong_request] = wrong_future
+    wrong_id = f"{session}:{wrong_request}"
+    wrong_pending = await _pending(state, wrong_id)
     assert wrong_pending.get("_auto_denied_note_id", "") == ""
     assert (
         state.resolve_approval_revision(
-            wrong_approval_id, True, wrong_pending["revision"], by=principal
+            wrong_id, True, wrong_pending["revision"], by=principal
         )
         == "resolved"
     )
-    assert await wrong_task is True
+    assert await wrong_future == "approved"
+    chat_session._approval_futures.pop(wrong_request)
     assert state._inbox_svc.inbox.items[second_id].status_for("") not in {
         ItemStatus.HANDLED.value,
         ItemStatus.DISMISSED.value,

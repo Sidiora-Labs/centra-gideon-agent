@@ -41,10 +41,13 @@ class _ScriptedModel:
 
     supports_tools = True
     _model = "scripted"
+    first_token_timeout_secs = None
 
     def __init__(self, turns: list[list[AgentEvent]]) -> None:
         self._turns = turns
         self.calls = 0
+        self.active_generations = 0
+        self._cancel_requested = False
         self.last_tools = None
         self.seen_messages: list[list[dict]] = []
 
@@ -53,12 +56,55 @@ class _ScriptedModel:
         self.seen_messages.append(list(messages))
         idx = min(self.calls, len(self._turns) - 1)
         self.calls += 1
-        for ev in self._turns[idx]:
-            yield ev
+        self._cancel_requested = False
+        self.active_generations += 1
+        try:
+            for ev in self._turns[idx]:
+                if self._cancel_requested:
+                    return
+                yield ev
+        finally:
+            self.active_generations -= 1
+
+    async def served_context_window(self) -> int | None:
+        return None
+
+    async def cancel(self, *, wait_ack_timeout: float = 0.0) -> str:
+        if not self.active_generations:
+            return "no_turn"
+        self._cancel_requested = True
+        return "acked"
+
+
+@pytest.mark.asyncio
+async def test_scripted_model_cancellation_closes_its_active_generation():
+    model = _ScriptedModel(
+        [
+            [
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="first"),
+                AgentEvent(kind=EVENT_TEXT_CHUNK, text="second"),
+            ]
+        ]
+    )
+    assert model.first_token_timeout_secs is None
+    assert await model.served_context_window() is None
+    assert await model.cancel() == "no_turn"
+    stream = model.complete([])
+    assert (await anext(stream)).text == "first"
+    assert model.active_generations == 1
+    assert await model.cancel() == "acked"
+    assert [event async for event in stream] == []
+    assert model.active_generations == 0
+    assert await model.cancel() == "no_turn"
 
 
 class _Tool(ToolProvider):
-    def __init__(self, name="echo", requires_approval=False, interactive=False) -> None:
+    def __init__(
+        self,
+        name="echo",
+        requires_approval=False,
+        interactive=False,
+    ) -> None:
         self._name = name
         self._req = requires_approval
         self._interactive = interactive
@@ -765,7 +811,6 @@ class _RiskyTool(ToolProvider):
                 description="d",
                 parameters={"type": "object"},
                 requires_approval=False,
-                risk_level=RiskLevel.SAFE,
             ),
         ]
 
