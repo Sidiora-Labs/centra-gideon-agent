@@ -9,22 +9,39 @@ import PrScreening from './PrScreening'
 let server: ChildProcess
 let baseUrl: string
 let home: string
+const networkFetch = globalThis.fetch
 beforeAll(async () => {
   home = await mkdtemp(`${tmpdir()}/gideon-pr-screening-`)
   const root = resolve(process.cwd(), '../..')
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/platform/pr_screening_ui_server.py'], {
-    cwd: root, env: { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home, GIDEON_DEV_NO_AUTH: '1' }, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: root, env: { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'],
   })
   let diagnostics = ''
   server.stderr!.on('data', chunk => { diagnostics += chunk.toString() })
   baseUrl = await new Promise<string>((accept, reject) => {
     const lines = createInterface({ input: server.stdout! })
-    lines.on('line', line => { if (/^\d+$/.test(line)) { accept(`http://127.0.0.1:${line}`); lines.close() } })
+    lines.on('line', line => {
+      if (!line.startsWith('{')) return
+      try {
+        const ready: { port: number; token: string } = JSON.parse(line)
+        if (!Number.isInteger(ready.port) || !ready.token) throw new Error('Invalid native readiness')
+        const origin = `http://127.0.0.1:${ready.port}`
+        globalThis.fetch = (input, init) => {
+          const url = new URL(input instanceof Request ? input.url : String(input), origin)
+          const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+          if (url.origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+          return networkFetch(input, { ...init, headers })
+        }
+        accept(origin)
+        lines.close()
+      } catch (error) { reject(error) }
+    })
     server.once('error', reject)
     server.once('exit', code => reject(new Error(`HTTP process exited ${code}: ${diagnostics}`)))
   })
 })
 afterAll(async () => {
+  globalThis.fetch = networkFetch
   if (server && server.exitCode === null) await new Promise<void>(done => { server.once('exit', () => done()); server.kill('SIGTERM') })
   await rm(home, { recursive: true, force: true })
 })
@@ -33,7 +50,7 @@ it('renders pinned source and real model-unavailable screening result', async ()
   expect(await screen.findByRole('status')).toHaveTextContent('captured')
   expect(screen.getByText('Head: ' + 'a'.repeat(40))).toBeVisible()
   expect(screen.getByRole('button', { name: 'Authorize GitHub review' })).toBeDisabled()
-  fireEvent.click(screen.getByRole('button', { name: 'Screen pull request' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Screen pull request example/project #7' }))
   await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('blocked'))
   expect(screen.getByText(/Screening unavailable or invalid/)).toBeVisible()
   expect(screen.getByRole('button', { name: 'Authorize GitHub review' })).toBeDisabled()

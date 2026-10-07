@@ -10,13 +10,14 @@ import IntegrationApps from './IntegrationApps'
 let server: ChildProcess
 let baseUrl: string
 let home: string
+const networkFetch = globalThis.fetch
 
 beforeAll(async () => {
   home = await mkdtemp(`${tmpdir()}/gideon-integration-apps-`)
   const root = resolve(process.cwd(), '../..')
   server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['checks/runtime/capabilities/platform/integration_apps_ui_server.py'], {
     cwd: root,
-    env: { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home, GIDEON_DEV_NO_AUTH: '1' },
+    env: { ...process.env, PYTHONPATH: `${root}/runtime`, GIDEON_HOME: home },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   let diagnostics = ''
@@ -24,10 +25,20 @@ beforeAll(async () => {
   baseUrl = await new Promise<string>((accept, reject) => {
     const lines = createInterface({ input: server.stdout! })
     lines.on('line', line => {
-      if (/^\d+$/.test(line)) {
-        accept(`http://127.0.0.1:${line}`)
+      if (!line.startsWith('{')) return
+      try {
+        const ready: { port: number; token: string } = JSON.parse(line)
+        if (!Number.isInteger(ready.port) || !ready.token) throw new Error('Invalid native readiness')
+        const origin = `http://127.0.0.1:${ready.port}`
+        globalThis.fetch = (input, init) => {
+          const url = new URL(input instanceof Request ? input.url : String(input), origin)
+          const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+          if (url.origin === origin) headers.set('Authorization', `Bearer ${ready.token}`)
+          return networkFetch(input, { ...init, headers })
+        }
+        accept(origin)
         lines.close()
-      }
+      } catch (error) { reject(error) }
     })
     server.once('error', reject)
     server.once('exit', code => reject(new Error(`HTTP process exited ${code}: ${diagnostics}`)))
@@ -35,6 +46,7 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  globalThis.fetch = networkFetch
   if (server && server.exitCode === null) {
     await new Promise<void>(done => {
       server.once('exit', () => done())
@@ -59,7 +71,14 @@ it('prepares an exact Jira mutation for review and fails closed before network w
   render(<IntegrationApps baseUrl={baseUrl} />)
   expect(screen.getByRole('region', { name: 'Integration applications' })).toBeVisible()
   expect(screen.getByText(/Credentials are named references/)).toBeVisible()
-  expect(screen.getByRole('button', { name: 'Save connection' })).toBeDisabled()
+  const unavailableSave = screen.getByRole('button', { name: 'Save connection' })
+  expect(unavailableSave).toHaveAttribute('aria-disabled', 'true')
+  expect(unavailableSave).toHaveAccessibleDescription('Enter a connection label')
+  unavailableSave.focus()
+  expect(unavailableSave).toHaveFocus()
+  fireEvent.click(unavailableSave)
+  const unchanged = await (await fetch(`${baseUrl}/api/capabilities/platform/integration-apps`)).json()
+  expect(unchanged.connections).toHaveLength(0)
   const option = await saveJira()
   fireEvent.change(screen.getByLabelText('Integration connection'), { target: { value: option.value } })
   expect(screen.getByLabelText('Integration operation')).toHaveValue('jira_auth')
@@ -72,11 +91,11 @@ it('prepares an exact Jira mutation for review and fails closed before network w
   expect(screen.getByText('Remote mutation: owner approval is required.')).toBeVisible()
   const article = status.closest('article')!
   expect(within(article).getByText(/Owner reviewed release/)).toBeVisible()
-  expect(within(article).getByRole('button', { name: 'Approve and execute' })).not.toBeDisabled()
-  fireEvent.click(within(article).getByRole('button', { name: 'Approve and execute' }))
+  expect(within(article).getByRole('button', { name: 'Approve and execute jira_comment for Delivery Jira' })).not.toBeDisabled()
+  fireEvent.click(within(article).getByRole('button', { name: 'Approve and execute jira_comment for Delivery Jira' }))
   await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('failed'))
   expect(screen.getByText('Named credential unavailable')).toBeVisible()
-  expect(within(article).getByRole('button', { name: 'Approve and execute' })).toHaveAttribute('aria-disabled', 'true')
+  expect(within(article).getByRole('button', { name: 'Approve and execute jira_comment for Delivery Jira' })).toHaveAttribute('aria-disabled', 'true')
   const persisted = await (await fetch(`${baseUrl}/api/capabilities/platform/integration-apps`)).json()
   expect(persisted.connections).toHaveLength(1)
   expect(persisted.connections[0].credential_name).toBe('jira-delivery-token')

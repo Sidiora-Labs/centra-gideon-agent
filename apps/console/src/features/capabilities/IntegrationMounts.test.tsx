@@ -16,16 +16,29 @@ let privacyOrigin = ''
 let platformHome = ''
 let privacyHome = ''
 const networkFetch = globalThis.fetch
-const testPython = process.env.GIDEON_TEST_PYTHON || '/tmp/gideon-runtime-venv/bin/python'
+const tokens = new Map<string, string>()
+function authenticatedFetch(input: RequestInfo | URL, init?: RequestInit) {
+  const url = new URL(input instanceof Request ? input.url : String(input), privacyOrigin || location.origin)
+  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+  const token = tokens.get(url.origin)
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  return networkFetch(url, { ...init, headers })
+}
+const testPython = process.env.GIDEON_TEST_PYTHON || 'python3'
 
 function waitForOrigin(server: ChildProcess, diagnostics: () => string) {
   return new Promise<string>((accept, reject) => {
     const lines = createInterface({ input: server.stdout! })
     lines.on('line', line => {
-      if (/^\d+$/.test(line)) {
-        accept(`http://127.0.0.1:${line}`)
+      if (!line.startsWith('{')) return
+      try {
+        const ready: { port: number; token: string } = JSON.parse(line)
+        if (!Number.isInteger(ready.port) || !ready.token) throw new Error('Invalid native readiness')
+        const origin = `http://127.0.0.1:${ready.port}`
+        tokens.set(origin, ready.token)
+        accept(origin)
         lines.close()
-      }
+      } catch (error) { reject(error) }
     })
     server.once('error', reject)
     server.once('exit', code => reject(new Error(`HTTP process exited ${code}: ${diagnostics()}`)))
@@ -40,7 +53,7 @@ async function terminate(server: ChildProcess) {
 }
 
 async function json(origin: string, path: string, method = 'GET', body?: unknown) {
-  const response = await networkFetch(origin + path, {
+  const response = await authenticatedFetch(origin + path, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
@@ -56,20 +69,21 @@ beforeAll(async () => {
   let platformDiagnostics = ''
   platformServer = spawn(testPython, ['checks/runtime/capabilities/platform/integration_apps_ui_server.py'], {
     cwd: root,
-    env: { ...process.env, PYTHONPATH: join(root, 'runtime'), GIDEON_HOME: platformHome, GIDEON_DEV_NO_AUTH: '1' },
+    env: { ...process.env, PYTHONPATH: join(root, 'runtime'), GIDEON_HOME: platformHome },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   platformServer.stderr!.on('data', chunk => { platformDiagnostics += chunk.toString() })
   platformOrigin = await waitForOrigin(platformServer, () => platformDiagnostics)
   let privacyDiagnostics = ''
   privacyServer = spawn(testPython, ['-u', '-c', `
-import asyncio, os
+import asyncio, os, json
 from pathlib import Path
 from aiohttp import web
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_privacy import register as register_privacy
 from gideon.interfaces.dashboard.handlers.capabilities_wellbeing_brokers import register as register_brokers
 async def main():
- app = web.Application()
+ app = web.Application(middlewares=[token_auth_middleware()])
  home = Path(os.environ['GIDEON_HOME'])
  register_privacy(app, home)
  register_brokers(app, home)
@@ -77,7 +91,7 @@ async def main():
  await runner.setup()
  site = web.TCPSite(runner, '127.0.0.1', 0)
  await site.start()
- print(site._server.sockets[0].getsockname()[1], flush=True)
+ print(json.dumps({"port": site._server.sockets[0].getsockname()[1], "token": generate_token("integration-test-owner")}), flush=True)
  await asyncio.Event().wait()
 asyncio.run(main())
 `], {
@@ -87,6 +101,7 @@ asyncio.run(main())
   })
   privacyServer.stderr!.on('data', chunk => { privacyDiagnostics += chunk.toString() })
   privacyOrigin = await waitForOrigin(privacyServer, () => privacyDiagnostics)
+  globalThis.fetch = authenticatedFetch
 })
 
 afterAll(async () => {
@@ -126,7 +141,7 @@ test('selected privacy subject keeps fact history and organization controls besi
   const broker = await json(privacyOrigin, base + '/brokers', 'POST', { request_id: 'broker', name: 'Example Search', website: 'https://broker.example/profile', optout_url: 'https://broker.example/remove', source: 'owner researched' })
   const brokerCase = await json(privacyOrigin, `${base}/subjects/${subject.id}/broker-cases`, 'POST', { request_id: 'case', broker_id: broker.id })
   history.replaceState(null, '', `#/capabilities/wellbeing/privacy?subject=${subject.id}&fact=${fact.id}&broker_case=${brokerCase.id}&shell=retained`)
-  globalThis.fetch = (input, init) => networkFetch(new URL(String(input), privacyOrigin), init)
+  globalThis.fetch = authenticatedFetch
   const view = render(<Privacy />)
   expect(await screen.findByRole('heading', { name: 'Correct selected private fact' })).toBeVisible()
   expect(screen.getByRole('region', { name: 'Private fact history' })).toHaveTextContent('Revision 1: Private email · ••••')

@@ -1,3 +1,4 @@
+import json
 import asyncio
 
 from aiohttp import web
@@ -5,7 +6,7 @@ from aiohttp import web
 from gideon.core.config.loader import config_dir
 from gideon.integrations.llm.credentials import CredentialStore
 from gideon.interfaces.dashboard.handlers.capabilities_pr_screening import register
-from gideon.interfaces.dashboard.token_auth import token_auth_middleware
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 from gideon.workspace.capabilities.platform import pr_screening as p
 
 
@@ -31,13 +32,13 @@ async def main():
         [{"filename": "parser.py", "patch": "-old\n+new"}],
         [{"sha": "a" * 40, "commit": {"message": "Parser change"}}],
     )
-    p.record(request, source, "user:dev-local")
+    p.record(request, source, "user:integration-test-owner")
     app = web.Application(middlewares=[token_auth_middleware()])
     register(app)
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", 0).start()
-    print(runner.addresses[0][1], flush=True)
+    print(json.dumps({"port": runner.addresses[0][1], "token": generate_token("integration-test-owner")}), flush=True)
     try:
         await asyncio.Event().wait()
     finally:
