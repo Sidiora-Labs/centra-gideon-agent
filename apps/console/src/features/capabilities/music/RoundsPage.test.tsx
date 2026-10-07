@@ -79,3 +79,24 @@ it('keeps an unsaved arrangement visible after a real revision conflict', async 
   expect(persisted.title).toBe('Evening voices')
   expect(persisted.notes).toBe('Concurrent edit')
 })
+
+it('shows real catalog load failures and recovers without losing the arrangement', async () => {
+  window.location.hash = '#/capabilities/music/rounds'
+  const unavailableCatalog = catalogBase + '/unavailable'
+  const page = render(<RoundsPage apiBase={apiBase} catalogBase={unavailableCatalog} />)
+  await screen.findByLabelText('Canon title')
+  fireEvent.change(screen.getByLabelText('Canon title'), { target: { value: 'Keep this draft' } })
+  expect(await screen.findByRole('alert')).toHaveTextContent('Could not load recordings: Recordings request failed (404)')
+  expect(screen.getByLabelText('Canon title')).toHaveValue('Keep this draft')
+  expect(screen.queryByRole('option', { name: /Actual voice recording/ })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Retry recordings' }))
+  expect(screen.getByRole('status')).toHaveTextContent('Loading recordings')
+  expect(await screen.findByRole('alert')).toHaveTextContent('Recordings request failed (404)')
+  expect(screen.getByLabelText('Canon title')).toHaveValue('Keep this draft')
+  page.rerender(<RoundsPage apiBase={apiBase} catalogBase={catalogBase} />)
+  await screen.findByRole('option', { name: /Actual voice recording/ })
+  expect(screen.queryByRole('alert')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Retry recordings' })).toBeNull()
+  expect(screen.getByLabelText('Canon title')).toHaveValue('Keep this draft')
+  expect(screen.getByRole('button', { name: 'Create canon' })).not.toBeDisabled()
+})

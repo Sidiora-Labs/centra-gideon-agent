@@ -15,11 +15,26 @@ export default function RoundsPage({apiBase='/api/capabilities/music/rounds',cat
   const [draft,setDraft]=useState({title:'',tempo_bpm:100,meter_beats:4,notes:'',parts:[blankPart()],partner_ids:[] as string[]})
   const [history,setHistory]=useState<Practice[]>([]),[tracks,setTracks]=useState<Track[]>([]),[chosen,setChosen]=useState<string[]>([])
   const [grade,setGrade]=useState(3),[practiceNotes,setPracticeNotes]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[dirty,setDirty]=useState(false),[offset,setOffset]=useState(0)
+  const [catalogError,setCatalogError]=useState(''),[catalogLoading,setCatalogLoading]=useState(false),[catalogRevision,setCatalogRevision]=useState(0)
   async function request(path:string,method='GET',data?:unknown){const response=await fetch(apiBase+path,{method,credentials:'same-origin',headers:{'Content-Type':'application/json'},body:data===undefined?undefined:JSON.stringify(data)});const value=await response.json();if(!response.ok)throw new Error(value.message||value.error);return value}
   function show(value:Round){setItem(value);setDraft({title:value.title,tempo_bpm:value.tempo_bpm,meter_beats:value.meter_beats,notes:value.notes,parts:value.parts,partner_ids:value.partner_ids});setChosen(value.parts.map(part=>part.id));setDirty(false)}
   function open(value:string){window.location.hash=`#/capabilities/music/rounds${value?'/'+value:''}`;setId(value)}
   useEffect(()=>{const changed=()=>setId(selected());window.addEventListener('hashchange',changed);return()=>window.removeEventListener('hashchange',changed)},[])
-  useEffect(()=>{let active=true;fetch(catalogBase+'/tracks?limit=100').then(response=>response.json()).then(value=>{if(active&&Array.isArray(value.items))setTracks(value.items)}).catch(()=>{});return()=>{active=false}},[catalogBase])
+  useEffect(() => {
+    let active = true
+    setCatalogLoading(true); setCatalogError(''); setTracks([])
+    fetch(catalogBase + '/tracks?limit=100')
+      .then(async response => {
+        if (!response.ok) throw new Error(`Recordings request failed (${response.status})`)
+        const value = await response.json()
+        if (!Array.isArray(value.items)) throw new Error('The recordings response is invalid')
+        return value.items as Track[]
+      })
+      .then(value => { if (active) setTracks(value) })
+      .catch(reason => { if (active) setCatalogError(reason instanceof Error ? reason.message : String(reason)) })
+      .finally(() => { if (active) setCatalogLoading(false) })
+    return () => { active = false }
+  }, [catalogBase, catalogRevision])
   useEffect(()=>{if(id&&item?.id===id)return;let active=true;setLoading(true);setItem(null);setError('');request(id?'/'+id:`?offset=${offset}&limit=25`).then(value=>{if(!active)return;if(id)show(value.item);else{setRows(value.items);setDraft({title:'',tempo_bpm:100,meter_beats:4,notes:'',parts:[blankPart()],partner_ids:[]});setDirty(false)}}).catch(err=>{if(active)setError(err.message)}).finally(()=>{if(active)setLoading(false)});if(id)request('/'+id+'/practice').then(value=>{if(active)setHistory(value.items)}).catch(err=>{if(active)setError(err.message)});return()=>{active=false}},[id,offset,apiBase])
   function edit(changes:Partial<typeof draft>){setDraft(value=>({...value,...changes}));setDirty(true)}
   function editPart(index:number,changes:Partial<Part>){edit({parts:draft.parts.map((part,i)=>i===index?{...part,...changes}:part)})}
@@ -27,6 +42,8 @@ export default function RoundsPage({apiBase='/api/capabilities/music/rounds',cat
   async function practice(){if(!item)return;setBusy(true);setError('');try{const value=await request('/'+id+'/practice','POST',{request_id:crypto.randomUUID(),round_revision:item.revision,part_ids:chosen,occurred_at:new Date().toISOString(),grade,notes:practiceNotes});setHistory(previous=>[...previous.filter(row=>row.id!==value.item.id),value.item]);setPracticeNotes('')}catch(err){setError((err as Error).message)}finally{setBusy(false)}}
   return <ListScaffold title="Musical canons and part practice" bodyClassName="mx-auto flex w-full max-w-4xl flex-col gap-l px-l py-xl">
     {error&&<p role="alert">{error}</p>}
+    {catalogLoading && <p role="status">Loading recordings…</p>}
+    {catalogError && <div className="space-y-s"><p role="alert">Could not load recordings: {catalogError}</p><Button variant="secondary" disabled={catalogLoading} disabledReason={catalogLoading ? BUSY_REASON : undefined} onClick={() => setCatalogRevision(value => value + 1)}>Retry recordings</Button></div>}
     {loading?<p role="status">Loading canons…</p>:<>
       {!id&&<><ul>{rows.map(row=><li key={row.id}><a className="text-primary" href={`#/capabilities/music/rounds/${row.id}`} onClick={()=>setId(row.id)}>{row.title}</a> · {row.parts.length} parts · {row.id}</li>)}</ul>{rows.length===0&&<p>No canons yet.</p>}<div className="flex gap-2"><Button disabled={!offset} onClick={()=>setOffset(value=>Math.max(0,value-25))}>Previous</Button><Button disabled={rows.length<25} onClick={()=>setOffset(value=>value+25)}>Next</Button></div></>}
       {id&&<Button variant="secondary" onClick={()=>open('')}>All canons</Button>}
