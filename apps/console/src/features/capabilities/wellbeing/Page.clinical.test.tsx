@@ -16,28 +16,45 @@ const nativeFetch = globalThis.fetch;
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), 'wellbeing-clinical-page-'));
   const root = resolve('../..');
-  server = spawn('/tmp/gideon-runtime-venv/bin/python', ['-u', '-c', `
-import asyncio
+  server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', ['-u', '-c', `
+import asyncio, json
 from aiohttp import web
 from gideon.interfaces.dashboard.handlers.capabilities_wellbeing import register
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
 async def main():
- app=web.Application()
+ app=web.Application(middlewares=[token_auth_middleware()])
  register(app)
  runner=web.AppRunner(app)
  await runner.setup()
  site=web.TCPSite(runner,'127.0.0.1',0)
  await site.start()
- print(site._server.sockets[0].getsockname()[1],flush=True)
+ print(json.dumps({"port":site._server.sockets[0].getsockname()[1],"token":generate_token("clinical-page-owner")}),flush=True)
  await asyncio.Event().wait()
 asyncio.run(main())
 `], { cwd: root, env: { ...process.env, PYTHONPATH: join(root, 'runtime'), GIDEON_HOME: home, GIDEON_HOSTED: '0' } });
   origin = await new Promise<string>((accept, reject) => {
     server.once('error', reject);
     server.once('exit', code => reject(new Error(`clinical page server exited ${code}`)));
-    server.stdout!.once('data', data => accept(`http://127.0.0.1:${String(data).trim()}`));
+    let output = '';
+    server.stdout!.on('data', data => {
+      output += String(data);
+      if (!output.includes('\n')) return;
+      try {
+        const ready: { port: number; token: string } = JSON.parse(output.trim());
+        if (!Number.isInteger(ready.port) || !ready.token) throw new Error('Invalid clinical readiness');
+        const base = `http://127.0.0.1:${ready.port}`;
+        globalThis.fetch = (input, init) => {
+          const url = new URL(input instanceof Request ? input.url : String(input), base);
+          const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+          if (url.origin === base) headers.set('Authorization', `Bearer ${ready.token}`);
+          return nativeFetch(url, { ...init, headers });
+        };
+        accept(base);
+      } catch (error) { reject(error); }
+    });
     server.stderr!.on('data', data => { if (String(data).includes('Traceback')) reject(new Error(String(data))); });
   });
-  globalThis.fetch = (input, init) => nativeFetch(new URL(String(input), origin), init);
+
 }, 60000);
 
 afterAll(async () => {
@@ -53,7 +70,7 @@ test('shared page navigates and deep-links all clinical forms with localized sec
   document.documentElement.lang = 'en';
   document.documentElement.dir = 'ltr';
   async function create(path: string, payload: object) {
-    const response = await nativeFetch(origin + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const response = await fetch(origin + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     expect(response.status).toBe(201);
     return response.json() as Promise<{ id: string }>;
   }
@@ -71,16 +88,17 @@ test('shared page navigates and deep-links all clinical forms with localized sec
   mounted.unmount();
 
   const journeys = [
-    ['Epigenetic results', 'epigenetic', 'Epigenetic results', '2026-09-20 · Page-Epi', 'Report history'],
-    ['Eye prescriptions', 'eyes', 'Eye prescriptions', '2026-09-24 · Page optometrist · v1', 'Correction history'],
+    ['Epigenetic results', 'epigenetic', 'Epigenetic results', /^2026-09-20 · Page report\s*38 years$/, 'Report history'],
+    ['Eye prescriptions', 'eyes', 'Eye prescriptions', /^2026-09-24 · Page optometrist\s*-1\.25 \/ -1 D$/, 'Correction history'],
     ['Lifestyle profile', 'lifestyle', 'Lifestyle profile observations', '2026-09-25T08:30:00Z · Page intake · BMI 24.2', 'Observation history'],
-    ['Body composition', 'body-composition', 'Body composition observations', '2026-09-25T08:30:00+02:00 · Page scale', 'History'],
+    ['Body composition', 'body-composition', 'Body composition observations', `${new Date('2026-09-25T08:30:00+02:00').toLocaleDateString()} · Page scale · 41.2% muscle · 18.4% fat`, 'History'],
   ] as const;
   for (const [label, view, heading, rowLabel, historyLabel] of journeys) {
     window.history.replaceState(null, '', '#/capabilities/wellbeing');
     mounted = render(<Page />);
     fireEvent.click(screen.getByRole('button', { name: label }));
-    await screen.findByRole('heading', { level: 1, name: heading });
+    await screen.findByRole('heading', { level: 1, name: label });
+    await screen.findByRole('heading', { level: 2, name: heading });
     await waitFor(() => expect(location.hash).toBe(`#/capabilities/wellbeing?view=${view}`));
     expect(screen.getByRole('button', { name: label })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(await screen.findByRole('button', { name: rowLabel }));
