@@ -1,8 +1,8 @@
 # Getting started
 
-Gideon is a self-hosted personal AI agent. It is a local gateway process that serves a web
-dashboard, runs agents with tooling, memory and skills, and connects to channels. This guide
-takes you from **nothing installed** to your first chat.
+This guide covers the **open-source, self-hosted edition of Gideon**: running its
+gateway and web console on your own infrastructure, then starting your first chat.
+Gideon also offers a hosted service; hosted users do not need to install this checkout.
 
 > **Pre-1.0:** Gideon is pre-1.0 and moves fast, so releases may make breaking changes. Run
 > `gideon snapshot` before upgrading.
@@ -55,8 +55,8 @@ sh infrastructure/website/install.sh
 
 For a separately supplied wheel or release source, set `GIDEON_PACKAGE_SOURCE` to its
 explicit path, URL, or versioned distribution specification before you run the installer.
-This project does not assume that a Gideon package, image, or hosted installer has already
-been published. Release notes are published on the
+Use the artifact and installation instructions for your selected release. Release notes
+and available repository artifacts are published on the
 [releases page](https://github.com/Sidiora-Labs/centra-gideon-agent/releases).
 
 `setup` configures the workspace directory and the timezone.
@@ -72,7 +72,8 @@ local script. For a published installer, obtain its HTTPS URL from your publishe
 and choose an independently trusted GitHub repository and immutable commit that
 contain its digest. Set `GIDEON_INSTALL_URL`, `GIDEON_DIGEST_REPOSITORY` (`owner/repo`),
 `GIDEON_VERIFY_REVISION` (the full 40-character lowercase commit ID), and
-`GIDEON_PACKAGE_SOURCE` explicitly. No hosted endpoint is assumed to exist.
+`GIDEON_PACKAGE_SOURCE` explicitly. These variables select the self-hosting installer
+and package source; they do not configure access to the hosted Gideon service.
 
 ```bash
 set -eu

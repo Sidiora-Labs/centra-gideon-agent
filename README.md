@@ -7,11 +7,11 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/LICENSE-2-0A0A0A?style=flat-square" alt="Apache License Version 2.0" /></a>
   <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/Version-0.1.3-0A0A0A?style=flat-square" alt="Version 0.1.3" /></a>
 </p>
-Gideon is a personal AI agent that runs on your own machine. The gateway serves a web console and coordinates the work: chat, long-running goal loops, memory, a knowledge base, tasks, schedules, an inbox, and a permission-gated app platform.
+Gideon is a personal AI agent platform. This repository is its open-source, self-hosted edition: a gateway and web console for chat, long-running goal loops, memory, a knowledge base, tasks, schedules, an inbox, and a permission-gated app platform.
 
-It is built for one person who wants an agent with real access to their own computer and their own services, without handing the keys to a hosted product. State lives in a directory you choose. Model providers are pluggable: an Anthropic or OpenAI key, an OpenAI-compatible endpoint, AWS Bedrock credentials, or a model running locally.
+Gideon also offers a hosted service, its primary managed offering. The instructions here are for people who want to self-host or develop Gideon. You control your state directory and model providers, including API providers, OpenAI-compatible endpoints, AWS Bedrock and local models.
 
-> **Pre-1.0:** Gideon is at **v0.1.3**. It moves quickly and a release can break something. Run `gideon snapshot` before you upgrade, and read [CHANGELOG.md](CHANGELOG.md) for what shipped.
+> **Open-source runtime:** The Python package in this checkout declares **v0.1.3**. For self-hosted upgrades, run `gideon snapshot` first and read [CHANGELOG.md](CHANGELOG.md). Hosted service releases are managed separately.
 
 ## What it does
 
@@ -23,7 +23,7 @@ It is built for one person who wants an agent with real access to their own comp
 - **Decide what it may touch.** Tool approvals, per-app permissions, credential handling, command screening and an audit trail. The core is provider-agnostic: integrations live in apps, never in the core package.
 - **Watch it work.** The console shows sessions, activity, running loops, scheduled jobs and health, and a terminal for the machine Gideon is working on.
 
-## Requirements
+## Self-hosting requirements
 
 - Python 3.12 or newer.
 - Rust and Cargo for building the packaged Hypermid daemon from source. The checkout pins Rust 1.91.1 in `rust-toolchain.toml`. A supplied platform-specific wheel already contains the built daemon.
@@ -33,7 +33,7 @@ It is built for one person who wants an agent with real access to their own comp
 
 No external database server or message broker is required. The gateway can launch app backends, agent programs and the local Hypermid daemon; provider integrations may depend on services you configure.
 
-## Run from a checkout
+## Self-host or develop from a checkout
 
 ```sh
 python3 -m venv .venv
@@ -113,9 +113,9 @@ The hook script formats staged Python and signs your commits off, which is what 
 
 ## Status
 
-Gideon is pre-1.0 and under active development. The gateway, console, desktop and mobile shells, the Python client, and the checks that exercise them are all in the tree, and CI defines Python, console, bundled-app and interaction checks. Which checks run depends on the workflow event and job configuration; this is not a claim that every capability has been qualified.
+Gideon is available as a hosted service and continues to develop alongside its open-source runtime. This repository documents the runtime, console, desktop and mobile shells, Python client, and self-hosting and development workflows. Its package versions and CI results describe this source tree; hosted releases have their own lifecycle.
 
-What that does not mean: no hosted service exists, and this repository assumes neither a published package nor a release endpoint unless you point `GIDEON_RELEASE_REPOSITORY` at one. Integrations need their own configuration, credentials and platform support. Some capabilities in the tree have not been exercised end to end against a live provider. Passing checks say something about what they cover and nothing about the rest.
+CI covers Python, console, bundled-app and interaction checks according to the workflow event and job configuration. See [GitHub Actions](https://github.com/Sidiora-Labs/centra-gideon-agent/actions) for results on a specific revision and [releases](https://github.com/Sidiora-Labs/centra-gideon-agent/releases) for published repository artifacts.
 
 ## Security
 

@@ -10,11 +10,11 @@ web
 
 ## Users
 
-A single technical owner-operator: the person self-hosts Gideon on their own machine and lives in this dashboard daily. They are fluent with developer tools, but they come here to *delegate* — chatting with agents, launching autonomous goal loops, reviewing what ran overnight, tuning memory/knowledge/skills, and wiring up providers and automations. Context is long sessions at a personal desk, often alongside an editor and terminal; the dashboard is the home base they return to between tasks.
+This repository serves people who self-host Gideon and developers extending its open-source runtime. They come to the console to delegate: chatting with agents, launching goal loops, reviewing completed work, shaping memory and knowledge, and connecting services and automations. Gideon also offers a hosted service; self-hosting is not a requirement for using the product.
 
 ## Product Purpose
 
-Gideon is a self-hosted personal AI agent platform — an agentic operating system for one person. The web dashboard is its single pane of glass: chat, goal loops, memory, knowledge base, skills, scheduled automation, an inbox, and an app store of pluggable providers, all behind one gateway the user owns. Success looks like trust: the user hands real work to agents, can always see what they're doing, and never feels locked to a vendor.
+The open-source Gideon console brings together chat, goal loops, memory, knowledge, skills, scheduled automation, an inbox and apps around a personal agent runtime. This document covers that console in the self-hosted edition. Success means users can delegate real work, understand what their agent is doing and control its access.
 
 ## Positioning
 
@@ -30,7 +30,7 @@ Friendly, playful, approachable. Gideon should feel like a capable companion, no
 
 ## Design Principles
 
-1. **Companion, not console.** Every surface should feel personal and warm — one user, their machine, their agent — never like a fleet-management tool.
+1. **Companion, not console.** Every surface should feel personal and warm — one user, their workspace, their agent — never like a fleet-management tool.
 2. **Show the machinery, softly.** Autonomy needs legibility: loops, approvals, and agent activity should be legible and steerable where supported, presented calmly rather than as alarm walls.
 3. **Playful within discipline.** Motion and delight are real but budgeted (expressiveness/bounciness scale them, reduced-motion zeroes them); the task always wins.
 4. **Everything is a token.** Colors, spacing, radius, motion all ride the customizable token system — no hardcoded values; the user can retint and reshape the whole app.
