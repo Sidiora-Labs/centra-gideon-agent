@@ -960,7 +960,7 @@ class TestApprovalBriefLine:
         """The brief informs the prompt; it must not reshape it.
 
         Rejecting is as much a decision as approving, so the line is shown for both and
-        neither button moves. Trust stays DM-only exactly as before.
+        neither button moves. A DM alone never offers standing permission.
         """
         from slack_desk_runtime.handler import (
             _ACTION_APPROVE,
@@ -981,13 +981,26 @@ class TestApprovalBriefLine:
             "blastRadiusLine": "runs a command",
         }
         for is_dm, expected in (
-            (True, [_ACTION_APPROVE, _ACTION_TRUST, _ACTION_REJECT]),
+            (True, [_ACTION_APPROVE, _ACTION_REJECT]),
             (False, [_ACTION_APPROVE, _ACTION_REJECT]),
         ):
             blocks = _build_approval_blocks(self._event(brief), is_dm=is_dm)
             actions = next(b for b in blocks if b["type"] == "actions")
             assert [e["action_id"] for e in actions["elements"]] == expected
             assert any("Can: runs a command" in t for t in self._context_lines(blocks))
+        from gideon.integrations.channel_delivery import APPROVAL_ANSWERS
+
+        blocks = _build_approval_blocks(
+            self._event(brief), is_dm=True, answers=APPROVAL_ANSWERS
+        )
+        actions = next(b for b in blocks if b["type"] == "actions")
+        assert [e["action_id"] for e in actions["elements"]] == [
+            _ACTION_APPROVE,
+            _ACTION_TRUST,
+            _ACTION_REJECT,
+        ]
+        assert any("Every tool in this chat" in t for t in self._context_lines(blocks))
+        assert any("Can: runs a command" in t for t in self._context_lines(blocks))
 
     def test_malformed_brief_renders_nothing_rather_than_raising(self):
         """A brief this renderer cannot read is silence, never a traceback.

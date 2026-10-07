@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -271,20 +272,94 @@ class TestApprovalBriefOnTheNotification:
         "blastRadiusLine": "writes files, runs a command",
     }
 
+    @pytest.fixture(autouse=True)
+    def _reviewed_owner(self, monkeypatch):
+        from gideon.core.config.credentials import owner_id_credential
+        from gideon.sdk.channel import allow_sender
+
+        monkeypatch.setenv(owner_id_credential("slack"), "U_OWNER")
+        allow_sender("slack", "U_OWNER", via="owner")
+
     @staticmethod
     async def _prompt(brief, outcome):
-        """Drive one real request_approval to completion, returning (verdict, fallback)."""
-        client = MagicMock()
+        """Answer an actual registered Slack offer and return its notification."""
+        from slack_desk_runtime import enterprise
+        from slack_desk_runtime.client import RealSlackDeskClient
+        from slack_desk_runtime.handler import handle_interaction
+        from slack_desk_runtime.transport import SlackDeskTransport
+
+        from gideon.integrations.channel_delivery import register
+        from gideon.sdk.channel import (
+            get_transport,
+            raw_delivery_for,
+            register_transport,
+            unregister_transport,
+        )
+
+        client = RealSlackDeskClient("xoxb-test-network-disabled")
         client.open_dm = AsyncMock(return_value="D1")
         client.post_blocks = AsyncMock(return_value="1.1")
         client.update_message = AsyncMock()
-        delivery = _delivery(client)
-        verdict = await delivery.request_approval(
-            TestApprovalBriefOnTheNotification._event(brief),
-            source="cron",
-            on_prompted=lambda pending: pending.future.set_result(outcome),
+        client._web.conversations_info = AsyncMock(
+            return_value={"ok": True, "channel": {"id": "D1", "is_im": True}}
         )
-        return verdict, client.post_blocks.call_args[0][2]
+        transport = SlackDeskTransport({"bot_token": "xoxb-test-network-disabled"})
+        delivery = SlackDeskDelivery(client, "U_OWNER", transport=transport)
+        previous_delivery = raw_delivery_for("slack")
+        previous_transport = get_transport("slack")
+        register_transport(transport)
+        register(delivery, "slack")
+        answer_task = None
+
+        async def answer_offer(pending):
+            assert pending.owner == "U_OWNER"
+            assert pending.tenant == f"slack:{enterprise._validated_team_id}"
+            assert pending.delivery is delivery
+            assert pending.provider is None
+            action = "approve_tool" if outcome == "approved" else "reject_tool"
+            arguments = dict(
+                channel="D1",
+                msg_ts="1.1",
+                action_id=action,
+                user_id="U_OWNER",
+                team_id=enterprise._validated_team_id,
+                thread_ts="",
+                slack_desk=client,
+                answer_value="req-fallback",
+            )
+            assert (
+                await handle_interaction(**(arguments | {"user_id": "U_FOREIGN"}))
+                is None
+            )
+            assert not pending.future.done()
+            assert await handle_interaction(**arguments) == action
+
+        def on_prompted(pending):
+            nonlocal answer_task
+            answer_task = asyncio.create_task(answer_offer(pending))
+            return True
+
+        try:
+            verdict = await asyncio.wait_for(
+                delivery.request_approval(
+                    TestApprovalBriefOnTheNotification._event(brief),
+                    source="cron",
+                    on_prompted=on_prompted,
+                ),
+                timeout=3,
+            )
+            assert answer_task is not None
+            await answer_task
+            return verdict, client.post_blocks.call_args[0][2]
+        finally:
+            if answer_task is not None and not answer_task.done():
+                answer_task.cancel()
+                await asyncio.gather(answer_task, return_exceptions=True)
+            register(previous_delivery, "slack")
+            if previous_transport is None:
+                unregister_transport("slack")
+            else:
+                register_transport(previous_transport)
 
     @pytest.mark.asyncio
     async def test_approved_notification_names_the_blast_radius(self):
