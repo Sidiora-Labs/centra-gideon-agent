@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { createRef, useState } from 'react'
 import { describe, expect, it } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { Copy, List, Grid2X2 } from 'lucide-react'
@@ -191,5 +191,56 @@ describe('segmented selection and responsive sizing', () => {
     expect(screen.getByRole('tablist', { name: 'Empty choices' })).toBeInTheDocument()
     expect(screen.queryAllByRole('tab')).toHaveLength(0)
     expect(container.firstElementChild).toHaveClass('overflow-x-auto')
+  })
+})
+
+
+describe('Button managed DOM capabilities', () => {
+  it('exposes the actual button, option semantics, geometry, and typed focus handlers', () => {
+    const ref = createRef<HTMLButtonElement>()
+    const events: string[] = []
+    render(<Button ref={ref} id="provider-option" role="option" aria-selected tabIndex={-1}
+      variant="ghost" size="sm" data-type="body-s" style={{ left: 12 }}
+      onKeyDown={(event) => events.push(event.key)}
+      onMouseEnter={(event) => events.push(event.currentTarget.id + ':hover')}
+      onFocus={(event) => events.push(event.currentTarget.id + ':focus')}
+      onBlur={(event) => events.push(event.currentTarget.id + ':blur')}>Local provider</Button>)
+    const button = screen.getByRole('option', { name: 'Local provider', selected: true })
+    expect(ref.current).toBe(button)
+    expect(button.tagName).toBe('BUTTON')
+    expect(button).toHaveAttribute('id', 'provider-option')
+    expect(button).toHaveAttribute('tabindex', '-1')
+    expect(button).toHaveAttribute('data-type', 'body-s')
+    expect(button.style.left).toBe('12px')
+    expect(button.style.fontVariationSettings).toBeTruthy()
+    expect(button.className).toContain('bg-transparent')
+    expect(button.className).toContain('h-8')
+    ref.current!.focus()
+    fireEvent.keyDown(button, { key: 'ArrowDown' })
+    fireEvent.mouseEnter(button)
+    ref.current!.blur()
+    expect(events).toEqual(['provider-option:focus', 'ArrowDown', 'provider-option:hover', 'provider-option:blur'])
+  })
+
+  it.each([
+    { disabled: true, disabledReason: 'Choose a provider' },
+    { loading: true },
+  ])('blocks custom keyboard activation and clicks while unavailable: %j', (availability) => {
+    const actions: string[] = []
+    render(<Button {...availability} onKeyDown={(event) => actions.push(event.key)}
+      onClick={() => actions.push('click')}>Connect provider</Button>)
+    const button = screen.getByRole('button', { name: 'Connect provider' })
+    expect(fireEvent.keyDown(button, { key: 'Enter' })).toBe(false)
+    expect(fireEvent.keyDown(button, { key: ' ' })).toBe(false)
+    fireEvent.click(button)
+    expect(actions).toEqual([])
+  })
+
+  it('keeps default typography and releases DOM ref on unmount', () => {
+    const ref = createRef<HTMLButtonElement>()
+    const { unmount } = render(<Button ref={ref} size="xs">Cancel</Button>)
+    expect(ref.current).toHaveAttribute('data-type', 'label-s')
+    unmount()
+    expect(ref.current).toBeNull()
   })
 })

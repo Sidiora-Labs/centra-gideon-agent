@@ -1,4 +1,4 @@
-import { useId, type MouseEvent, type ReactNode } from 'react'
+import { forwardRef, useId, type AriaRole, type AriaAttributes, type CSSProperties, type FocusEventHandler, type KeyboardEventHandler, type MouseEvent, type MouseEventHandler, type ReactNode } from 'react'
 import { motion, useMotionTemplate, useMotionValue } from 'framer-motion'
 import { physics, exprHeavy, useReducedMotion } from '../theme/motion'
 import { fvs } from '../theme/fontWeight'
@@ -25,10 +25,16 @@ interface ButtonProps {
   loading?: boolean; loadingLabel?: string; className?: string; onClick?: (event: MouseEvent<HTMLButtonElement>) => void
   disabled?: boolean; disabledReason?: string; type?: 'button' | 'submit'; title?: string
   ariaLabel?: string; ariaExpanded?: boolean; ariaPressed?: boolean
+  id?: string; role?: AriaRole; style?: CSSProperties; tabIndex?: number
+  'aria-selected'?: AriaAttributes['aria-selected']; 'data-type'?: string
+  onKeyDown?: KeyboardEventHandler<HTMLButtonElement>
+  onMouseEnter?: MouseEventHandler<HTMLButtonElement>
+  onFocus?: FocusEventHandler<HTMLButtonElement>; onBlur?: FocusEventHandler<HTMLButtonElement>
 }
 
-export function Button({ children, variant = 'primary', size = 'md', shape = 'pill', loading = false, loadingLabel,
-  className, onClick, disabled = false, disabledReason, type = 'button', title, ariaLabel, ariaExpanded, ariaPressed }: ButtonProps) {
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button({ children, variant = 'primary', size = 'md', shape = 'pill', loading = false, loadingLabel,
+  className, onClick, disabled = false, disabledReason, type = 'button', title, ariaLabel, ariaExpanded, ariaPressed,
+  id, role, style, tabIndex, 'aria-selected': ariaSelected, 'data-type': dataType, onKeyDown, onMouseEnter, onFocus, onBlur }, ref) {
   const reduced = useReducedMotion()
   const state = controlAvailability(disabled, loading, disabledReason)
   const reasonId = useId()
@@ -38,12 +44,20 @@ export function Button({ children, variant = 'primary', size = 'md', shape = 'pi
   const highlight = !state.blocked && !reduced && exprHeavy(0.45) && ['primary', 'danger'].includes(variant)
   const density = sizes[size]
   const description = loading && loadingLabel ? loadingLabel : disabled && disabledReason ? disabledReason : null
-  return <><motion.button type={type} aria-label={ariaLabel}
+  return <><motion.button ref={ref} id={id} role={role} tabIndex={tabIndex} type={type} aria-label={ariaLabel}
+    aria-selected={ariaSelected} onMouseEnter={onMouseEnter} onFocus={onFocus} onBlur={onBlur}
     aria-describedby={description ? reasonId : undefined} aria-expanded={ariaExpanded} aria-pressed={ariaPressed}
     aria-busy={state.busy} aria-disabled={state.ariaDisabled} disabled={state.nativeDisabled}
     data-visual-state={loading ? 'loading' : disabled ? 'disabled' : 'ready'}
     title={controlTitle(title, !!state.ariaDisabled, disabledReason)}
     onClick={(event) => activateControl(event, state.blocked, onClick)}
+    onKeyDown={(event) => {
+      if (state.blocked) {
+        if (event.key === 'Enter' || event.key === ' ') event.preventDefault()
+        return
+      }
+      onKeyDown?.(event)
+    }}
     onPointerMove={(event) => {
       if (!highlight) return
       const rect = event.currentTarget.getBoundingClientRect()
@@ -52,7 +66,7 @@ export function Button({ children, variant = 'primary', size = 'md', shape = 'pi
     }}
     onPointerLeave={() => { pointerX.set(50); pointerY.set(50) }}
     {...controlMotion(reduced, state.blocked, 0.05, 0.025)} transition={physics.snappy}
-    data-type={density.type} style={fvs(470)}
+    data-type={dataType ?? density.type} style={{ ...fvs(470), ...style }}
     className={cx('relative inline-flex shrink-0 select-none items-center justify-center gap-s overflow-hidden whitespace-nowrap border border-transparent transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-canvas',
       shape === 'pill' ? 'rounded-pill' : 'squircle', variants[variant], density.layout,
       loading && loadingLabel ? 'disabled:pointer-events-none' : 'disabled:pointer-events-none disabled:opacity-40',
@@ -60,4 +74,4 @@ export function Button({ children, variant = 'primary', size = 'md', shape = 'pi
     {highlight && <motion.span aria-hidden className="pointer-events-none absolute inset-0" style={{ background: sheen }} />}
     <ControlContent busy={loading} label={loadingLabel}>{children}</ControlContent>
   </motion.button>{description && <span id={reasonId} className="sr-only">{description}</span>}</>
-}
+})
