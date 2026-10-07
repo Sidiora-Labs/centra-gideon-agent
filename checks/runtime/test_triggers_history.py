@@ -23,7 +23,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from gideon.automation.event_triggers import EventTrigger, EventTriggerStore
+from gideon.automation.event_triggers import CanonicalEventStore, EventTrigger
 from gideon.automation.schedule import (
     ScheduleDefinition,
     ScheduleJob,
@@ -459,19 +459,32 @@ def app_with_all_kinds(tmp_path, monkeypatch):
     hooks._save()
     hooks.create({"name": "never", "event": "Stop", "provider": "run-prompt"})
 
-    events = EventTriggerStore(cfg / "event_triggers.json")
-    events.save(
-        [
-            EventTrigger(
-                id="e1",
-                pattern="memory",
-                action_provider="run-prompt",
-                action_config={},
-                fire_count=5,
-                last_fired_at=NOW - 600,
-            )
-        ]
+    from datetime import datetime, timezone
+
+    from gideon.automation.triggers.models import Trigger
+    from gideon.automation.triggers.ownership import is_owner_authored, owner_username
+    from gideon.automation.triggers.store import TriggerStore
+
+    events = TriggerStore(base_dir=cfg)
+    events.upsert(
+        Trigger(
+            id="e1",
+            name="Memory update",
+            kind="event",
+            created_by="user",
+            author=owner_username(),
+            spec={"source": "memory", "pattern": "memory"},
+            workflow={"inline": {"provider": "run-prompt", "config": {}}},
+            run_count=5,
+            last_fired_at=datetime.fromtimestamp(NOW - 600, timezone.utc).isoformat(),
+        )
     )
+    saved_event = events.get("e1")
+    assert saved_event is not None
+    assert saved_event.trigger.created_by == "user"
+    assert is_owner_authored(saved_event.trigger)
+    projected_events = CanonicalEventStore(cfg).load()
+    assert [(event.id, event.fire_count) for event in projected_events] == [("e1", 5)]
 
     class FakeCrons:
         def list_jobs(self, include_disabled=False):
