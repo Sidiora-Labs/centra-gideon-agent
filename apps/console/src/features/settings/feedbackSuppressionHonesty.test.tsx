@@ -2,16 +2,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import type { FeedbackProducerRow } from '../../shared/data/api'
 import { FeedbackPanel } from './FeedbackPanel'
+import { resetDataStore } from '../../shared/data/data'
 
 
 const feedbackProducers = vi.fn()
-vi.mock('../../shared/data/api', () => ({
-  api: {
-    feedbackProducers: (...a: unknown[]) => feedbackProducers(...a),
-    feedbackSnooze: vi.fn(),
-    feedbackClear: vi.fn(),
-  },
-}))
+vi.mock('../../shared/data/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../shared/data/api')>()
+  return {
+    ...actual,
+    api: {
+      feedbackProducers: (...a: unknown[]) => feedbackProducers(...a),
+      feedbackSnooze: vi.fn(),
+      feedbackClear: vi.fn(),
+    },
+  }
+})
 vi.mock('../../app/shell/appSdk', () => ({ notify: vi.fn() }))
 
 function rows(...producers: FeedbackProducerRow[]) {
@@ -29,6 +34,7 @@ const ENFORCED: FeedbackProducerRow = {
 
 describe('the panel only claims "stopped surfacing" where something stops', () => {
   beforeEach(() => {
+    resetDataStore()
     localStorage.clear()
     vi.clearAllMocks()
   })

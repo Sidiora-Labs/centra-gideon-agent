@@ -63,7 +63,12 @@ describe('the daily-digest promise', () => {
     expect(web('features/settings/MemoryPanel.tsx'), 'the button it points at').toMatch(/Build \/ refresh/)
     const consolidate = pyMethod(py('cognition/history.py'), '    async def _consolidate_locked')
     expect(consolidate, 'the method body must be found').toMatch(/single_flight|include_history/)
-    expect(consolidate, 'the cadence builds digests').toMatch(/self\._svc\.build_daily_digest\(\)/)
+    expect(consolidate, 'the cadence delegates to its real cycle').toContain('ConsolidationRound(self, key, include_history).run()')
+    const cycle = py('cognition/consolidation_cycle.py')
+    expect(cycle, 'completed consolidation runs maintenance').toContain('await self.maintain()')
+    const maintenance = pyMethod(cycle, '    async def maintain')
+    expect(maintenance).toContain('"build_daily_digest"')
+    expect(maintenance).toContain('getattr(owner._svc, method)(**arguments)')
     const h = py('interfaces/dashboard/handlers/memory.py')
     expect(h, 'the rebuild query param drives the same builder').toMatch(
       /rebuild[\s\S]{0,200}?build_daily_digest/,
@@ -74,8 +79,12 @@ describe('the daily-digest promise', () => {
     // future reader (or a cleanup pass) could take it as licence to delete the builder while the hint
     const svc = py('cognition/memory_service.py')
     const fn = pyMethod(svc, '    def build_daily_digest')
-    expect(fn, 'it synthesises per completed day').toMatch(/Only \*completed\* days are digested/)
-    expect(fn, 'and writes an episodic record').toMatch(/MemoryKind|MemoryRecord/)
+    expect(fn, 'the service invokes the real rollup').toContain('DailyMemoryRollup(self, archive, self._DIGEST_TAG, logger)')
+    expect(fn).toContain('rollup.build(now, max_days, summarizer)')
+    const rollup = py('cognition/memory_lifecycle.py').split('class DailyMemoryRollup:')[1]
+    expect(rollup, 'only completed calendar days are eligible').toContain('day < today')
+    expect(rollup, 'completed days write real digest episodics').toContain('self.service.write_episodic(')
+    expect(rollup).toContain('source="daily_digest"')
   })
 })
 
@@ -106,15 +115,16 @@ describe('the remaining promise-hints, verified and pinned', () => {
     expect(web('features/dashboard/widgets/Suggestions.tsx')).toContain('they build from your activity')
     const sug = py('cognition/suggestions.py')
     expect(sug, 'the function the hint is a promise about must exist').toMatch(/def _build_context\(/)
-    for (const [source, call] of [
-      ['user preferences', /read_preferences\(\)/],
-      ['active projects', /read_projects\(\)/],
-      ['recent history', /read_recent_history\(days=2\)/],
-      ['recent sessions', /list_sessions\(\)/],
-      ['active automations', /TriggerStore\(base_dir=config_dir\(\)\)\.load\(\)/],
-    ] as const) {
-      expect(sug, `"built from your activity" claims ${source}, so the builder must read it`).toMatch(call)
+    for (const method of ['read_preferences', 'read_projects', 'read_recent_history']) {
+      expect(sug, `the memory reader declares ${method}`).toContain(`"${method}"`)
     }
+    const memory = pyMethod(sug, '    def memory')
+    expect(memory).toContain('for method, label, limit, template in _MEMORY_FIELDS:')
+    expect(memory).toContain('read = getattr(source, method)')
+    expect(memory).toContain('read(days=2) if method == "read_recent_history" else read()')
+    expect(sug).toContain('log.list_sessions()')
+    expect(sug).toContain('TriggerStore(base_dir=config_dir()).load()')
+    expect(sug).toContain('for source in (self.memory, self.sessions, self.automations):')
   })
 
   it('the design canvas asks for exactly what the loop is told to write', () => {
@@ -130,16 +140,27 @@ describe('the remaining promise-hints, verified and pinned', () => {
   it('the memory history really does log every write', () => {
     expect(web('features/settings/MemoryPanel.tsx')).toContain('It fills as agents remember things.')
     const vm = py('cognition/vector_memory.py')
-    expect(vm, 'the events table is written').toMatch(/INSERT INTO memory_events/)
-    const calls = (vm.match(/self\._log_event\(/g) ?? []).length
-    expect(calls, 'writes, updates and deletions all log').toBeGreaterThanOrEqual(10)
+    expect(pyMethod(vm, '    def _log_event'), 'archive mutations delegate to the actual journal').toContain('ArchiveJournal(self).append(')
+    expect(py('cognition/archive_events.py')).toContain('INSERT INTO memory_events ')
+    expect(pyMethod(vm, '    def _write_semantic')).toContain('SemanticMutation(self, key, value_json, confidence, source).apply(')
+    expect(py('cognition/archive_semantics.py')).toContain('archive._log_event(')
+    expect(pyMethod(vm, '    def delete_semantic')).toContain('SemanticRetirement(self).tombstone(key, source)')
+    expect(pyMethod(vm, '    def write_episodic')).toContain('EpisodeAppend(self, text, source).write(')
+    const episodes = py('cognition/archive_episodes.py')
+    expect(episodes).toContain('store._log_event("create", "episodic"')
+    expect(episodes, 'episodic replacement logs its merge and previous text').toMatch(/store\._log_event\(\s*"merge",\s*"episodic",[\s\S]{0,100}prior\["text"\]/)
+    expect(py('cognition/archive_semantics.py'), 'semantic updates and new facts both reach the journal').toContain('"update" if live else "create"')
+    expect(pyMethod(vm, '    def delete_episodic')).toContain('self._log_event("delete", "episodic"')
   })
 
   it('intents really do gather as items are saved', () => {
     expect(web('features/knowledge/KnowledgeListPage.tsx')).toContain('As you save items, it gathers what matches')
-    expect(py('cognition/knowledge/pipeline/runner.py'), 'the ingest pipeline records the matches').toMatch(
-      /relevant matches are recorded as intent_outcomes by value/,
-    )
+    const runner = py('cognition/knowledge/pipeline/runner.py')
+    expect(runner, 'the ingest pipeline invokes real matching').toContain('matches = await run_intents(intents, item_type, content, pool=pool)')
+    expect(runner, 'prior matches are replaced for this item').toContain('store.clear_item_intent_outcomes(item_id)')
+    expect(runner, 'each matched value is durably recorded').toContain('store.record_intent_outcome(')
+    expect(runner).toContain('takeaway=m.takeaway')
+    expect(runner).toContain('fields=m.fields')
   })
 })
 
