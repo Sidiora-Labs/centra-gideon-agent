@@ -105,7 +105,7 @@ def owner_word_capture(
 ) -> VerifiedCapture | None:
     from dataclasses import replace
 
-    from gideon.interfaces.dashboard.session_store import load_or_create_key
+    from gideon.security.session_signing import load_or_create_key
     from gideon.security.session_credentials import current_work
 
     work = current_work()
@@ -163,7 +163,7 @@ def owner_word_capture(
 def validate_capture(capture) -> VerifiedCapture | None:
     from gideon.cognition.history import ConversationLog
     from gideon.core.config.loader import config_dir
-    from gideon.interfaces.dashboard.session_store import KEY_BYTES, key_path
+    from gideon.security.session_signing import KEY_BYTES, key_path
     from gideon.security.session_credentials import current_work
 
     if (

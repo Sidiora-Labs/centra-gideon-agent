@@ -43,7 +43,7 @@ def _payload(ingress: dict) -> bytes:
 
 
 def sign_ingress(ingress: dict) -> dict:
-    from gideon.interfaces.dashboard.session_store import load_or_create_key
+    from gideon.security.session_signing import load_or_create_key
 
     signature = hmac.new(
         load_or_create_key(), _DOMAIN + _payload(ingress), hashlib.sha256
@@ -52,7 +52,7 @@ def sign_ingress(ingress: dict) -> dict:
 
 
 def verified_ingress(ingress) -> bool:
-    from gideon.interfaces.dashboard.session_store import KEY_BYTES, key_path
+    from gideon.security.session_signing import KEY_BYTES, key_path
 
     if not isinstance(ingress, dict) or not isinstance(
         ingress.get("origin_proof"), str
@@ -162,7 +162,7 @@ class AcceptedWorkOrigin:
 
 
 def _seal_origin(values: dict) -> AcceptedWorkOrigin:
-    from gideon.interfaces.dashboard.session_store import load_or_create_key
+    from gideon.security.session_signing import load_or_create_key
 
     payload = json.dumps(values, sort_keys=True, separators=(",", ":"))
     return AcceptedWorkOrigin(
@@ -174,7 +174,7 @@ def _seal_origin(values: dict) -> AcceptedWorkOrigin:
 
 
 def _origin_values(origin: AcceptedWorkOrigin | None) -> dict | None:
-    from gideon.interfaces.dashboard.session_store import KEY_BYTES, key_path
+    from gideon.security.session_signing import KEY_BYTES, key_path
 
     if (
         not isinstance(origin, AcceptedWorkOrigin)

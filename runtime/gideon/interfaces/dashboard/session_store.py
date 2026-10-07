@@ -57,6 +57,8 @@ from typing import Any
 
 from gideon.core.atomic_write import atomic_write, atomic_write_bytes
 from gideon.core.config import loader as config_loader
+from gideon.security import session_signing
+from gideon.security.session_signing import _ensure_owner_only as _ensure_owner_only
 
 
 def config_dir() -> Path:
@@ -70,10 +72,10 @@ def config_dir() -> Path:
 
 logger = logging.getLogger(__name__)
 
-KEY_FILE = "session_key"
+KEY_FILE = session_signing.KEY_FILE
 SESSIONS_FILE = "sessions.json"
 
-KEY_BYTES = 32
+KEY_BYTES = session_signing.KEY_BYTES
 
 MAX_SESSIONS = 2000
 
@@ -100,32 +102,8 @@ def sessions_path() -> Path:
 
 
 def load_or_create_key() -> bytes:
-    """The persistent signing key, creating it on first use.
-
-    Raises ``OSError`` when the key can neither be read nor written — see the module note on
-    fail-closed. A caller that genuinely wants ephemeral behavior (tests, `--test-mode`) asks
-    for it explicitly rather than getting it from a swallowed error.
-    """
-    path = key_path()
-    try:
-        if path.is_file():
-            raw = path.read_bytes()
-            if len(raw) >= KEY_BYTES:
-                _ensure_owner_only(path)
-                return raw
-            logger.warning(
-                "session key at %s is too short (%d bytes) — regenerating",
-                path,
-                len(raw),
-            )
-    except OSError:
-        logger.warning("session key unreadable at %s", path, exc_info=True)
-
-    key = os.urandom(KEY_BYTES)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_bytes(path, key, mode=0o600)
-    logger.info("created a persistent session signing key at %s", path)
-    return key
+    """Load the canonical signing key using this facade's active key path."""
+    return session_signing.load_or_create_key(key_path())
 
 
 def rotate_key() -> bytes:
@@ -137,21 +115,6 @@ def rotate_key() -> bytes:
     clear_sessions()
     logger.info("rotated the session signing key; all existing tokens are now invalid")
     return key
-
-
-def _ensure_owner_only(path: Path) -> None:
-    """Tighten the key file to 0600 if something loosened it.
-
-    Not merely cosmetic: a key readable by another local account is a key that account can
-    use to mint a dashboard session for itself.
-    """
-    try:
-        mode = path.stat().st_mode & 0o777
-        if mode != 0o600:
-            path.chmod(0o600)
-            logger.warning("session key had mode %o — tightened to 0600", mode)
-    except OSError:
-        logger.debug("could not verify session key permissions", exc_info=True)
 
 
 @dataclass

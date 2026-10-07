@@ -25,7 +25,7 @@ def _payload(value):
 
 
 def _sign(value, domain):
-    from gideon.interfaces.dashboard.session_store import load_or_create_key
+    from gideon.security.session_signing import load_or_create_key
 
     return dict(
         value,
@@ -36,7 +36,7 @@ def _sign(value, domain):
 
 
 def _verify(value, domain):
-    from gideon.interfaces.dashboard.session_store import KEY_BYTES, key_path
+    from gideon.security.session_signing import KEY_BYTES, key_path
 
     if not isinstance(value, dict):
         return None
