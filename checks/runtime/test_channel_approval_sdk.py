@@ -5,11 +5,14 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from test_channel_offered_answers import isolated, native
+import test_channel_offered_answers as channel_fixtures
 
 from gideon.assurance.testing.channel_conformance import assert_channel_contract
 from gideon.sdk.channel import ChannelContractError, assert_channel_approvals
 from gideon.security.approval_brief import APPROVAL_BRIEF_META_KEY
+
+isolated = channel_fixtures.isolated
+native = channel_fixtures.native
 
 
 async def harness(n, monkeypatch, *, refuse_trust=False):

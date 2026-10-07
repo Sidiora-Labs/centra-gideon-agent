@@ -175,14 +175,14 @@ async def test_real_retirement_integrity_and_republication(tmp_path, monkeypatch
             return provider._remote_get(identifier)[0]
 
         clean = publish("clean", first)
-        damaged = publish(
+        publish(
             "bad-digest",
             accepted_words(key, "I prefer green notebooks.", "green-words"),
         )
-        ambiguous = publish(
+        publish(
             "bad-actor", accepted_words(key, "I prefer plain labels.", "plain-words")
         )
-        scoped = publish(
+        publish(
             "bad-scope", accepted_words(key, "I prefer wide margins.", "margin-words")
         )
         archived = publish(
@@ -245,7 +245,7 @@ async def test_real_retirement_integrity_and_republication(tmp_path, monkeypatch
         )
         provider.put([changing])
         original_parent = provider._remote_get(changing.id)[0]
-        historical = child("historical-independent-child", [], [original_parent])
+        child("historical-independent-child", [], [original_parent])
         changed_parent = publish(
             "changing-parent",
             accepted_words(key, "I prefer graph paper.", "graph-words"),
@@ -260,7 +260,7 @@ async def test_real_retirement_integrity_and_republication(tmp_path, monkeypatch
         )
         independent_span = provider._draft(legacy).provenance[0]
         exclusive = child("exclusive", [], [clean])
-        shared = child(
+        child(
             "shared",
             [clean_span, independent_span],
             [clean, provider._remote_get(legacy.id)[0]],

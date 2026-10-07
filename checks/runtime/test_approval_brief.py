@@ -13,7 +13,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
-from test_channel_offered_answers import isolated, native, press  # noqa: F401
+import test_channel_offered_answers as channel_fixtures
+from test_channel_offered_answers import press
 
 from gideon.integrations.llm_helpers import LLMEvent
 from gideon.security.approval_brief import (
@@ -27,6 +28,9 @@ from gideon.security.approval_brief import (
     established_facets,
 )
 from gideon.security.command_effects import CommandEffects
+
+isolated = channel_fixtures.isolated
+native = channel_fixtures.native
 
 _TS_SOURCE = (
     Path(__file__).resolve().parents[2]

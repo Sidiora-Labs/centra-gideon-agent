@@ -438,7 +438,7 @@ async def test_actual_admitted_channel_row_and_queue_carry_typed_signed_principa
 async def test_unanswered_native_channel_prompt_closes_with_actual_ending(
     native, ending
 ):
-    future = register_question(native)
+    register_question(native)
     key, pending = await prompt(native)
     native.state.end_approval("ordinary:call", outcome=ending)
     await asyncio.gather(*tuple(native.state._background_tasks), return_exceptions=True)

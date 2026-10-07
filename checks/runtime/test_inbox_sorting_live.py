@@ -5,17 +5,17 @@ import json
 from types import SimpleNamespace
 
 import pytest
+import test_background_completion_contract as completion_fixtures
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from test_background_completion_contract import (
-    configured_completion,
-    isolated_completion,
-)
 
 from gideon.core.config.loader import AppConfig
 from gideon.integrations.inbox import InboxItem, InboxState, InboxStore, redact_item
 from gideon.integrations.inbox_service import InboxService
 from gideon.integrations.inbox_sorting import BATCH_MAX, InboxSorter
+
+configured_completion = completion_fixtures.configured_completion
+isolated_completion = completion_fixtures.isolated_completion
 
 
 def message(identity, **fields):

@@ -131,7 +131,7 @@ async def test_hot_adapter_settings_class_removal_and_native_ownership(embedding
 async def test_registered_local_model_fallback_keeps_type_and_batch_contract(
     embedding_home,
 ):
-    module = load_ollama()
+    load_ollama()
     requests = []
 
     async def embed(request):

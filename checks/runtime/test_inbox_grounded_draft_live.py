@@ -7,17 +7,17 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+import test_background_completion_contract as completion_fixtures
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from test_background_completion_contract import (
-    configured_completion,
-    isolated_completion,
-)
 
 from gideon.integrations.inbox import InboxItem, InboxState, InboxStore
 from gideon.integrations.inbox_service import InboxService
 from gideon.integrations.reply_grounding import grounding
 from gideon.interfaces.dashboard.handlers_inbox import api_inbox_draft
+
+configured_completion = completion_fixtures.configured_completion
+isolated_completion = completion_fixtures.isolated_completion
 
 
 def service(tmp_path):

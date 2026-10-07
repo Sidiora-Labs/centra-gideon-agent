@@ -337,7 +337,7 @@ async def test_unavailable_scopes_never_offer_standing_permission(native, scope)
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ending", ["approved", "expired", "cancelled"])
 async def test_owner_endings_remove_components_and_late_grants(native, ending):
-    f = register(native)
+    register(native)
     p = await pending(native)
     if ending == "approved":
         native.state.resolve_approval("ordinary:call", True, by=YOU)

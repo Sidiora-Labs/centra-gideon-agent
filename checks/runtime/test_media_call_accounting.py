@@ -168,7 +168,10 @@ def test_actual_native_image_http_generate_edit_regenerate_accounted(
         )
         monkeypatch.setattr(media_call, "is_unattended", lambda key="": True)
         artifacts = NativeArtifactProvider(root=tmp_path / "artifacts")
-        audit = lambda *args, **kwargs: None
+
+        def audit(*args, **kwargs):
+            return None
+
         assert "Generated image" in mcp_artifacts._image_generate(
             artifacts, {"prompt": "cat"}, "session", audit
         )

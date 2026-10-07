@@ -153,7 +153,9 @@ async def test_owned_browser_readiness_preview_and_exclusive_control(
     register_browser_session_routes(app, store_path=tmp_path / "sessions.sqlite3")
     alice = token_auth.generate_token("alice", ttl_seconds=3600)
     bob = token_auth.generate_token("bob", ttl_seconds=3600)
-    cookie = lambda token: {"gideon_token_10129": token}
+
+    def cookie(token):
+        return {"gideon_token_10129": token}
 
     async with TestClient(
         TestServer(app), cookie_jar=aiohttp.DummyCookieJar()

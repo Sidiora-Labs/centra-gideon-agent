@@ -145,7 +145,7 @@ async def test_bridge_surface_token_cannot_redeem_but_signed_owner_session_can(
                 "/confirm",
                 json={"confirm_token": token},
                 headers=headers,
-                cookies={f"gideon_token_19406": owner_token},
+                cookies={"gideon_token_19406": owner_token},
             )
             assert owner_response.status == 200
             assert (await owner_response.json())["status"] == "ok"

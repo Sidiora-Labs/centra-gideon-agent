@@ -280,7 +280,7 @@ def test_instance_record_is_reference_only_and_delete_purges_owner(
     monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     monkeypatch.setenv("GIDEON_CREDENTIAL_BACKEND", "dotenv")
-    instance = create_instance(
+    create_instance(
         "test-provider", "Main", {"api_key": "instance-secret"}, instance_id="abc123"
     )
     path = tmp_path / "extensions/test-provider/instances/abc123.json"

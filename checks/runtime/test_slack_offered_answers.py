@@ -282,7 +282,7 @@ async def test_unavailable_private_or_native_scope_has_no_standing_offer(native,
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ending", ["approved", "expired", "cancelled"])
 async def test_native_owner_endings_close_offer_without_late_grant(native, ending):
-    f = register(native)
+    register(native)
     p = await pending(native)
     if ending == "approved":
         native.state.resolve_approval("ordinary:call", True, by=YOU)

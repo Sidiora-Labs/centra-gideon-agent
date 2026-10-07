@@ -11,7 +11,6 @@ from gideon.automation.triggers import tools
 from gideon.automation.triggers.event_fire import attach, detach
 from gideon.automation.triggers.store import TriggerStore
 from gideon.core.config.loader import AppConfig
-from gideon.engine.gateway import RuntimeCoordinator
 from gideon.integrations.action_providers import services as action_services
 from gideon.integrations.action_providers.services import ActionServices
 from gideon.interfaces.dashboard.state import ConsoleState

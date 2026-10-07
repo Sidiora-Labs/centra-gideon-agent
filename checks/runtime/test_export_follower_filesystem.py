@@ -115,7 +115,7 @@ def test_timer_start_and_stop_are_ordered_real_threads(tmp_path):
 
 
 def test_lock_does_not_truncate_metadata_or_follow_link(tmp_path, monkeypatch):
-    home = seed(tmp_path, monkeypatch)
+    seed(tmp_path, monkeypatch)
     path = lock_path("example")
     path.write_bytes(b"owner metadata")
     inode = path.stat().st_ino

@@ -401,7 +401,7 @@ async def test_unavailable_thread_or_work_scope_has_no_standing_offer(native, sc
 async def test_actual_owner_ending_is_mailed_in_same_thread_without_late_grant(
     native, ending
 ):
-    f = register(native)
+    register(native)
     p = await pending(native)
     if ending == "approved":
         native.state.resolve_approval("ordinary:call", True, by=YOU)

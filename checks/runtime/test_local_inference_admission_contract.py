@@ -4,8 +4,8 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+import test_provider_locality_health_contract as locality_fixtures
 from aiohttp import ClientSession, web
-from test_provider_locality_health_contract import serving
 
 from gideon.interfaces.dashboard.handlers.model_registry import (
     api_local_inference_move_on,
@@ -13,6 +13,8 @@ from gideon.interfaces.dashboard.handlers.model_registry import (
 )
 from gideon.interfaces.dashboard.ws_state import WebSocketState
 from gideon.security.guardrails import local_inference as q
+
+serving = locality_fixtures.serving
 
 
 @pytest.mark.asyncio

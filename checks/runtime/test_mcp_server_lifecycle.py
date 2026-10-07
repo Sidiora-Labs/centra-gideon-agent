@@ -166,7 +166,7 @@ async def test_masked_provider_card_round_trip_preserves_owner_secret(
 
         moved_config = {
             **saved_instance["config"],
-            "args": f"--header --renamed=[REDACTED: credential] --verbose",
+            "args": "--header --renamed=[REDACTED: credential] --verbose",
         }
         moved = await client.put(
             "/api/providers/mcp-tools/instances/cli",

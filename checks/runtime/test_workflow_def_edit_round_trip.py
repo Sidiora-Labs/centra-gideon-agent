@@ -129,7 +129,7 @@ async def test_named_base_round_trip_and_historical_read_keep_hidden_values_and_
 async def test_unmatched_hidden_flag_refuses_write_and_revision_guard_is_atomic(
     providers,
 ):
-    original = await providers.save_def(
+    await providers.save_def(
         name="editor-conflict",
         provenance="user",
         root={

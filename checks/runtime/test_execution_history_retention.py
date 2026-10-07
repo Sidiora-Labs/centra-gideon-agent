@@ -60,8 +60,8 @@ def test_real_writer_keeps_own_times_and_suppression_budget(tmp_path, monkeypatc
 def test_actual_boot_rotation_and_restart(tmp_path, monkeypatch):
     monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
     rows = [row(i) for i in range(1000, 1100)] + [row(i) for i in range(10)]
-    index = [row(i, job=f"job-{i%25}") for i in range(10000, 12000)] + [
-        row(i, job=f"job-{i%25}") for i in range(10)
+    index = [row(i, job=f"job-{i % 25}") for i in range(10000, 12000)] + [
+        row(i, job=f"job-{i % 25}") for i in range(10)
     ]
     write_history(tmp_path, rows, index)
     asyncio.run(

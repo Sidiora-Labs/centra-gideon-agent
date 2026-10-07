@@ -6,14 +6,17 @@ import sys
 from pathlib import Path
 
 import pytest
+import test_owner_question_runtime as question_fixtures
 from aiohttp.test_utils import TestClient, TestServer
-from test_owner_question_runtime import app_for, owned_state
+from test_owner_question_runtime import app_for
 
 from gideon.integrations.acp.client import AcpClient
 from gideon.integrations.acp.dialect import ClaudeCodeDialect, CodexDialect
 from gideon.interfaces.dashboard.token_auth import generate_token
 from gideon.security.approval_answer import OWNER, Principal
 from gideon.security.session_credentials import begin_turn, end_turn
+
+owned_state = question_fixtures.owned_state
 
 FORM = {
     "mode": "form",
