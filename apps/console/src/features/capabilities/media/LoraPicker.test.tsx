@@ -1,10 +1,30 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { render as mount, screen, fireEvent } from '@testing-library/react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import LoraPicker, { type LoraInventory } from './LoraPicker'
 const item = { id: 'adapter.safetensors', sha256: 'a'.repeat(64), bytes: 512, base_model: 'base', compatibility: 'metadata_match', trigger_words: 'red bird', effect_verified: false }
 const inventory: LoraInventory = { items: [item], invalid: [], truncated: false, supports_lora: true, selected_base_model: 'base' }
 const render = (value: LoraInventory, selected: Record<string, string> = {}) => new DOMParser().parseFromString(renderToStaticMarkup(<LoraPicker inventory={value} selected={selected} change={() => {}} />), 'text/html')
 describe('installed adapter picker', () => {
+  it('keeps an unavailable adapter focusable and refuses selection until support and metadata match', () => {
+    const change = vi.fn()
+    const view = mount(<LoraPicker inventory={{ ...inventory, supports_lora: false }} selected={{}} change={change} />)
+    const checkbox = screen.getByRole('checkbox', { name: item.id })
+    expect(checkbox).not.toBeDisabled()
+    expect(checkbox).toHaveAttribute('aria-disabled', 'true')
+    expect(checkbox).toHaveAccessibleDescription('Select a model that advertises LoRA support.')
+    fireEvent.click(checkbox)
+    expect(change).not.toHaveBeenCalled()
+    view.rerender(<LoraPicker inventory={{ ...inventory, items: [{ ...item, compatibility: 'metadata_mismatch' }] }} selected={{}} change={change} />)
+    expect(checkbox).toHaveAccessibleDescription('This adapter must have matching base-model metadata before selection.')
+    fireEvent.click(checkbox)
+    expect(change).not.toHaveBeenCalled()
+    view.rerender(<LoraPicker inventory={inventory} selected={{}} change={change} />)
+    expect(checkbox).not.toHaveAttribute('aria-disabled')
+    expect(checkbox).not.toHaveAttribute('aria-describedby')
+    fireEvent.click(checkbox)
+    expect(change).toHaveBeenCalledExactlyOnceWith(item.id, '1')
+  })
   it('never equates metadata matching with verified image effect', () => {
     const doc = render(inventory)
     expect(doc.querySelector('legend')?.textContent).toBe('Installed LoRA adapters')
@@ -20,14 +40,16 @@ describe('installed adapter picker', () => {
   it('disables application when the provider does not advertise support', () => {
     const doc = render({ ...inventory, supports_lora: false })
     expect(doc.querySelector('[role="status"]')?.textContent).toContain('does not advertise LoRA support')
-    expect(doc.querySelector<HTMLInputElement>('input')?.disabled).toBe(true)
+    expect(doc.querySelector<HTMLInputElement>('input')?.disabled).toBe(false)
+    expect(doc.querySelector('input')?.getAttribute('aria-disabled')).toBe('true')
     expect(doc.body.textContent).toContain(item.id)
     expect(doc.querySelectorAll('article')).toHaveLength(1)
   })
   it('does not allow unknown or mismatched adapters to be selected', () => {
     for (const compatibility of ['unknown', 'metadata_mismatch']) {
       const doc = render({ ...inventory, items: [{ ...item, compatibility }] })
-      expect(doc.querySelector<HTMLInputElement>('input')?.disabled).toBe(true)
+      expect(doc.querySelector<HTMLInputElement>('input')?.disabled).toBe(false)
+      expect(doc.querySelector('input')?.getAttribute('aria-disabled')).toBe('true')
       expect(doc.body.textContent).toContain(compatibility)
       expect(doc.querySelector('input[type="number"]')).toBeNull()
     }
