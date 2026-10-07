@@ -1,3 +1,4 @@
+import { TextLink } from '../../shared/ui/TextLink'
 import { useState } from 'react'
 import { api, type TriggerReviewCard, type TriggerReviewDecision, type TriggerReviewResult } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
@@ -47,7 +48,7 @@ export function ReviewCard({ card, onOpenTrigger, onChanged }: { card: TriggerRe
   }
   if (settled) return null
   return <article className="rounded-lg border border-outline-variant/50 bg-surface-container px-l py-m flex flex-col gap-m">
-    <button type="button" onClick={() => onOpenTrigger(card.trigger_id)} className="text-left text-primary hover:underline" data-type="title-s">{card.trigger_name || 'Automation'}</button>
+    <TextLink ink="emphasis" onClick={() => onOpenTrigger(card.trigger_id)} className="text-left">{card.trigger_name || 'Automation'}</TextLink>
     <p data-type="body-s" className="text-on-surface-var">{card.reason === 'interrupted'
       ? 'Interrupted during restart. It may already have produced an effect. Review it before running it again.'
       : `${card.missed_count} missed ${card.missed_count === 1 ? 'fire' : 'fires'}${card.latest_missed_at ? ` · latest ${relPast(card.latest_missed_at)}` : ''}. Run once now or dismiss these missed fires.`}</p>

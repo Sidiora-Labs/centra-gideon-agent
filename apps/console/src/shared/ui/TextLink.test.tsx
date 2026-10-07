@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { render } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
+import { fireEvent, render } from '@testing-library/react'
 import { ExternalLink } from 'lucide-react'
 import { TextLink } from './TextLink'
 
@@ -68,4 +68,42 @@ describe('TextLink', () => {
     expect(have).toContain('ml-auto')
     expect(have).toContain('text-primary')
   })
+
+  it('forwards disclosure state and references to the actual button through updates', () => {
+    const activate = vi.fn()
+    const { getByRole, rerender } = render(
+      <TextLink ariaExpanded={false} ariaControls="advanced-fields" ariaDescribedBy="advanced-summary" onClick={activate}>Advanced settings</TextLink>,
+    )
+    const button = getByRole('button', { name: 'Advanced settings' })
+    expect(button).toHaveAttribute('type', 'button')
+    expect(button).toHaveAttribute('aria-expanded', 'false')
+    expect(button).toHaveAttribute('aria-controls', 'advanced-fields')
+    expect(button).toHaveAttribute('aria-describedby', 'advanced-summary')
+    fireEvent.click(button)
+    expect(activate).toHaveBeenCalledTimes(1)
+    rerender(<TextLink ariaExpanded ariaControls="advanced-fields" ariaDescribedBy="advanced-summary" onClick={activate}>Advanced settings</TextLink>)
+    expect(button).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('keeps the native disabled action guard when disclosure attributes are present', () => {
+    const activate = vi.fn()
+    const { getByRole } = render(<TextLink disabled ariaExpanded={false} ariaControls="details" onClick={activate}>Guarded details</TextLink>)
+    const button = getByRole('button', { name: 'Guarded details' })
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    expect(activate).not.toHaveBeenCalled()
+    expect(button).not.toHaveAttribute('href')
+  })
+
+  it('forwards the same references without changing real anchor navigation', () => {
+    const { getByRole } = render(<TextLink href="#/settings" ariaExpanded={false} ariaControls="settings" ariaDescribedBy="settings-summary">Settings</TextLink>)
+    const link = getByRole('link', { name: 'Settings' })
+    expect(link).toHaveAttribute('href', '#/settings')
+    expect(link).toHaveAttribute('aria-expanded', 'false')
+    expect(link).toHaveAttribute('aria-controls', 'settings')
+    expect(link).toHaveAttribute('aria-describedby', 'settings-summary')
+    expect(link).not.toHaveAttribute('target')
+    expect(link).not.toHaveAttribute('rel')
+  })
+
 })

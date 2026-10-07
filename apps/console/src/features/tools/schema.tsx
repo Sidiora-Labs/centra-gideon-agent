@@ -1,3 +1,4 @@
+import { TextLink } from '../../shared/ui/TextLink'
 import { useId, useState, type ReactNode } from 'react'
 import { Toggle } from '../../shared/ui/Toggle'
 import type { JsonSchema, SchemaMeta, SchemaProp } from '../../shared/data/api'
@@ -89,11 +90,11 @@ export function SchemaFieldDisclosure({ fields, required = [], values = {}, conf
       {standard.map(renderField)}
       {advanced.length > 0 && (
         <>
-          <button type="button" onClick={() => setAdvancedOpen((open) => !open)} aria-expanded={advancedOpen}
-            aria-controls={disclosureId} aria-describedby={`${disclosureId}-summary`}
-            className="inline-flex w-fit items-center text-[0.8125rem] text-primary hover:underline">
+          <TextLink size="sm" ink="emphasis" onClick={() => setAdvancedOpen((open) => !open)} ariaExpanded={advancedOpen}
+            ariaControls={disclosureId} ariaDescribedBy={`${disclosureId}-summary`}
+            className="inline-flex w-fit items-center">
             Advanced settings
-          </button>
+          </TextLink>
           <span id={`${disclosureId}-summary`} data-type="caption" className="sr-only">
             {advancedOpen ? 0 : advanced.length} hidden advanced {advanced.length === 1 ? 'setting' : 'settings'}, {configuredCount} configured {configuredCount === 1 ? 'value' : 'values'}.
           </span>

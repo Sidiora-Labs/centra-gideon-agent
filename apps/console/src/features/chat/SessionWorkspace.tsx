@@ -1,3 +1,4 @@
+import { TextLink } from '../../shared/ui/TextLink'
 import { tabListKeys } from '../../shared/data/tabListKeys'
 import { useEffect, useMemo, useState } from 'react'
 import { Activity, Bot, Boxes, GripVertical, Workflow } from 'lucide-react'
@@ -154,7 +155,7 @@ function RunChanges({ runId, onOpenFile }: { runId: string; onOpenFile: (path: s
     return () => { live = false }
   }, [runId, open])
   return <div className="px-s pb-s">
-    <Button variant="ghost" size="xs" shape="squircle" type="button" ariaExpanded={open} onClick={() => setOpen((value) => !value)} className="text-primary hover:underline">{open ? 'Hide files & diff' : 'Show files & diff'}</Button>
+    <TextLink size="sm" ink="emphasis" ariaExpanded={open} onClick={() => setOpen((value) => !value)}>{open ? 'Hide files & diff' : 'Show files & diff'}</TextLink>
     {open && <div className="mt-s rounded-lg border border-outline-variant/50 p-s">
       {error ? <p data-type="body-s" role="alert" className="text-danger">{error}</p>
         : !workspace || !review ? <p data-type="body-s" role="status" className="text-on-surface-low">Loading files and diff…</p>

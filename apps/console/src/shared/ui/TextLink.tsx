@@ -1,4 +1,4 @@
-import type { ReactNode, MouseEvent } from 'react'
+import type { ReactNode, MouseEvent, AriaAttributes } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { cx } from './cx'
 
@@ -18,7 +18,7 @@ const INK: Record<Ink, string> = {
 export function TextLink({
   children, href, external = false, onClick, icon: Icon, iconPosition = 'leading',
   iconSize = 13, size = 'inherit', ink = 'primary', disabled = false, title, className,
-  'aria-label': ariaLabel,
+  'aria-label': ariaLabel, ariaExpanded, ariaControls, ariaDescribedBy,
 }: {
   children: ReactNode
   href?: string
@@ -33,6 +33,9 @@ export function TextLink({
   title?: string
   className?: string
   'aria-label'?: string
+  ariaExpanded?: AriaAttributes['aria-expanded']
+  ariaControls?: AriaAttributes['aria-controls']
+  ariaDescribedBy?: AriaAttributes['aria-describedby']
 }) {
   const cls = cx(
     INK[ink],
@@ -49,14 +52,16 @@ export function TextLink({
 
   if (href !== undefined) {
     return (
-      <a href={href} onClick={onClick} title={title} aria-label={ariaLabel} data-type={role} className={cls}
+      <a href={href} onClick={onClick} title={title} aria-label={ariaLabel} aria-expanded={ariaExpanded}
+        aria-controls={ariaControls} aria-describedby={ariaDescribedBy} data-type={role} className={cls}
         {...(external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>
         {body}
       </a>
     )
   }
   return (
-    <button type="button" onClick={onClick} disabled={disabled} title={title} aria-label={ariaLabel} data-type={role} className={cls}>
+    <button type="button" onClick={onClick} disabled={disabled} title={title} aria-label={ariaLabel} aria-expanded={ariaExpanded}
+        aria-controls={ariaControls} aria-describedby={ariaDescribedBy} data-type={role} className={cls}>
       {body}
     </button>
   )
