@@ -341,7 +341,7 @@ export function Composer(props: ComposerProps) {
         </div>
       </div>}
       <AssistantComposerToolbar className="gideon-composer-toolbar flex flex-wrap items-end justify-between gap-x-3 gap-y-2 border-t pt-2">
-        <div className="gideon-composer-options flex min-w-0 flex-wrap items-center gap-1" aria-label="Message options">
+        <div className="gideon-composer-options flex min-w-0 flex-wrap items-center gap-1" role="group" aria-label="Message options">
           {controls.attach && <PlusMenu onAttach={() => files.current?.click()} onOpenPrompts={onOpenPrompts} extra={plusMenuExtra} />}
           {controls.agent && <AgentPill data={data} value={selection?.agent ?? ''} openSignal={props.openAgentSignal} onSelect={agent => onSelect?.({ agent })} />}
           {controls.model && props.auiModelSelector !== false && <ModelControl data={data} agent={selection?.agent ?? ''} value={selection?.model ?? ''} aui={props.auiModelSelector}

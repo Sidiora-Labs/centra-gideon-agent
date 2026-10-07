@@ -180,7 +180,7 @@ export function TerminalView({ tab, onExited, onClose, onSession }: { tab: TermT
       className="group relative flex h-full flex-col overflow-hidden rounded-lg border border-outline/30 outline-none focus:ring-2 focus:ring-inset focus:ring-primary"
       style={{ background: mode === 'light' ? '#ffffff' : '#0d0d12' }}>
       <div className="flex h-7 shrink-0 items-center gap-1.5 border-b border-outline/20 px-2 text-[0.6875rem] text-on-surface-low"
-        aria-label={`Current directory: ${cwd || 'unavailable'}`} title={cwd || 'Current directory unavailable'}>
+        role="group" aria-label={`Current directory: ${cwd || 'unavailable'}`} title={cwd || 'Current directory unavailable'}>
         <Folder size={11} className="shrink-0" />
         <span className="truncate font-mono">{cwd || 'Current directory unavailable'}</span>
       </div>

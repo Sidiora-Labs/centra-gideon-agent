@@ -61,7 +61,7 @@ export function MessageAssistant({ children, actions, timestamp, feedback, model
       {stopOutcome && <StoppedRun words={[]} showWords={false}
         reason={stopOutcome.state === 'stopped' ? 'Stopped' : 'Stop failed; session reset'}
         className="mt-2 max-w-none" />}
-      {changedFiles.length > 0 && <div className="mt-3 flex flex-col gap-1.5" aria-label="File changes">
+      {changedFiles.length > 0 && <div className="mt-3 flex flex-col gap-1.5" role="group" aria-label="File changes">
         <FileTree nodes={changedFiles.map(({ change, complete, diff }): FileTreeNode => ({
           path: change.path, name: change.path, depth: 0, kind: 'file', snapshotComplete: complete,
           additions: diff?.additions, deletions: diff?.deletions,

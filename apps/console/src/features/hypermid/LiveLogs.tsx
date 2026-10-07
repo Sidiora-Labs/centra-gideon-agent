@@ -58,7 +58,7 @@ export function LiveLogs() {
     {error && <p data-type="body-s" role="alert" className="mb-m break-words text-danger">{error}</p>}
     {loading && !buffer.cursor ? <FormSkeleton sections={1} rows={3} what="Hypermid logs" /> : visible.length === 0
       ? <EmptyState title="No log entries" hint="No retained entries match these filters." />
-      : <div className="grid gap-s" aria-label="Hypermid log entries">{visible.map((entry) => <Surface key={`${entry.cursor.epoch}:${entry.cursor.sequence}`} tone="container" radius="lg" className="min-w-0 p-m">
+      : <div className="grid gap-s" role="group" aria-label="Hypermid log entries">{visible.map((entry) => <Surface key={`${entry.cursor.epoch}:${entry.cursor.sequence}`} tone="container" radius="lg" className="min-w-0 p-m">
         <div className="flex flex-wrap items-center gap-s text-on-surface-low"><span className="uppercase" data-type="label-s">{entry.severity}</span><span data-type="caption">{entry.component}</span><span data-type="caption">{new Date(entry.observed_at).toLocaleString()}</span></div>
         <p data-type="body-m" className="mt-xs break-words text-on-surface">{entry.message}</p>
       </Surface>)}</div>}

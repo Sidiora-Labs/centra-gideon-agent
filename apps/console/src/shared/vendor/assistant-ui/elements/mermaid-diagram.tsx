@@ -186,12 +186,13 @@ const MermaidDiagramImpl: FC<MermaidDiagramProps> = ({
     return (
       <div
         data-slot="mermaid-skeleton"
-        aria-label="Rendering diagram"
+        role="status" aria-busy="true" aria-label="Rendering diagram"
         className={cn(
           "aui-mermaid-skeleton bg-muted flex h-32 animate-pulse items-center justify-center gap-3 rounded-b-lg p-4",
           className,
         )}
       >
+        <span className="sr-only">Rendering diagram</span>
         <div className="bg-muted-foreground/20 h-8 w-20 rounded-md" />
         <div className="bg-muted-foreground/20 h-px w-10" />
         <div className="bg-muted-foreground/20 h-8 w-20 rounded-md" />

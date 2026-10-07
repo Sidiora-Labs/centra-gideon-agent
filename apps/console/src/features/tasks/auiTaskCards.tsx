@@ -38,7 +38,7 @@ export function GideonTaskCard({ task, onSaved, onOpen }: {
       setBusy(false)
     }
   }
-  return <div aria-label={`Task ${task.id}`}>
+  return <div role="group" aria-label={`Task ${task.id}`}>
     <TaskCard label={task.title} meta={task.id} state={taskCardState(task.status)}
       result={task.description || undefined}
       actions={(onOpen || (task.status !== 'done' && task.status !== 'completed' && task.provider !== 'project')) && <div className="flex gap-2">

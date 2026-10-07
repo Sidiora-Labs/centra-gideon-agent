@@ -9,7 +9,7 @@ export function PlanningArtifactDoc({ markdown, docId, label, commentTarget }: {
   const viewport = useRef<HTMLDivElement | null>(null)
   const annotations = commentTarget ? <CommentLayer scrollRef={viewport} docId={docId} docLabel={label}
     content={markdown} onSubmit={(message, docPaths) => commentTarget.submit({ message, docPaths })} /> : null
-  return <div ref={viewport} className="relative rounded-lg text-on-surface-var" aria-label={label}>
+  return <div ref={viewport} className="relative rounded-lg text-on-surface-var" role="document" aria-label={label}>
     <Markdown>{markdown}</Markdown>{annotations}
   </div>
 }

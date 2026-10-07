@@ -52,7 +52,7 @@ export function NetworkGrants({ grants, decisions = [], onRevoke }: Props) {
         </dl>
       </li>)}
     </ul>}
-    {decisions.length > 0 && <div aria-label="Recent network decisions" className="rounded-lg bg-surface-container p-m">
+    {decisions.length > 0 && <div role="group" aria-label="Recent network decisions" className="rounded-lg bg-surface-container p-m">
       <h3 className="font-medium text-on-surface">Recent decisions</h3>
       <ul data-type="body-s" className="mt-s space-y-xs">{decisions.map((decision, index) => <li key={`${decision.checkedAtMs}-${index}`} className="flex flex-wrap justify-between gap-s">
         <span className={decision.allowed ? 'text-on-surface' : 'text-error'}>{decision.allowed ? 'Allowed' : 'Denied'} · {decision.rule}</span>

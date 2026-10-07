@@ -41,7 +41,7 @@ export function NumberTicker({
     >
       <span
         className="flex text-3xl font-medium tracking-tight tabular-nums"
-        aria-label={formatted}
+        role="img" aria-label={formatted}
       >
         {formatted.split("").map((char, i) =>
           /\d/.test(char) ? (

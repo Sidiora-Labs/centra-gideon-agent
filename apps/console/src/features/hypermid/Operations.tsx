@@ -103,7 +103,7 @@ function Logs() {
     </p>}
     {!page ? <FormSkeleton sections={1} rows={3} what="Hypermid logs" />
       : page.entries.length === 0 ? <p data-type="body-s" className="text-on-surface-low">No log entries are available after this cursor.</p>
-      : <div className="grid max-h-96 gap-xs overflow-y-auto" aria-label="Redacted Hypermid log entries">{page.entries.map((entry) => <div key={`${entry.cursor.epoch}:${entry.cursor.sequence}`} data-type="caption" className="grid min-w-0 gap-xs rounded-lg bg-surface-container px-m py-s sm:grid-cols-[auto_auto_1fr]">
+      : <div className="grid max-h-96 gap-xs overflow-y-auto" role="group" aria-label="Redacted Hypermid log entries">{page.entries.map((entry) => <div key={`${entry.cursor.epoch}:${entry.cursor.sequence}`} data-type="caption" className="grid min-w-0 gap-xs rounded-lg bg-surface-container px-m py-s sm:grid-cols-[auto_auto_1fr]">
         <span className="text-on-surface-low">{new Date(entry.observed_at).toLocaleTimeString()}</span>
         <span className="text-on-surface-low">{entry.component} · {entry.severity}</span>
         <span className="min-w-0 break-words text-on-surface">{entry.message}</span>

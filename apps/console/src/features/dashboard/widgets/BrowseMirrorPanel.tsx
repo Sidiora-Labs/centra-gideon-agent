@@ -77,7 +77,7 @@ export function BrowseMirrorPanel() {
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-xs pt-xs" aria-label="Browser-control requests">
+    <div className="flex min-w-0 flex-col gap-xs pt-xs" role="group" aria-label="Browser-control requests">
       {grants.map((grant) => {
         const working = busy === grant.request_id
         return (

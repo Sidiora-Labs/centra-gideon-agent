@@ -63,7 +63,7 @@ export function AgentPill({ data, value, onSelect, openSignal }: { data?: Compos
 function ContextRing({ pct }: { pct: number }) {
   const context = contextIndicator(pct)
   if (!context) return <span className="size-1.5 rounded-full bg-primary" />
-  return <span title={context.label} aria-label={context.label} className="inline-flex size-4 shrink-0">
+  return <span title={context.label} role="img" aria-label={context.label} className="inline-flex size-4 shrink-0">
     <svg aria-hidden width="16" height="16" viewBox="0 0 16 16" className="-rotate-90">
       <circle cx="8" cy="8" r="6" fill="none" stroke="var(--color-outline-variant)" strokeWidth="2" opacity="0.4" />
       <circle cx="8" cy="8" r="6" pathLength="1" fill="none" stroke={`var(--color-${context.tone})`} strokeWidth="2" strokeLinecap="round"
