@@ -1,5 +1,5 @@
 import { type Page, expect } from '@playwright/test'
-import type { Theme } from './routes'
+import { ROUTES, NON_NAV_ROUTES, type Theme } from './routes'
 
 
 export async function seedTheme(page: Page, theme: Theme): Promise<void> {
@@ -41,6 +41,8 @@ export async function gotoRoute(page: Page, route: string): Promise<void> {
   await page.evaluate(() => (document as unknown as { fonts?: { ready: Promise<unknown> } }).fonts?.ready)
   await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {   })
   await page.locator(VISUAL_WAITING_SELECTOR).waitFor({ state: 'detached', timeout: 10_000 })
+  const readySelector = [...ROUTES, ...NON_NAV_ROUTES].find(entry => entry.route === route)?.readySelector
+  if (readySelector) await expect(page.locator(readySelector), `the native page for #/${route} did not mount`).toBeVisible({ timeout: 10_000 })
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
   await settleEntranceAnimations(page)
   await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
