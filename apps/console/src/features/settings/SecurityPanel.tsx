@@ -12,7 +12,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   api, ApiError, type DesktopCapabilityWire, type EgressPolicyConfig, type DenylistBaseline,
 } from '../../shared/data/api'
-import { confirm } from '../../shared/ui/dialog'
+import { confirm, confirmDestructive } from '../../shared/ui/dialog'
 import {
   desktopBridge, getLoginItem, requestDesktopCapability, setLoginItem,
 } from '../../shared/data/desktopBridge'
@@ -415,7 +415,7 @@ async function saveSecurityCollection(
   catch (error) {
     if (!(error instanceof ApiError) || error.status !== 400
       || (error.code !== 'confirmation_required' && error.message !== 'confirmation_required')) throw error
-    if (!(await confirm({ title, body, confirmLabel: 'Allow this change', danger: true }))) {
+    if (!(await confirmDestructive(title, body, { confirmLabel: 'Allow this change' }))) {
       throw new Error('The change was not saved.')
     }
     return write(true)

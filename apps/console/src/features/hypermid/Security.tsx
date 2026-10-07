@@ -4,7 +4,7 @@ import { api, type HypermidSecurityStatusWire } from '../../shared/data/api'
 import { useQuery } from '../../shared/data/data'
 import { Button } from '../../shared/ui/Button'
 import { FormSkeleton, LoadError } from '../../shared/ui/ListScaffold'
-import { confirm } from '../../shared/ui/dialog'
+import { confirmDestructive } from '../../shared/ui/dialog'
 import { Surface } from '../../shared/ui/Surface'
 import { PanelHeader, Section } from '../settings/settingsUI'
 import { NetworkGrants } from './NetworkGrants'
@@ -43,12 +43,13 @@ export function Security() {
   if (!query.data) return <FormSkeleton sections={1} rows={3} what="Hypermid network security" />
 
   const revoke = async (grantId: string) => {
-    if (!(await confirm({
-      title: 'Revoke this network grant?',
-      body: 'Future requests covered by this grant will be denied. Active effects remain subject to their authoritative outcome state.',
-      confirmLabel: 'Revoke grant',
-      danger: true,
-    }))) return
+    const grant = query.data.grants.find(candidate => candidate.grantId === grantId)
+    if (!grant) { setError('This network grant is no longer available. Refresh and try again.'); return }
+    if (!(await confirmDestructive(
+      `Revoke network access to ${grant.scheme}://${grant.hostname}?`,
+      'Future requests covered by this grant will be denied. Active effects remain subject to their authoritative outcome state.',
+      { confirmLabel: 'Revoke grant' },
+    ))) return
     setBusy(grantId); setError('')
     try {
       await api.revokeHypermidNetworkGrant(grantId)

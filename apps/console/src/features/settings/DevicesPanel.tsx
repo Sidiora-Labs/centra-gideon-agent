@@ -6,7 +6,7 @@ import type { LucideIcon } from 'lucide-react'
 import { api } from '../../shared/data/api'
 import type { DeviceRec, DevicePairStart } from '../../shared/data/api'
 import { notify } from '../../app/shell/appSdk'
-import { confirm } from '../../shared/ui/dialog'
+import { confirm, confirmDestructive } from '../../shared/ui/dialog'
 import { useQuery } from '../../shared/data/data'
 import { PanelHeader, Section, RowGroup } from './settingsUI'
 import { PairingQr } from './PairingQr'
@@ -103,12 +103,7 @@ export function DevicesPanel() {
   }
 
   const revokeOthers = async () => {
-    const ok = await confirm({
-      title: 'Sign out other clients?',
-      body: 'Every other browser, paired device and terminal session will be signed out. This client will stay signed in.',
-      danger: true,
-      confirmLabel: 'Sign out other clients',
-    })
+    const ok = await confirmDestructive('Sign out other clients?', 'Every other browser, paired device and terminal session will be signed out. This client will stay signed in.', { confirmLabel: 'Sign out other clients' })
     if (!ok) return
     setRevokingOthers(true)
     try {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, RotateCcw } from 'lucide-react'
 import { useIdentity, DEFAULT_USER_NAME, suggestHandle, USERNAME_MAX_LEN } from '../../app/shell/identity'
-import { confirm } from '../../shared/ui/dialog'
+import { confirm, confirmDestructive } from '../../shared/ui/dialog'
 import { notify } from '../../app/shell/appSdk'
 import { api } from '../../shared/data/api'
 import { PanelHeader, Section, Field, Row, Toggle } from './settingsUI'
@@ -171,24 +171,14 @@ function LoginSection() {
   }
 
   const toggleLogin = async (next: boolean) => {
-    if (!next && !(await confirm({
-      title: 'Disable password sign-in?',
-      body: 'People using the password sign-in page will no longer be able to use it. Your token link remains available.',
-      confirmLabel: 'Disable password sign-in',
-      danger: true,
-    }))) return
+    if (!next && !(await confirmDestructive('Disable password sign-in?', 'People using the password sign-in page will no longer be able to use it. Your token link remains available.', { confirmLabel: 'Disable password sign-in' }))) return
     api.patchConfig('auth.login_enabled', next)
       .then(() => load())
       .catch((e) => notify(`Couldn't change sign-in: ${String((e as Error)?.message || e)}`, 'error'))
   }
 
   const toggleTotp = async (next: boolean) => {
-    if (!next && !(await confirm({
-      title: 'Stop requiring a 2FA code?',
-      body: 'Password sign-in will no longer require a code from an authenticator app.',
-      confirmLabel: 'Stop requiring 2FA',
-      danger: true,
-    }))) return
+    if (!next && !(await confirmDestructive('Stop requiring a 2FA code?', 'Password sign-in will no longer require a code from an authenticator app.', { confirmLabel: 'Stop requiring 2FA' }))) return
     api.patchConfig('auth.require_totp', next)
       .then(() => load())
       .catch((e) => notify(`Couldn't change the 2FA requirement: ${String((e as Error)?.message || e)}`, 'error'))

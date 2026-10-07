@@ -10,7 +10,7 @@ import { SidePanel } from '../../shared/ui/SidePanel'
 import { InlineError } from '../../shared/ui/InlineError'
 import { ApiError, api, partitionRunHistory, requireWriteAccepted, type WorkflowCascadePreview, type WorkflowContinuation, type WorkflowNodeState, type WorkflowRunDetailData } from '../../shared/data/api'
 import { notify } from '../../app/shell/appSdk'
-import { confirm, promptForm } from '../../shared/ui/dialog'
+import { confirm, confirmDestructive, promptForm } from '../../shared/ui/dialog'
 import { PageTitle } from '../../shared/ui/PageTitle'
 import { fmtElapsed, isNodeTerminal, isPrelaunch, isTerminal, itemProgress, nodeLabel, nodeLook, runLook } from './workflowMeta'
 import { PolicyOverridesPanel } from './PolicyOverridesPanel'
@@ -211,7 +211,7 @@ export function WorkflowRunDetail({ runId, onBack, initialInspectNodeId, onInspe
     } catch (error) {
       const preview = cascadePreview(error)
       if (!preview) throw error
-      const accepted = await confirm({ title, body: cascadeConfirmation(preview), confirmLabel, danger: true })
+      const accepted = await confirmDestructive(title, cascadeConfirmation(preview), { confirmLabel })
       return accepted ? request(true) : null
     }
   }, [])

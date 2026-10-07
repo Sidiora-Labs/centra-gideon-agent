@@ -17,7 +17,7 @@ import { Meter } from '../../shared/ui/Meter'
 import { WavyProgress } from '../../shared/ui/WavyProgress'
 import { SearchField } from '../../shared/ui/SearchField'
 import { useQuery, invalidateKeys } from '../../shared/data/data'
-import { confirm } from '../../shared/ui/dialog'
+import { confirm, confirmDestructive } from '../../shared/ui/dialog'
 import { PanelHeader, Section, RowGroup, ToggleRow } from './settingsUI'
 import { notify } from '../../app/shell/appSdk'
 import { FormSkeleton, ListSkeleton, LoadError } from '../../shared/ui/ListScaffold'
@@ -277,12 +277,7 @@ export function ModelTokenSection() {
     } finally { setSaving(false) }
   }
   const remove = async () => {
-    const ok = await confirm({
-      title: 'Remove the saved Hugging Face token?',
-      body: 'Gated model downloads will use an environment or cached token if one is available; otherwise they will be blocked until you add another token.',
-      confirmLabel: 'Remove token',
-      danger: true,
-    })
+    const ok = await confirmDestructive('Remove the saved Hugging Face token?', 'Gated model downloads will use an environment or cached token if one is available; otherwise they will be blocked until you add another token.', { confirmLabel: 'Remove token' })
     if (!ok) return
     setSaving(true)
     try {
