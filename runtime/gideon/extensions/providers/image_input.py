@@ -95,7 +95,7 @@ async def resolve_image_reader(**kwargs: Any) -> ModelProvider:
     reader = await image_reader()
     if not reader.ref:
         raise ProviderResolutionError(
-            f"No image model can read this file. Choose one in Settings → Models."
+            "No image model can read this file. Choose one in Settings → Models."
         )
     return resolve_provider_for_use_case(
         IMAGE_USE_CASE,

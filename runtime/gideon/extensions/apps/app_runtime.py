@@ -8,7 +8,6 @@ needed.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import importlib
 import importlib.util
@@ -154,7 +153,6 @@ def unload(
         _stop_backend,
         _stop_worker,
     )
-    from gideon.extensions.apps.native_contract import namespaced_module_name
     from gideon.extensions.providers.availability import get_availability_board
 
     _hold_processes(name)

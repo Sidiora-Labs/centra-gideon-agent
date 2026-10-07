@@ -50,13 +50,14 @@ from typing import Any
 # sibling ``discord_desk.*`` import below must keep resolving for the life of the process
 # (the source lives as long as the app is enabled). Pin it, exactly as transport.py does for
 # the channel half.
+from gideon.sdk.trigger_source import SourceEvent, TriggerSourceProvider
+
 _APP_DIR = str(_Path(__file__).resolve().parents[1])
 if _APP_DIR not in _sys.path:
     _sys.path.insert(0, _APP_DIR)
 
-from discord_desk.inbound_tap import subscribe, unsubscribe
+from discord_desk.inbound_tap import subscribe, unsubscribe  # noqa: E402
 
-from gideon.sdk.trigger_source import SourceEvent, TriggerSourceProvider
 
 logger = logging.getLogger(__name__)
 

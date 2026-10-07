@@ -52,31 +52,6 @@ from typing import Any
 # process (the poll loop, delivery and settings all resolve ``mail_desk_runtime.*`` long
 # after boot). Pin the app dir on sys.path so those imports keep resolving — a real
 # installed package would be permanently importable.
-_APP_DIR = str(_Path(__file__).resolve().parents[1])
-if _APP_DIR not in _sys.path:
-    _sys.path.insert(0, _APP_DIR)
-
-# Import ALL runtime deps at MODULE level (not lazily inside methods): the loader only
-# keeps this app's dir on sys.path while it execs this module, so a
-# ``from mail_desk_runtime.X import`` inside a method would run LATER, off the path, and
-# fail. Binding them here, during exec, captures them for the process life.
-from mail_desk_runtime.delivery import MailDeskDelivery, ThreadStore
-from mail_desk_runtime.imap_client import Imap4Client, ImapClient, ImapError
-from mail_desk_runtime.imap_client import probe_login as imap_probe
-from mail_desk_runtime.inbound_tap import publish as publish_inbound
-from mail_desk_runtime.mime import parse_inbound, strip_quoted_reply
-from mail_desk_runtime.settings import (
-    ACTIVATION_OFF,
-    MailDeskSettings,
-    get_settings,
-    load_credentials,
-    load_raw_settings,
-    reload_settings,
-)
-from mail_desk_runtime.smtp_client import SmtplibSender
-from mail_desk_runtime.smtp_client import probe_login as smtp_probe
-from mail_desk_runtime.writes import SendRefused, live_writes_disabled
-
 from gideon.sdk.channel import (
     ChannelCapabilities,
     ChannelMessage,
@@ -85,6 +60,32 @@ from gideon.sdk.channel import (
     redeem_pairing_code,
 )
 from gideon.sdk.util import app_data_dir
+
+_APP_DIR = str(_Path(__file__).resolve().parents[1])
+if _APP_DIR not in _sys.path:
+    _sys.path.insert(0, _APP_DIR)
+
+# Import ALL runtime deps at MODULE level (not lazily inside methods): the loader only
+# keeps this app's dir on sys.path while it execs this module, so a
+# ``from mail_desk_runtime.X import`` inside a method would run LATER, off the path, and
+# fail. Binding them here, during exec, captures them for the process life.
+from mail_desk_runtime.delivery import MailDeskDelivery, ThreadStore  # noqa: E402
+from mail_desk_runtime.imap_client import Imap4Client, ImapClient, ImapError  # noqa: E402
+from mail_desk_runtime.imap_client import probe_login as imap_probe  # noqa: E402
+from mail_desk_runtime.inbound_tap import publish as publish_inbound  # noqa: E402
+from mail_desk_runtime.mime import parse_inbound, strip_quoted_reply  # noqa: E402
+from mail_desk_runtime.settings import (  # noqa: E402
+    ACTIVATION_OFF,
+    MailDeskSettings,
+    get_settings,
+    load_credentials,
+    load_raw_settings,
+    reload_settings,
+)
+from mail_desk_runtime.smtp_client import SmtplibSender  # noqa: E402
+from mail_desk_runtime.smtp_client import probe_login as smtp_probe  # noqa: E402
+from mail_desk_runtime.writes import SendRefused, live_writes_disabled  # noqa: E402
+
 
 logger = logging.getLogger(__name__)
 

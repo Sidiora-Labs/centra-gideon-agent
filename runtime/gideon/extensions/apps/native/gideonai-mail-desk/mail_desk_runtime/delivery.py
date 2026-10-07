@@ -805,7 +805,7 @@ class MailDeskDelivery:
         )
         if chosen is None:
             return False
-        from gideon.security.approval_answer import Principal, on_channel
+        from gideon.security.approval_answer import on_channel
 
         by = on_channel("mail-desk", sender, pending.tenant)
         if callable(pending.on_answer):

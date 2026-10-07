@@ -34,7 +34,6 @@ import os
 import signal
 import socket
 import subprocess
-import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,9 +46,10 @@ from gideon.extensions.apps.manifest import AppManifest
 if TYPE_CHECKING:
     from gideon.integrations.sandbox_providers import SandboxSpec
 
+from gideon.operations.child_output import ChildOutput, relay
+
 logger = logging.getLogger(__name__)
 
-from gideon.operations.child_output import ChildOutput, relay
 
 _TERM_TIMEOUT = 5
 

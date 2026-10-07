@@ -36,7 +36,6 @@ class TestYoloExpiry:
 
     def test_config_yolo_never_expires(self) -> None:
         """set_yolo_mode from config sets no expiry."""
-        import slack_desk_runtime.handler as h
         from slack_desk_runtime.handler import is_yolo_mode, set_yolo_mode
 
         set_yolo_mode(True)
@@ -50,7 +49,6 @@ class TestYoloExpiry:
 
     def test_dashboard_yolo_expires_6h(self) -> None:
         """Dashboard YOLO uses _YOLO_DASHBOARD_TTL_SECS (6h)."""
-        import slack_desk_runtime.handler as h
         from slack_desk_runtime.handler import (
             _YOLO_DASHBOARD_TTL_SECS,
             enable_yolo_with_ttl,
@@ -109,7 +107,6 @@ class TestYoloFromConfigGuard:
         disable_yolo()
 
     def test_config_yolo_sets_from_config_flag(self) -> None:
-        import slack_desk_runtime.handler as h
         from slack_desk_runtime.handler import set_yolo_mode
 
         set_yolo_mode(True)
@@ -132,7 +129,6 @@ class TestYoloFromConfigGuard:
         assert tm._TRUST._expires_at == 0.0, "Config yolo should remain permanent"
 
     def test_config_yolo_survives_far_future(self) -> None:
-        import slack_desk_runtime.handler as h
         from slack_desk_runtime.handler import is_yolo_mode, set_yolo_mode
 
         set_yolo_mode(True)
@@ -142,7 +138,6 @@ class TestYoloFromConfigGuard:
             assert is_yolo_mode(), "Config YOLO must never expire"
 
     def test_disable_clears_from_config_flag(self) -> None:
-        import slack_desk_runtime.handler as h
         from slack_desk_runtime.handler import disable_yolo, set_yolo_mode
 
         set_yolo_mode(True)
@@ -151,7 +146,6 @@ class TestYoloFromConfigGuard:
         assert tm._TRUST._from_config is False
 
     def test_set_yolo_mode_false_clears_flag(self) -> None:
-        import slack_desk_runtime.handler as h
         from slack_desk_runtime.handler import set_yolo_mode
 
         set_yolo_mode(True)
@@ -175,7 +169,6 @@ class TestYoloFromConfigSlackDeskGuards:
         """events.py: /gideon yolo on responds with noop when config-permanent."""
         from unittest.mock import AsyncMock, MagicMock
 
-        import slack_desk_runtime.handler as h
         from slack_desk_runtime.handler import set_yolo_mode
 
         set_yolo_mode(True)
@@ -205,7 +198,6 @@ class TestYoloFromConfigSlackDeskGuards:
         """handler.py: !yolo on responds with noop when config-permanent."""
         from unittest.mock import AsyncMock, MagicMock
 
-        import slack_desk_runtime.handler as h
         from slack_desk_runtime.handler import _handle_slash_command, set_yolo_mode
 
         set_yolo_mode(True)

@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any, Callable
+from typing import Any, Callable
 
 from discord_desk.api import (
     BUTTON_STYLE_DANGER,
@@ -134,16 +134,16 @@ class _PendingApproval:
     )
 
     def __init__(self, request_id: str, channel_id: str, message_id: str) -> None:
+        from gideon.integrations.channel_delivery import (
+            ONE_CALL_ANSWERS,
+            ApprovalAnswer,
+        )
         self.future: asyncio.Future = asyncio.get_event_loop().create_future()
         self.channel_id = channel_id
         self.message_id = message_id
         self.request_id = request_id
         self.answerer: Principal | None = None
         self.on_answer: Callable[[str, Principal], bool] | None = None
-        from gideon.integrations.channel_delivery import (
-            ONE_CALL_ANSWERS,
-            ApprovalAnswer,
-        )
 
         self.answers: tuple[ApprovalAnswer, ...] = ONE_CALL_ANSWERS
         self.delivery: DiscordDeskDelivery | None = None
@@ -756,8 +756,7 @@ def _approval_components(
     request_id: str, answers: tuple | None = None
 ) -> list[dict[str, Any]]:
     """Render exactly the answer capability offered by the native approval owner."""
-    from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS, ApprovalAnswer
-
+    from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
     return [
         {
             "type": COMPONENT_ACTION_ROW,

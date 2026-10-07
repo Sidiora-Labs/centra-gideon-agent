@@ -17,6 +17,19 @@ from typing import TypedDict, Unpack
 
 import pytest
 
+from mail_desk_fakes import FakeImapServer, FakeSmtpServer, FakeState, build_message
+from mail_desk_runtime.delivery import MailDeskDelivery, ThreadStore
+from mail_desk_runtime.settings import CRED_IMAP_PASS, reload_settings
+from mail_desk_runtime.transport import MailDeskTransport, create_provider
+
+from gideon.sdk.channel import (
+    ProviderSettings,
+    allow_sender,
+    create_pairing_code,
+    is_allowed_sender,
+    save_credential,
+)
+
 
 class _MessageFields(TypedDict, total=False):
     from_addr: str
@@ -31,19 +44,6 @@ class _MessageFields(TypedDict, total=False):
     attachments: list[tuple[str, str, bytes]] | None
     extra_headers: dict[str, str] | None
 
-
-from mail_desk_fakes import FakeImapServer, FakeSmtpServer, FakeState, build_message
-from mail_desk_runtime.delivery import MailDeskDelivery, ThreadStore
-from mail_desk_runtime.settings import CRED_IMAP_PASS, reload_settings
-from mail_desk_runtime.transport import MailDeskTransport, create_provider
-
-from gideon.sdk.channel import (
-    ProviderSettings,
-    allow_sender,
-    create_pairing_code,
-    is_allowed_sender,
-    save_credential,
-)
 
 _APP = "gideonai-mail-desk"
 

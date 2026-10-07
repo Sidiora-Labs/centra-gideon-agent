@@ -20,7 +20,6 @@ import os
 import re
 import time
 from collections import OrderedDict
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 import aiohttp
@@ -62,7 +61,6 @@ from slack_sdk.socket_mode.response import SocketModeResponse
 from slack_sdk.socket_mode.websockets import SocketModeClient as WSSocketModeClient
 from slack_sdk.web.async_client import AsyncWebClient
 
-from gideon.sdk.channel import AppConfig
 from gideon.sdk.channel import ProcedureLibrary as SkillsLoader
 from gideon.sdk.channel import (
     Stats,
@@ -232,6 +230,7 @@ async def _handle_agent(
     orch: "SlackDeskRuntime", caller_id: str, args: str, respond: Callable
 ) -> None:
     """Switch agent directly if valid name given, otherwise show selector."""
+    from pathlib import Path
     from slack_desk_runtime.handler import (
         _get_default_agent,
         _resolve_agent_name,
@@ -258,7 +257,6 @@ async def _handle_agent(
         await respond(f"❌ Unknown agent `{name}`. Pick one below:")
 
     # Show selector dropdown
-    from pathlib import Path
 
     agents_dir = Path.home() / ".gideon" / "agents"
     jsons = sorted(agents_dir.glob("*.json")) if agents_dir.is_dir() else []
@@ -468,8 +466,8 @@ def _get_agent_names() -> list[str]:
     When a read is blocked by ``is_sensitive_path()``, a SEL audit event
     (``sensitive_path_blocked``) is emitted so the attempt is observable.
     """
-    import json
     from pathlib import Path
+    import json
 
     from gideon.sdk.channel import safe_read_file
 
@@ -547,8 +545,8 @@ async def _handle_sessions(
     orch: "SlackDeskRuntime", caller_id: str, args: str, respond: Callable
 ) -> None:
     """List last 10 sessions as task_card blocks with resume buttons."""
-    import json
     from pathlib import Path
+    import json
 
     sess_dir = Path.home() / ".gideon" / "sessions"
     if not sess_dir.exists():

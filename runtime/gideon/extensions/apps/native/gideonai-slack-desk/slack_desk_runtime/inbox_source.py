@@ -34,13 +34,14 @@ from typing import Any
 # but the sibling ``slack_desk_runtime.*`` imports below must keep resolving for the life
 # of the process (the inbox service polls long after boot). Pin it, exactly as
 # transport.py does for the channel half.
+from gideon.sdk.inbox import IncomingMessage, MessageSourceProvider
+
 _APP_DIR = str(_Path(__file__).resolve().parents[1])
 if _APP_DIR not in _sys.path:
     _sys.path.insert(0, _APP_DIR)
 
-from slack_desk_runtime.client import RealSlackDeskClient, SlackDeskClientOps
+from slack_desk_runtime.client import RealSlackDeskClient, SlackDeskClientOps  # noqa: E402
 
-from gideon.sdk.inbox import IncomingMessage, MessageSourceProvider
 
 logger = logging.getLogger(__name__)
 

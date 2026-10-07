@@ -22,6 +22,13 @@ from typing import Any
 # socket receiver, delivery, and interaction handlers all resolve ``slack_desk_runtime.*``
 # long after boot. Pin the app dir on sys.path for the life of the process so those
 # imports keep resolving (a real installed package would be permanently importable).
+from gideon.sdk.channel import (
+    ChannelCapabilities,
+    ChannelTransportProvider,
+    OutboundMessage,
+    fence_channel_content,
+)
+
 _APP_DIR = str(_Path(__file__).resolve().parents[1])
 if _APP_DIR not in _sys.path:
     _sys.path.insert(0, _APP_DIR)
@@ -31,20 +38,14 @@ if _APP_DIR not in _sys.path:
 # ``from slack_desk_runtime.X import`` inside a method runs LATER — when the dir is off
 # the path — and fails with "No module named 'slack_desk_runtime'". Binding them here,
 # during exec, captures them for the life of the transport instance.
-from slack_desk_runtime.client import RealSlackDeskClient
-from slack_desk_runtime.delivery import SlackDeskDelivery
-from slack_desk_runtime.events import SeenCache, init_socket_mode
-from slack_desk_runtime.interactions import init as init_interactions
-from slack_desk_runtime.runtime import SlackDeskRuntime
-from slack_desk_runtime.settings import load_tokens
-from slack_desk_runtime.writes import SendRefused, live_writes_disabled
+from slack_desk_runtime.client import RealSlackDeskClient  # noqa: E402
+from slack_desk_runtime.delivery import SlackDeskDelivery  # noqa: E402
+from slack_desk_runtime.events import SeenCache, init_socket_mode  # noqa: E402
+from slack_desk_runtime.interactions import init as init_interactions  # noqa: E402
+from slack_desk_runtime.runtime import SlackDeskRuntime  # noqa: E402
+from slack_desk_runtime.settings import load_tokens  # noqa: E402
+from slack_desk_runtime.writes import SendRefused, live_writes_disabled  # noqa: E402
 
-from gideon.sdk.channel import (
-    ChannelCapabilities,
-    ChannelTransportProvider,
-    OutboundMessage,
-    fence_channel_content,
-)
 
 # NOT ``__name__``: the app loader execs this ENTRY module under a synthetic name
 # (``_gid_app_gideonai_slack_desk__slack_desk_runtime_transport``), so ``__name__`` produced a

@@ -6,8 +6,7 @@ import contextvars
 from dataclasses import dataclass
 from typing import Any
 
-from gideon.extensions.apps.agent_tiers import AGENT_READ, AGENT_TIERS, AGENT_TOOLS
-
+from gideon.extensions.apps.agent_tiers import AGENT_READ, AGENT_TIERS
 _BOUND: dict[str, AppWork] = {}
 _HELD: contextvars.ContextVar[AppWork | None] = contextvars.ContextVar(
     "gideon_app_work", default=None

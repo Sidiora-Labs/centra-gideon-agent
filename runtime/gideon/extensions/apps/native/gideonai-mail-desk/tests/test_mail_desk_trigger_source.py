@@ -28,21 +28,6 @@ from typing import TypedDict, Unpack
 
 import pytest
 
-
-class _MessageFields(TypedDict, total=False):
-    from_addr: str
-    to_addr: str
-    subject: str
-    message_id: str
-    plain: str | None
-    html: str | None
-    in_reply_to: str
-    references: str
-    date: str
-    attachments: list[tuple[str, str, bytes]] | None
-    extra_headers: dict[str, str] | None
-
-
 from mail_desk_fakes import FakeImapServer, FakeSmtpServer, FakeState, build_message
 from mail_desk_runtime import inbound_tap
 from mail_desk_runtime.delivery import MailDeskDelivery, ThreadStore
@@ -58,6 +43,21 @@ from mail_desk_runtime.trigger_source import (
 )
 
 from gideon.sdk.channel import ProviderSettings, allow_sender, save_credential
+
+
+class _MessageFields(TypedDict, total=False):
+    from_addr: str
+    to_addr: str
+    subject: str
+    message_id: str
+    plain: str | None
+    html: str | None
+    in_reply_to: str
+    references: str
+    date: str
+    attachments: list[tuple[str, str, bytes]] | None
+    extra_headers: dict[str, str] | None
+
 
 _MANIFEST = Path(__file__).resolve().parents[1] / "app.json"
 AGENT = "agent@example.com"

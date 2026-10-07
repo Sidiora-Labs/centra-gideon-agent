@@ -54,13 +54,14 @@ from typing import Any
 # sibling ``slack_desk_runtime.*`` import below must keep resolving for the life of the process
 # (the source lives as long as the app is enabled). Pin it, exactly as transport.py and
 # inbox_source.py do for the other two halves.
+from gideon.sdk.trigger_source import SourceEvent, TriggerSourceProvider
+
 _APP_DIR = str(_Path(__file__).resolve().parents[1])
 if _APP_DIR not in _sys.path:
     _sys.path.insert(0, _APP_DIR)
 
-from slack_desk_runtime.inbound_tap import subscribe, unsubscribe
+from slack_desk_runtime.inbound_tap import subscribe, unsubscribe  # noqa: E402
 
-from gideon.sdk.trigger_source import SourceEvent, TriggerSourceProvider
 
 logger = logging.getLogger(__name__)
 

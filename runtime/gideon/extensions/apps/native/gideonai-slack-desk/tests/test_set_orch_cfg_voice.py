@@ -6,7 +6,6 @@ Voice behavior toggles (enabled / auto_speak / auto_reply_to_voice) load from
 """
 
 import pytest
-from slack_desk_runtime import handler as handler_mod
 from slack_desk_runtime.handler import _vc, set_orch_cfg
 
 from gideon.sdk.channel import AppConfig

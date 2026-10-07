@@ -75,9 +75,10 @@ from gideon.extensions.apps.background import (
 from gideon.extensions.apps.manager import app_dir
 from gideon.extensions.apps.manifest import AppManifest
 
+from gideon.operations.child_output import ChildOutput, relay
+
 logger = logging.getLogger(__name__)
 
-from gideon.operations.child_output import ChildOutput, relay
 
 _WATCHDOG_INTERVAL = 30
 
