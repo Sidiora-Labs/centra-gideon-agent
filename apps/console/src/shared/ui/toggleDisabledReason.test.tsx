@@ -1,3 +1,6 @@
+import ts from 'typescript'
+import { sourceFile } from '../testing/sourceOwners'
+import { jsxTags } from '../testing/jsxContracts'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
@@ -83,16 +86,33 @@ describe('the triage, pinned per site', () => {
     }
   })
 
-  it('the census is reproducible — 16 disabled Toggle sites, not vacuously zero', () => {
+  it('the canonical census is reproducible — 32 disabled Toggle sites, not vacuously zero', () => {
     const walk = (d: string): string[] =>
       readFileSync !== undefined
         ? require('node:fs').readdirSync(d, { withFileTypes: true }).flatMap((e: { name: string; isDirectory(): boolean }) =>
           e.isDirectory() ? walk(join(d, e.name)) : (/\.tsx$/.test(e.name) && !/\.(test|doc)\.tsx$/.test(e.name) ? [join(d, e.name)] : []))
         : []
-    const sites = walk(SRC).flatMap((abs) =>
-      [...readFileSync(abs, 'utf8').matchAll(/<Toggle\b[\s\S]{0,400}?\/>/g)]
-        .filter((m) => /(?<!aria-)disabled=/.test(m[0])))
-    expect(sites.length).toBe(25)
-    expect(sites.filter((m) => /disabledReason/.test(m[0])).length, 'eight carry a reason; seventeen stay native').toBe(8)
+    const reExport = readFileSync(join(SRC, 'features/settings/settingsUI.tsx'), 'utf8')
+    expect(reExport).toContain("export { Toggle } from '../../shared/ui/Toggle'")
+    const sites = walk(SRC).flatMap((abs) => {
+      const source = readFileSync(abs, 'utf8')
+      const bindings: string[] = []
+      for (const statement of sourceFile(source).statements) {
+        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || !/\/(Toggle|settingsUI)$/.test(statement.moduleSpecifier.text)) continue
+        const named = statement.importClause?.namedBindings
+        if (named && ts.isNamedImports(named)) {
+          for (const binding of named.elements) if ((binding.propertyName ?? binding.name).text === 'Toggle') bindings.push(binding.name.text)
+        }
+      }
+      if (!bindings.length) return []
+      return jsxTags(source, bindings).filter((tag) => tag.attributes.has('disabled'))
+    })
+    expect(sites.length, 'canonical disabled sites cannot become vacuously absent').toBeGreaterThanOrEqual(25)
+    expect(sites.length).toBe(32)
+    const explained = sites.filter((tag) => tag.attributes.has('disabledReason'))
+    expect(explained.length, 'retain the established reason coverage').toBeGreaterThanOrEqual(8)
+    expect(explained.length).toBe(9)
+    for (const tag of explained) expect(tag.attributes.get('disabledReason')).not.toMatch(/^\{?(undefined|null|false)\}?$/)
+
   })
 })

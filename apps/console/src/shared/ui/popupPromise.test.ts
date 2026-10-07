@@ -1,3 +1,6 @@
+import { jsxTags } from '../testing/jsxContracts'
+import ts from 'typescript'
+import { nodes } from '../testing/sourceOwners'
 import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -27,7 +30,12 @@ describe('an aria-haspopup trigger delivers what it promises', () => {
     const broken: string[] = []
     for (const { file, src, kinds } of declarers()) {
       for (const kind of new Set(kinds)) {
-        if (!new RegExp(`role="${kind}"`).test(src)) broken.push(`${file} promises ${kind} and renders none`)
+        const rendered = jsxTags(src).some((tag) => {
+          const role = tag.attributes.get('role')
+          if (role === `"${kind}"`) return true
+          return nodes(`const role = ${role?.slice(1, -1) ?? 'undefined'}`, (node) => ts.isConditionalExpression(node) && [node.whenTrue, node.whenFalse].some((branch) => ts.isStringLiteral(branch) && branch.text === kind)).length > 0
+        })
+        if (!rendered) broken.push(`${file} promises ${kind} and renders none`)
       }
     }
     expect(broken, `a trigger promises a popup it does not deliver:\n${broken.join('\n')}`).toEqual([])

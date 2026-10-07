@@ -1,3 +1,4 @@
+import { tabListKeys } from '../../shared/data/tabListKeys'
 import { useEffect, useMemo, useState } from 'react'
 import { Activity, Bot, Boxes, GripVertical, Workflow } from 'lucide-react'
 import { api, type Artifact, type SpawnControl, type SpawnedAgent, type WorkflowOutboxEntry, type WorkflowReviewPayload, type WorkflowWorkspaceReview } from '../../shared/data/api'
@@ -93,10 +94,10 @@ export function SessionWorkspace({ sessionKey, pane, onPane, turns, activity, on
   }
 
   return <div className="flex h-full min-h-0 flex-col">
-    <div role="tablist" aria-label="Session workspace panes" className="mb-m flex flex-wrap gap-xs border-b border-outline-variant/40 pb-s">
+    <div role="tablist" aria-label="Session workspace panes" onKeyDown={tabListKeys((index) => choose(order[index]))} className="mb-m flex flex-wrap gap-xs border-b border-outline-variant/40 pb-s">
       {order.map((item) => {
         const Icon = item === 'activity' ? Activity : item === 'runs' ? Workflow : item === 'delivered' ? Boxes : Bot
-        return <button key={item} type="button" role="tab" aria-selected={active === item} draggable
+        return <button key={item} type="button" role="tab" aria-selected={active === item} tabIndex={active === item ? 0 : -1} draggable
           onDragStart={() => setDragged(item)} onDragEnd={() => setDragged(null)}
           onDragOver={(event) => event.preventDefault()} onDrop={() => { if (dragged) move(dragged, item); setDragged(null) }}
           onClick={() => choose(item)}

@@ -1,3 +1,5 @@
+import { jsxTags } from '../testing/jsxContracts'
+import { Button } from '../ui/Button'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -112,12 +114,22 @@ describe('every tab strip in the tree is a real tablist', () => {
       const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
       const problems = [
         /role="tablist"/.test(code) ? '' : 'no role="tablist"',
-        /aria-selected/.test(code) ? '' : 'no aria-selected',
-        /tabIndex=\{[^}]*\?\s*0\s*:\s*-1\}/.test(code) ? '' : 'no roving tabIndex',
+        jsxTags(code).filter((tag) => tag.attributes.get('role') === '"tab"').every((tag) => tag.attributes.has('aria-selected')) ? '' : 'no aria-selected',
+        jsxTags(code).filter((tag) => tag.attributes.get('role') === '"tab"').every((tag) => /\?\s*0\s*:\s*-1/.test(tag.attributes.get('tabIndex') ?? '')) ? '' : 'no roving tabIndex',
       ].filter(Boolean)
       if (problems.length) bad.push(`${file}: ${problems.join(', ')}`)
     }
     expect(bad, `a strip announces tabs without being a tablist:\n${bad.join('\n')}`).toEqual([])
+    const selected = vi.fn()
+    render(<div role="tablist" aria-label="Native areas" onKeyDown={tabListKeys(selected)}><Button role="tab" aria-selected tabIndex={0}>Inspect</Button><Button role="tab" aria-selected={false} tabIndex={-1}>Configure</Button></div>)
+    const first = screen.getByRole('tab', { name: 'Inspect' })
+    const second = screen.getByRole('tab', { name: 'Configure' })
+    expect(first).toHaveAttribute('aria-selected', 'true')
+    expect(second).toHaveAttribute('tabindex', '-1')
+    first.focus()
+    fireEvent.keyDown(first, { key: 'ArrowRight' })
+    expect(selected).toHaveBeenCalledWith(1)
+    expect(second).toHaveFocus()
   })
 
   it('the arrow-key handler has ONE implementation, shared by four strips', () => {

@@ -1,3 +1,6 @@
+import { jsxTags } from '../testing/jsxContracts'
+import { namedOwner } from '../testing/sourceOwners'
+import { Button } from './Button'
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
@@ -66,18 +69,31 @@ describe("the design panel's own two hand-rolled selectors", () => {
   const read = (rel: string) => readFileSync(join(SRC, rel), 'utf8')
 
   it('the scheme tile announces which scheme is on', () => {
-    expect(read('features/settings/DesignPanel.tsx')).toMatch(/<button type="button" onClick=\{onPick\} aria-pressed=\{active\}/)
+    const owner = namedOwner(read('features/settings/DesignPanel.tsx'), 'SchemeTile')
+    const tile = jsxTags(owner, ['Button']).find((tag) => tag.attributes.get('onClick') === '{onPick}')
+    expect(tile?.attributes.get('ariaPressed')).toBe('{active}')
+    const { rerender } = render(<Button ariaPressed>Ocean</Button>)
+    expect(screen.getByRole('button', { name: 'Ocean' })).toHaveAttribute('aria-pressed', 'true')
+    rerender(<Button ariaPressed={false}>Ocean</Button>)
+    expect(screen.getByRole('button', { name: 'Ocean' })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('the token select pill announces its state AND names its group', () => {
-    const src = read('shared/ui/TokenControls.tsx')
-    expect(src, 'the bare value is not a name — "dm-sans" told nobody it was Font family')
-      .toMatch(/aria-label=\{`\$\{token\.label\}: \$\{opt\}`\}/)
-    expect(src).toMatch(/aria-pressed=\{on\}/)
+    const owner = namedOwner(read('shared/ui/TokenControls.tsx'), 'SelectControl')
+    const pill = jsxTags(owner, ['button'])[0]
+    expect(pill.attributes.get('aria-label')).toBe('{`${token.label}: ${option}`}')
+    expect(pill.attributes.get('aria-pressed')).toBe('{active}')
+    expect(owner).toContain('const active = selected === option')
+    expect(jsxTags(owner).find((tag) => tag.attributes.get('role') === '"group"')?.attributes.get('aria-label')).toBe('{token.label}')
   })
 
   it('the Mode row it converged onto is unchanged', () => {
-    expect(read('features/settings/DesignPanel.tsx')).toMatch(/aria-label=\{`Mode: \$\{m\.label\}`\} aria-pressed=\{on\}/)
+    const source = read('features/settings/DesignPanel.tsx')
+    const mode = jsxTags(source, ['Button']).find((tag) => tag.attributes.get('ariaLabel') === '{`Mode: ${m.label}`}')
+    expect(mode?.attributes.get('ariaPressed')).toBe('{on}')
+    expect(source).toContain('const on = preference === m.key')
+    render(<Button ariaLabel="Mode: Dark" ariaPressed={false}>Dark</Button>)
+    expect(screen.getByRole('button', { name: 'Mode: Dark' })).toHaveAttribute('aria-pressed', 'false')
   })
 })
 

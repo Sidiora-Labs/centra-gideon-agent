@@ -1,3 +1,4 @@
+import { tabListKeys } from '../../shared/data/tabListKeys'
 import { Button } from '../../shared/ui/Button'
 import { useState } from 'react'
 import { HypermidOverview } from '../hypermid/HypermidOverview'
@@ -13,14 +14,17 @@ import { Connections } from '../hypermid/Connections'
 import { Security } from '../hypermid/Security'
 import '../hypermid/hypermid.css'
 
+const AREA_TABS = [['inspect', 'Inspect'], ['configure', 'Configure'], ['connections', 'Connections'], ['security', 'Security'], ['operations', 'Operations'], ['lifecycle', 'Lifecycle'], ['diagnostics', 'Health & logs'], ['remote', 'Remote access']] as const
+
 export function HypermidPanel() {
   const [view, setView] = useState<'inspect' | 'configure' | 'connections' | 'security' | 'operations' | 'lifecycle' | 'diagnostics' | 'remote'>('inspect')
   return <div className="hypermid-surface">
-    <div role="tablist" aria-label="Hypermid area" className="mb-xl inline-flex max-w-full flex-wrap rounded-2xl bg-surface-container p-1">
-      {([['inspect', 'Inspect'], ['configure', 'Configure'], ['connections', 'Connections'], ['security', 'Security'], ['operations', 'Operations'], ['lifecycle', 'Lifecycle'], ['diagnostics', 'Health & logs'], ['remote', 'Remote access']] as const).map(([id, label]) => <Button variant="ghost" size="sm" key={id}
+    <div role="tablist" aria-label="Hypermid area" onKeyDown={tabListKeys((index) => setView(AREA_TABS[index][0]))} className="mb-xl inline-flex max-w-full flex-wrap rounded-2xl bg-surface-container p-1">
+      {AREA_TABS.map(([id, label]) => <Button variant="ghost" size="sm" key={id}
           type="button"
           role="tab"
           aria-selected={view === id}
+          tabIndex={view === id ? 0 : -1}
           onClick={() => setView(id)}
           className="min-h-11 rounded-pill px-m text-sm text-on-surface-low aria-selected:bg-surface-highest aria-selected:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
         {label}
