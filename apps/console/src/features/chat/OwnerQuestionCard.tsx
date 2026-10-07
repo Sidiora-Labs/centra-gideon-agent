@@ -50,15 +50,15 @@ export function OwnerQuestionCard({ seg, session }: { seg: QuestionSegment; sess
     finally { setBusy(false) }
   }
   return <section className="rounded-lg border border-outline-variant bg-surface-low p-3 space-y-3" aria-label="Owner question">
-    <p className="text-sm font-medium" role="status">{LABELS[outcome]}</p>
+    <p data-type="body-s" className="font-medium" role="status">{LABELS[outcome]}</p>
     {seg.questions.map((question, index) => <fieldset key={index} disabled={!active} className="space-y-2">
-      <legend className="text-sm font-medium">{question.header && <span className="text-on-surface-low">{question.header}: </span>}{question.question}</legend>
-      {question.options.map((option, optionIndex) => <label key={optionIndex} className="flex items-start gap-2 rounded-md border border-outline-variant px-3 py-2 text-sm">
+      <legend data-type="label-m" className="font-medium">{question.header && <span className="text-on-surface-low">{question.header}: </span>}{question.question}</legend>
+      {question.options.map((option, optionIndex) => <label data-type="body-s" key={optionIndex} className="flex items-start gap-2 rounded-md border border-outline-variant px-3 py-2 ">
         <input type={question.multiSelect ? 'checkbox' : 'radio'} name={`${seg.id}-${index}`} checked={answers[index].selected.includes(optionIndex)}
           onChange={() => change(index, { selected: question.multiSelect ? answers[index].selected.includes(optionIndex) ? answers[index].selected.filter((value) => value !== optionIndex) : [...answers[index].selected, optionIndex] : [optionIndex] })} />
-        <span>{option.label}{option.description && <span className="block text-xs text-on-surface-low">{option.description}</span>}</span>
+        <span>{option.label}{option.description && <span data-type="caption" className="block text-on-surface-low">{option.description}</span>}</span>
       </label>)}
-      {question.free_text !== false && <label className="block text-sm">Other
+      {question.free_text !== false && <label data-type="body-s" className="block ">Other
         <textarea aria-label={`${question.header || question.question} — Other`} value={answers[index].other} maxLength={2000} rows={2}
           className="mt-1 w-full rounded-md border border-outline-variant bg-surface px-2 py-1" onChange={(event) => change(index, { other: event.target.value })} />
       </label>}
@@ -69,7 +69,7 @@ export function OwnerQuestionCard({ seg, session }: { seg: QuestionSegment; sess
       <Button size="sm" variant="secondary" loading={busy} loadingLabel="Sending answer…" disabled={!active}
         disabledReason={unavailableReason} onClick={() => void submit(true)}>Skip</Button>
     </div>}
-    {seg.reason && <p className="text-xs text-on-surface-low">{seg.reason}</p>}
-    {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+    {seg.reason && <p data-type="body-s" className="text-on-surface-low">{seg.reason}</p>}
+    {error && <p data-type="body-s" role="alert" className="text-danger">{error}</p>}
   </section>
 }

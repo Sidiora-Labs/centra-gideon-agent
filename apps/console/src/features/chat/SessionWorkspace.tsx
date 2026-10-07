@@ -97,15 +97,15 @@ export function SessionWorkspace({ sessionKey, pane, onPane, turns, activity, on
     <div role="tablist" aria-label="Session workspace panes" onKeyDown={tabListKeys((index) => choose(order[index]))} className="mb-m flex flex-wrap gap-xs border-b border-outline-variant/40 pb-s">
       {order.map((item) => {
         const Icon = item === 'activity' ? Activity : item === 'runs' ? Workflow : item === 'delivered' ? Boxes : Bot
-        return <button key={item} type="button" role="tab" aria-selected={active === item} tabIndex={active === item ? 0 : -1} draggable
+        return <button data-type="label-s" key={item} type="button" role="tab" aria-selected={active === item} tabIndex={active === item ? 0 : -1} draggable
           onDragStart={() => setDragged(item)} onDragEnd={() => setDragged(null)}
           onDragOver={(event) => event.preventDefault()} onDrop={() => { if (dragged) move(dragged, item); setDragged(null) }}
           onClick={() => choose(item)}
-          className={`inline-flex items-center gap-xs rounded-md px-s py-xs text-xs focus-visible:ring-2 focus-visible:ring-primary ${active === item ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-var hover:bg-surface-high'}`}>
+          className={`inline-flex items-center gap-xs rounded-md px-s py-xs focus-visible:ring-2 focus-visible:ring-primary ${active === item ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-var hover:bg-surface-high'}`}>
           <GripVertical size={11} aria-hidden="true" className="cursor-grab opacity-50" /><Icon size={13} aria-hidden="true" />{PANE_LABELS[item]}
         </button>
       })}
-      <Button variant="ghost" size="xs" shape="squircle" type="button" ariaPressed={!!secondary} onClick={toggleSplit} className="rounded-md px-s py-xs text-xs text-primary hover:bg-surface-high">{secondary ? 'One pane' : 'Split panes'}</Button>
+      <Button variant="ghost" size="xs" shape="squircle" type="button" ariaPressed={!!secondary} onClick={toggleSplit} className="rounded-md px-s py-xs text-primary hover:bg-surface-high">{secondary ? 'One pane' : 'Split panes'}</Button>
     </div>
     <div className="flex min-h-0 flex-1 flex-col">
       <section role="tabpanel" aria-label={PANE_LABELS[active]} className="min-h-0 overflow-y-auto" style={{ flex: secondary ? `0 0 ${split}%` : '1 1 auto' }}>
@@ -134,7 +134,7 @@ function PaneContent({ kind, sessionKey, runIds, activity, onOpenFile, onOpenArt
       {kind === 'activity' && <ChatActivityPanel activity={activity} onOpenFile={onOpenFile} subagents={subagents}
         onKillFanout={onKillFanout} side={side} />}
       {kind === 'runs' && (runIds.length ? <div className="space-y-s">{runIds.map((id) => <div key={id}><WorkflowProgressCard refObj={id.startsWith('batch:') ? { runId: '', batchName: id.slice(6), created: true } : { runId: id, created: false }} />{!id.startsWith('batch:') && <RunChanges runId={id} onOpenFile={onOpenFile} />}</div>)}</div>
-        : <p className="py-xl text-center text-sm text-on-surface-low">No workflow runs in this conversation.</p>)}
+        : <p data-type="body-s" className="py-xl text-center text-on-surface-low">No workflow runs in this conversation.</p>)}
       {kind === 'delivered' && <DeliveredShelf sessionKey={sessionKey} runIds={runIds.filter((id) => !id.startsWith('batch:'))} onOpen={onOpenArtifact} />}
       {kind === 'agents' && <DelegatedAgents sessionKey={sessionKey} />}
     </>
@@ -154,17 +154,17 @@ function RunChanges({ runId, onOpenFile }: { runId: string; onOpenFile: (path: s
     return () => { live = false }
   }, [runId, open])
   return <div className="px-s pb-s">
-    <Button variant="ghost" size="xs" shape="squircle" type="button" ariaExpanded={open} onClick={() => setOpen((value) => !value)} className="text-xs text-primary hover:underline">{open ? 'Hide files & diff' : 'Show files & diff'}</Button>
+    <Button variant="ghost" size="xs" shape="squircle" type="button" ariaExpanded={open} onClick={() => setOpen((value) => !value)} className="text-primary hover:underline">{open ? 'Hide files & diff' : 'Show files & diff'}</Button>
     {open && <div className="mt-s rounded-lg border border-outline-variant/50 p-s">
-      {error ? <p role="alert" className="text-xs text-danger">{error}</p>
-        : !workspace || !review ? <p role="status" className="text-xs text-on-surface-low">Loading files and diff…</p>
+      {error ? <p data-type="body-s" role="alert" className="text-danger">{error}</p>
+        : !workspace || !review ? <p data-type="body-s" role="status" className="text-on-surface-low">Loading files and diff…</p>
           : <>
             {workspace.workspace.changed.length ? <ul className="mb-s space-y-xs">{workspace.workspace.changed.map((file) => <li key={file.path}>
               <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => onOpenFile(file.path.startsWith('/') ? file.path : `${workspace.workspace.path}/${file.path}`)}
-                className="w-full truncate text-left text-xs text-on-surface-var hover:text-primary" title={file.path}>{file.status} · {file.path}</Button>
-            </li>)}</ul> : <p className="mb-s text-xs text-on-surface-low">No changed files recorded for this run.</p>}
+                className="w-full truncate text-left text-on-surface-var hover:text-primary" title={file.path}>{file.status} · {file.path}</Button>
+            </li>)}</ul> : <p data-type="body-s" className="mb-s text-on-surface-low">No changed files recorded for this run.</p>}
             {review.diff ? <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words bg-surface-low p-s text-[0.6875rem] text-on-surface-var">{review.diff}{review.diff_truncated ? '\n… Diff truncated; open the full run for more.' : ''}</pre>
-              : <p className="text-xs text-on-surface-low">No diff available.</p>}
+              : <p data-type="body-s" className="text-on-surface-low">No diff available.</p>}
           </>}
     </div>}
   </div>
@@ -193,13 +193,13 @@ function DeliveredShelf({ sessionKey, runIds, onOpen }: { sessionKey: string; ru
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false }
   }, [sessionKey, runIds.join('|')])
-  if (loading) return <p role="status" className="py-l text-sm text-on-surface-low">Loading delivered artifacts…</p>
-  if (error) return <p role="alert" className="py-l text-sm text-danger">{error}</p>
-  if (!items.length) return <p className="py-xl text-center text-sm text-on-surface-low">No delivered artifacts yet. Working files stay in Files & links.</p>
+  if (loading) return <p data-type="body-s" role="status" className="py-l text-on-surface-low">Loading delivered artifacts…</p>
+  if (error) return <p data-type="body-s" role="alert" className="py-l text-danger">{error}</p>
+  if (!items.length) return <p data-type="body-s" className="py-xl text-center text-on-surface-low">No delivered artifacts yet. Working files stay in Files & links.</p>
   return <ul className="space-y-xs">{items.map((item) => <li key={item.slug}>
     <button type="button" onClick={() => onOpen(item.slug)} className="w-full rounded-md px-s py-s text-left hover:bg-surface-high">
-      <span className="block truncate text-sm text-on-surface">{item.name}</span>
-      <span className="block truncate text-xs text-on-surface-low">{item.source}</span>
+      <span data-type="title-m" className="block truncate text-on-surface">{item.name}</span>
+      <span data-type="caption" className="block truncate text-on-surface-low">{item.source}</span>
     </button>
   </li>)}</ul>
 }
@@ -244,14 +244,14 @@ function DelegatedAgents({ sessionKey }: { sessionKey: string }) {
     finally { setControlBusy(false) }
   }
   return <div className="space-y-s">
-    {error && <p role="alert" className="text-xs text-danger">{error}</p>}
-    {!agents.length && !error && <p className="py-xl text-center text-sm text-on-surface-low">No delegated agents in this conversation.</p>}
+    {error && <p data-type="body-s" role="alert" className="text-danger">{error}</p>}
+    {!agents.length && !error && <p data-type="body-s" className="py-xl text-center text-on-surface-low">No delegated agents in this conversation.</p>}
     {!!agents.length && <BackgroundAgentRuns agents={agents} onOpen={(id) => setSelected(selected === id ? '' : id)} />}
     {agents.filter((agent) => !agent.done).map((agent, index) => <article key={agent.id} className="rounded-lg border border-outline-variant/50 p-s">
       <div className="flex items-start gap-s"><div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-on-surface">{agent.agent || agent.id}</p>
+        <p data-type="title-m" className="truncate font-medium text-on-surface">{agent.agent || agent.id}</p>
       </div><Button variant="ghost" size="xs" onClick={() => setSelected(selected === agent.id ? '' : agent.id)}>{selected === agent.id ? 'Close' : 'Inspect'}</Button>{!agent.done && <Button ariaLabel={`Interrupt: ${agent.agent || 'Delegated agent'} — run ${index + 1}`} variant="danger" size="xs" disabled={busy === agent.id} onClick={() => void cancel(agent)} disabledReason={busy === agent.id ? 'Wait for this agent interrupt request to finish' : undefined}>Interrupt</Button>}</div>
-      {selected === agent.id && <div className="mt-s border-t border-outline-variant/40 pt-s text-xs text-on-surface-var">
+      {selected === agent.id && <div data-type="body-s" className="mt-s border-t border-outline-variant/40 pt-s text-on-surface-var">
         {!detail ? <p role="status">Loading this agent…</p> : <>
           <p>Instance {detail.id}</p>
           <p>{detail.done ? detail.error ? 'Failed' : 'Complete' : `Running · ${detail.turns ?? 0} turns${detail.last_tool ? ` · ${detail.last_tool}` : ''}`}</p>
@@ -279,10 +279,10 @@ function DelegatedAgents({ sessionKey }: { sessionKey: string }) {
           {detail.done && detail.result && <pre className="mt-s max-h-52 overflow-auto whitespace-pre-wrap">{detail.result}</pre>}
         </>}
       </div>}
-      {agent.error && <p role="alert" className="mt-s text-xs text-danger">{agent.error}</p>}
-      {agent.done && agent.result && <details className="mt-s text-xs text-on-surface-var"><summary className="cursor-pointer">Result</summary><pre className="mt-xs max-h-52 overflow-auto whitespace-pre-wrap">{agent.result}</pre></details>}
+      {agent.error && <p data-type="body-s" role="alert" className="mt-s text-danger">{agent.error}</p>}
+      {agent.done && agent.result && <details data-type="body-s" className="mt-s text-on-surface-var"><summary className="cursor-pointer">Result</summary><pre className="mt-xs max-h-52 overflow-auto whitespace-pre-wrap">{agent.result}</pre></details>}
     </article>)}
-    {agents.some((agent) => agent.id === selected && agent.done) && <div className="rounded-lg border border-outline-variant/50 p-s text-xs text-on-surface-var">
+    {agents.some((agent) => agent.id === selected && agent.done) && <div data-type="body-s" className="rounded-lg border border-outline-variant/50 p-s text-on-surface-var">
       <Button variant="ghost" size="xs" onClick={() => setSelected('')}>Close</Button>
       {!detail ? <p role="status">Loading this agent…</p> : <>
         <p>Instance {detail.id}</p>

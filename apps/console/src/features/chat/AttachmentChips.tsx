@@ -40,7 +40,7 @@ export function AttachmentChips({ attachments, onRemove, onOpen }: {
           onRemove={onRemove ? () => onRemove(attachment.id) : undefined}
         />
         {onOpen && (attachment.state ?? 'done') === 'done' && <Button variant="ghost" size="xs" shape="squircle" type="button" ariaLabel={`Open ${attachment.name}`}
-          onClick={() => onOpen(attachment.id)} className="rounded-lg px-2 py-1 text-xs text-primary-emphasis hover:bg-primary/10 hover:text-on-primary-tint">Open</Button>}
+          onClick={() => onOpen(attachment.id)} className="rounded-lg px-2 py-1 text-primary-emphasis hover:bg-primary/10 hover:text-on-primary-tint">Open</Button>}
       </div>
     })}
   </ComposerAttachments>

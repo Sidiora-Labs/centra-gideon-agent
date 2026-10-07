@@ -66,7 +66,7 @@ function BatchProgressCard({ name }: { name: string }) {
   return <motion.div {...messageEnter} className="my-s flex flex-col gap-s rounded-xl border border-outline-variant p-m">
     <div className="flex items-center gap-s"><Workflow size={15} /><span data-type="label-s">Batch of this conversation</span></div>
     <p data-type="body-s">{batch?.status === 'not_started' ? 'Did not start' : batch?.status === 'starting' ? 'Starting' : `Waiting for your Allow${batch ? ` · ${batch.tasks} tasks` : ''}`}</p>
-    {question && <><p data-type="body-s">{question.tool_purpose}</p><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-on-surface-var">{typeof question.tool_input === 'string' ? question.tool_input : JSON.stringify(question.tool_input)}</pre>
+    {question && <><p data-type="body-s">{question.tool_purpose}</p><pre data-type="caption" className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-on-surface-var">{typeof question.tool_input === 'string' ? question.tool_input : JSON.stringify(question.tool_input)}</pre>
       <div className="flex gap-s"><Button size="xs" disabled={busy} onClick={() => void answer('approve')} disabledReason={busy ? 'Wait for the workflow task decision to finish' : undefined}>Allow these tasks</Button><Button variant="ghost-accent" size="xs" disabled={busy} onClick={() => void answer('reject')} disabledReason={busy ? 'Wait for the workflow task decision to finish' : undefined}>Deny</Button></div></>}
     {batch?.error && <p role="alert" data-type="caption" className="text-danger">{batch.error}</p>}
     {batch?.run_id && batch.status === 'not_started' && <TextLink href={`#/workflows/runs/${encodeURIComponent(batch.run_id)}`} size="xs">Inspect the failed start</TextLink>}
@@ -176,13 +176,13 @@ function RunProgressCard({ refObj }: { refObj: WorkflowRunRef }) {
       {vm && vm.totalCount > 0 && (
         <div>
           <Button variant="ghost" size="xs" shape="squircle" type="button" ariaExpanded={graphOpen} onClick={() => setGraphOpen((open) => !open)}
-            className="inline-flex items-center gap-xs text-xs text-primary hover:underline">
+            className="inline-flex items-center gap-xs text-primary hover:underline">
             <ChevronDown size={13} className={graphOpen ? '' : '-rotate-90'} />
             {graphOpen ? 'Hide run graph' : 'Inspect run graph'}
           </Button>
           {graphOpen && dag && <div role="region" aria-label="Workflow nodes" className="mt-s max-h-72 overflow-auto rounded-lg border border-outline-variant/50 bg-surface-low p-s">
             <div style={{ width: dag.width, minWidth: '100%' }}><DagView nodes={dag.nodes} edges={dag.edges} width={dag.width} height={dag.height} onNodeClick={setSelectedNode} /></div>
-            {selectedNode && <div className="mt-s border-t border-outline-variant/50 pt-s text-xs text-on-surface-var">
+            {selectedNode && <div data-type="body-s" className="mt-s border-t border-outline-variant/50 pt-s text-on-surface-var">
               <p className="font-medium text-on-surface">{selectedNode}</p>
               {nodeError ? <p role="alert" className="mt-xs text-warning">{nodeError}</p>
                 : nodeDetail ? <pre className="mt-xs max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono">{JSON.stringify(nodeDetail, null, 2)}</pre>

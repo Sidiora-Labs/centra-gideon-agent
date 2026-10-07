@@ -97,8 +97,8 @@ export function ApprovalCard({ seg, onAct }: { seg: ApprovalSegment; onAct: (id:
         {seg.risk && <RiskChip risk={seg.risk} />}
       </div>}
       {!seg.resolved && denial && <p data-type="caption">{denial}</p>}
-      {seg.input && <pre tabIndex={0} role="group" aria-label="Tool arguments"
-        className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-surface-high p-2 font-mono text-xs">{seg.input}</pre>}
+      {seg.input && <pre data-type="caption" tabIndex={0} role="group" aria-label="Tool arguments"
+        className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-surface-high p-2 font-mono ">{seg.input}</pre>}
       {seg.protectedDelete && <p role="alert" data-type="caption" className="text-on-surface-low">{seg.protectedDelete} This answer allows this call only.</p>}
       {seg.purpose && <p data-type="caption" className="text-on-surface-low">{seg.purpose}</p>}
       {!seg.resolved && (

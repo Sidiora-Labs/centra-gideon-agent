@@ -73,7 +73,7 @@ export function PromptPalette({ onInsert, onSend, onClose }: {
               if (e.key === 'Enter' && filtered && filtered.length > 0 && !loadingDetail) { e.preventDefault(); void pick(filtered[0]) }
               else if (e.key === 'Escape' && q) { e.preventDefault(); setQ('') }
             }} />
-          {loadingDetail && <div role="status" className="flex items-center gap-2 px-1 text-sm text-on-surface-low"><Loader2 size={14} className="animate-spin" /> Loading prompt…</div>}
+          {loadingDetail && <div data-type="body-s" role="status" className="flex items-center gap-2 px-1 text-on-surface-low"><Loader2 size={14} className="animate-spin" /> Loading prompt…</div>}
           <ResultAnnouncement count={filtered?.length ?? 0} noun="prompts" active={!!q.trim() && filtered !== null} />
           {!!filtered?.length && (
             <div data-type="caption" className="flex items-center gap-3 px-1 text-on-surface-low">

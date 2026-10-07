@@ -2714,7 +2714,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
         </Modal>
       )}
       {shareOpen && <Modal title="Private conversation copies" onClose={() => setShareOpen(false)}>
-        {shares === null && !shareError ? <p role="status" className="p-l text-sm text-on-surface-low">Loading private copies…</p>
+        {shares === null && !shareError ? <p data-type="body-s" role="status" className="p-l text-on-surface-low">Loading private copies…</p>
           : <ThreadSharedSnapshots shares={shares ?? []} selected={selectedShare} detail={shareDetail} busy={shareBusy} error={shareError}
               onCreate={() => { void createPrivateCopy() }} onSelect={setSelectedShare}
               onOpen={(share) => navigate(`artifacts/${encodeURIComponent(share.slug)}`)}
@@ -3140,10 +3140,10 @@ export function SelectionQuote({ scrollRef, onQuote, attributionFor }: {
         <QuoteBlock.Text className="max-w-full">{pos.text}</QuoteBlock.Text>
       </QuoteBlock.Root>
       <div className="flex items-center border-t border-outline-variant/50 pt-1">
-        <button type="button" onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }} onClick={() => { onQuote(pos.text, pos.attribution); clear() }}
-          className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-md px-2 text-sm hover:bg-surface-high"><Quote size={13}/>Quote</button>
-        <button type="button" onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }} onClick={() => { void copyText(pos.text, 'the selection'); clear() }}
-          className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-md px-2 text-sm hover:bg-surface-high"><Clipboard size={13}/>Copy</button>
+        <button data-type="label-s" type="button" onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }} onClick={() => { onQuote(pos.text, pos.attribution); clear() }}
+          className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-md px-2 hover:bg-surface-high"><Quote size={13}/>Quote</button>
+        <button data-type="label-s" type="button" onMouseDown={(event) => { event.preventDefault(); event.stopPropagation() }} onClick={() => { void copyText(pos.text, 'the selection'); clear() }}
+          className="inline-flex min-h-8 flex-1 items-center justify-center gap-1 rounded-md px-2 hover:bg-surface-high"><Clipboard size={13}/>Copy</button>
       </div>
     </div>
   )

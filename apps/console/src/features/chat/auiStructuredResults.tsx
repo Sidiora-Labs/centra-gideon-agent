@@ -45,7 +45,7 @@ export function artifactTableRows(artifact: Artifact): Row[] | null {
 
 export function StructuredArtifactTable({ artifact, onOpen, showTitle = true }: { artifact: Artifact; onOpen?: (slug: string) => void; showTitle?: boolean }) {
   const rows = artifactTableRows(artifact)
-  if (!rows) return <p data-slot="data-table" className="text-sm text-on-surface-low">No tabular JSON in {artifact.name}.</p>
+  if (!rows) return <p data-type="body-s" data-slot="data-table" className="text-on-surface-low">No tabular JSON in {artifact.name}.</p>
   const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))))
   return <section aria-label={`Data table from ${artifact.name}`} className="min-w-0 max-w-full space-y-2">
     {(showTitle || onOpen) && <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
@@ -60,7 +60,7 @@ export function ArtifactMetricChart({ artifact, column }: { artifact: Artifact; 
   const rows = artifactTableRows(artifact)
   const points = rows?.map((row) => row[column])
   if (!points?.length || !points.every((value): value is number => typeof value === 'number' && Number.isFinite(value))) {
-    return <p className="text-sm text-on-surface-low">No numeric {column} series in {artifact.name}.</p>
+    return <p data-type="body-s" className="text-on-surface-low">No numeric {column} series in {artifact.name}.</p>
   }
   return <div data-slot="artifact-chart" className="min-w-0 max-w-full space-y-2">
     <NumberTicker label={`${artifact.name}: ${column}`} value={points.at(-1)!} />
@@ -195,7 +195,7 @@ export interface RecordedSpan {
 export function RunTraceWaterfall({ spans }: { spans: readonly RecordedSpan[] | null }) {
   const valid = spans?.filter((span) => Number.isFinite(span.startedAtMs)
     && (span.endedAtMs === null || (Number.isFinite(span.endedAtMs) && span.endedAtMs >= span.startedAtMs))) || []
-  if (!valid.length) return <p data-slot="trace-waterfall" className="text-sm text-on-surface-low">Span timing unavailable.</p>
+  if (!valid.length) return <p data-type="body-s" data-slot="trace-waterfall" className="text-on-surface-low">Span timing unavailable.</p>
   const origin = Math.min(...valid.map((span) => span.startedAtMs))
   const end = Math.max(...valid.map((span) => span.endedAtMs ?? span.startedAtMs))
   const ids = new Map(valid.map((span) => [span.id, span]))
@@ -214,8 +214,8 @@ export function RunTraceWaterfall({ spans }: { spans: readonly RecordedSpan[] | 
 export function WorkflowCostMeter({ stats }: { stats: WorkflowRunStats }) {
   return <section data-slot="cost-meter" aria-label={`Cost for run ${stats.run_id}`} className={`${paper} rounded-xl p-3`}>
     <strong>{stats.priced ? `$${stats.cost_usd.toFixed(4)}` : 'Cost unavailable'}</strong>
-    <span className="ml-2 text-sm text-on-surface-low">Run {stats.run_id}</span>
-    <p className="text-sm">{stats.tokens_recorded && stats.tokens !== null ? `${stats.tokens} tokens` : 'Token usage unavailable'}</p>
+    <span data-type="caption" className="ml-2 text-on-surface-low">Run {stats.run_id}</span>
+    <p data-type="body-m" className="">{stats.tokens_recorded && stats.tokens !== null ? `${stats.tokens} tokens` : 'Token usage unavailable'}</p>
   </section>
 }
 
@@ -235,7 +235,7 @@ export function MeasuredQuotaBanner({ quota }: { quota: KnownQuota | null }) {
 export function ExperimentScoreBreakdown({ campaign }: { campaign: ExperimentCampaign }) {
   return <section data-slot="score-breakdown" aria-label={`Scores for ${campaign.title}`} className={`${paper} rounded-xl p-3`}>
     <h3>{campaign.title}</h3>
-    <p className="text-sm">Metric: {campaign.metric} · {campaign.direction}</p>
+    <p data-type="body-m" className="">Metric: {campaign.metric} · {campaign.direction}</p>
     <ol>{campaign.attempts.map((attempt) => <li key={attempt.ordinal}>
       Attempt {attempt.ordinal}: {attempt.score === null ? 'Score unavailable' : attempt.score}
       {attempt.valid === false && <span> · invalid</span>}
@@ -248,7 +248,7 @@ export function RecordedArtifactImage({ artifact }: { artifact: Artifact }) {
   return <figure data-slot="image" className={`${paper} rounded-xl p-3`}>
     <img src={`/api/artifacts/${encodeURIComponent(artifact.slug)}/raw?version=${artifact.version}`}
       alt={artifact.name} loading="lazy" className="max-h-80 max-w-full object-contain" />
-    <figcaption className="text-xs text-on-surface-low">{artifact.name} · version {artifact.version}</figcaption>
+    <figcaption data-type="caption" className="text-on-surface-low">{artifact.name} · version {artifact.version}</figcaption>
   </figure>
 }
 
@@ -256,8 +256,8 @@ export function ArtifactFile({ artifact }: { artifact: Artifact }) {
   const href = `/api/artifacts/${encodeURIComponent(artifact.slug)}/raw?version=${artifact.version}`
   return <article data-slot="file" className={`${paper} rounded-xl p-3`}>
     <strong>{artifact.name}</strong>
-    <p className="text-xs text-on-surface-low">{artifact.kind} · version {artifact.version}</p>
-    <a href={href} download={artifact.name} className="text-sm underline">Download file</a>
+    <p data-type="body-s" className="text-on-surface-low">{artifact.kind} · version {artifact.version}</p>
+    <a data-type="label-s" href={href} download={artifact.name} className="underline">Download file</a>
   </article>
 }
 

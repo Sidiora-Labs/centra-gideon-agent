@@ -82,11 +82,11 @@ export function ConversationHistoryView({ turns, labels }: { turns: readonly Cha
     <div role="group" aria-label={copy.view} className="grid grid-cols-3 gap-1 rounded-lg bg-surface-container p-1">
       {(['pairs', 'days', 'speakers'] as const).map((option) => <Button variant="ghost" size="xs" shape="squircle" key={option} type="button"
         ariaPressed={view === option} onClick={() => setView(option)}
-        className="min-h-10 rounded-md px-2 text-xs text-on-surface transition-colors hover:bg-surface-high aria-pressed:bg-surface-high">
+        className="min-h-10 rounded-md px-2 text-on-surface transition-colors hover:bg-surface-high aria-pressed:bg-surface-high">
         {copy[option]}
       </Button>)}
     </div>
-    {!hasText ? <p className="text-sm text-on-surface-low">{copy.empty}</p>
+    {!hasText ? <p data-type="body-s" className="text-on-surface-low">{copy.empty}</p>
       : view === 'pairs' ? <div className="flex flex-col gap-4">{pairs(turns, records, copy)}</div>
         : view === 'speakers' ? <SpeakerIdentity className="max-w-none" turns={records.filter((record): record is TextTurn => !!record).map((record) => speaker(record, copy))} />
           : <div className="flex flex-col gap-3">{dayGroups(records, copy).map((group, index) => group.kind === 'dated'

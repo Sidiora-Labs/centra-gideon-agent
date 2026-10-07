@@ -26,8 +26,8 @@ export function KnowledgeLinkPreview({ title, url, description }: {
   return <div data-slot="link-preview" className={`${paper} rounded-xl p-3`}>
     {href ? <a href={href} target="_blank" rel="noopener noreferrer" className="font-medium underline">{title}</a>
       : <strong>{title}</strong>}
-    {href && <p className="break-all text-xs text-on-surface-low">{new URL(href).host}</p>}
-    {description && <p className="mt-1 text-sm text-on-surface-var">{description}</p>}
+    {href && <p data-type="body-s" className="break-all text-on-surface-low">{new URL(href).host}</p>}
+    {description && <p data-type="body-s" className="mt-1 text-on-surface-var">{description}</p>}
   </div>
 }
 
@@ -106,7 +106,7 @@ export function KnowledgeImage({ item, onOpen }: { item: KnowledgeItem; onOpen?:
   if (!image || !src) return null
   return <figure data-slot="image-generation" className={`${paper} rounded-xl p-2`}>
     <img src={src} alt={item.title || 'Knowledge image'} loading="lazy" className="max-h-72 max-w-full rounded-lg object-contain" />
-    <figcaption className="mt-1 text-xs text-on-surface-low">
+    <figcaption data-type="caption" className="mt-1 text-on-surface-low">
       {onOpen ? <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => onOpen(item.id)} className="underline">{item.title || 'Open image'}</Button>
         : item.title || 'Image'}
     </figcaption>
@@ -125,7 +125,7 @@ export function KnowledgeDocumentReference({ item, onOpen }: { item: KnowledgeIt
   return <article data-slot="document-reference" className={`${paper} rounded-xl p-3`}>
     {onOpen ? <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => onOpen(item.id)} className="font-medium underline">{item.title || item.id}</Button>
       : <strong>{item.title || item.id}</strong>}
-    {item.summary && <p className="mt-1 text-sm">{item.summary}</p>}
+    {item.summary && <p data-type="body-m" className="mt-1 ">{item.summary}</p>}
     {item.provider && <small className="text-on-surface-low">Source: {item.provider}</small>}
   </article>
 }
@@ -133,7 +133,7 @@ export function KnowledgeDocumentReference({ item, onOpen }: { item: KnowledgeIt
 export function KnowledgeMemoryEntry({ entry }: { entry: SemanticEntry }) {
   return <article data-slot="memory" className={`${paper} rounded-xl p-3`}>
     <strong>{entry.key}</strong>
-    {entry.value_json && <p className="mt-1 whitespace-pre-wrap text-sm">{entry.value_json}</p>}
+    {entry.value_json && <p data-type="body-m" className="mt-1 whitespace-pre-wrap ">{entry.value_json}</p>}
     {entry.source && <small className="text-on-surface-low">Source: {entry.source}</small>}
   </article>
 }
@@ -141,8 +141,8 @@ export function KnowledgeMemoryEntry({ entry }: { entry: SemanticEntry }) {
 export function KnowledgeResearchReport({ report, onRun }: { report: ResearchReport; onRun?: (id: string) => void }) {
   return <article data-slot="research-report" className={`${paper} rounded-xl p-3`}>
     <h3 className="font-medium">{report.name}</h3>
-    <p className="text-sm">{report.prompt}</p>
-    <p className="text-xs text-on-surface-low">Last run: {report.last_run_ts == null ? 'Never' : new Date(report.last_run_ts * 1000).toLocaleString()} · {report.last_status || 'No status'}</p>
+    <p data-type="body-m" className="">{report.prompt}</p>
+    <p data-type="body-s" className="text-on-surface-low">Last run: {report.last_run_ts == null ? 'Never' : new Date(report.last_run_ts * 1000).toLocaleString()} · {report.last_status || 'No status'}</p>
     {report.last_error && <p role="alert">{report.last_error}</p>}
     {onRun && <Button variant="ghost" size="xs" shape="squircle" type="button" onClick={() => onRun(report.id)} className="mt-2 underline">Run report</Button>}
   </article>
@@ -151,7 +151,7 @@ export function KnowledgeResearchReport({ report, onRun }: { report: ResearchRep
 export function KnowledgeRelationMap({ item, onOpen }: { item: KnowledgeItem; onOpen?: KnowledgeOpen }) {
   return <section data-slot="map" aria-label={`Knowledge relations for ${item.title || item.id}`} className={`${paper} rounded-xl p-3`}>
     <h3>{item.title || item.id}</h3>
-    <ul className="mt-2 space-y-1 text-sm">
+    <ul data-type="body-m" className="mt-2 space-y-1 ">
       {(item.relations || []).map((relation) => <li key={relation.id}>
         {relation.source_name || 'Unknown source'} → {relation.target_name || 'Unknown target'}
         {relation.relation_type && <span> · {relation.relation_type}</span>}
@@ -182,7 +182,7 @@ export function KnowledgeMediaPlayer({ item }: { item: KnowledgeItem }) {
   return <figure data-slot="media-player" className={`${paper} rounded-xl p-3`}>
     {kind === 'audio' ? <audio src={src} controls preload="none" aria-label={item.title || 'Knowledge audio'} />
       : <video src={src} controls preload="none" className="max-h-80 w-full" aria-label={item.title || 'Knowledge video'} />}
-    <figcaption className="text-xs text-on-surface-low">{item.title || item.id}</figcaption>
+    <figcaption data-type="caption" className="text-on-surface-low">{item.title || item.id}</figcaption>
   </figure>
 }
 
