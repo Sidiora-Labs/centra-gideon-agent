@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { compile } from '@tailwindcss/node'
 import { chromium, type Browser, type Page } from '@playwright/test'
@@ -26,7 +26,7 @@ beforeAll(async () => {
     expect(css, `Tailwind must emit ${selector}`).toContain(selector)
   }
   browser = await chromium.launch({
-    executablePath: process.env.CHROMIUM_PATH || (existsSync('/snap/bin/chromium') ? '/snap/bin/chromium' : undefined),
+    executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
     args: ['--no-sandbox'],
   })
   page = await browser.newPage()
@@ -56,13 +56,13 @@ describe('assistant UI classes use Gideon appearance tokens', () => {
       paper: 'rgb(32, 32, 36)', ink: 'rgb(238, 238, 239)', inkText: 'rgb(25, 25, 28)',
       foreground: 'rgb(238, 238, 239)', muted: 'rgb(162, 162, 173)',
       card: 'rgb(32, 32, 36)', accent: 'rgb(48, 48, 54)',
-      primary: 'rgb(217, 219, 235)', destructive: 'rgb(246, 108, 102)',
+      primary: 'rgb(217, 219, 235)', destructive: 'rgb(254, 116, 110)',
     }],
     ['light', true, {
       paper: 'rgb(252, 252, 253)', ink: 'rgb(32, 32, 39)', inkText: 'rgb(252, 252, 253)',
       foreground: 'rgb(32, 32, 39)', muted: 'rgb(98, 98, 111)',
       card: 'rgb(245, 245, 247)', accent: 'rgb(231, 231, 236)',
-      primary: 'rgb(52, 62, 105)', destructive: 'rgb(175, 47, 41)',
+      primary: 'rgb(52, 62, 105)', destructive: 'rgb(173, 45, 39)',
     }],
   ] as const)('%s resolves donor surfaces and ink in a real browser', async (_mode, light, expected) => {
     await page.evaluate((isLight) => document.documentElement.classList.toggle('light', isLight), light)

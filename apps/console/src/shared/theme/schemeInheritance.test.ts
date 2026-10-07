@@ -37,10 +37,17 @@ describe('colour scheme is inherited, never pinned on a control', () => {
 
   it('the form primitives keep the rest of their chrome', () => {
     const forms = readFileSync(join(SRC, 'shared/ui/forms.tsx'), 'utf8')
-    const select = forms.slice(forms.indexOf('export function Select'))
-    expect(select).toMatch(/bg-surface-container/)
-    expect(select).toMatch(/focus:ring-2/)
-    expect(select).toMatch(/rounded-md/)
+    const select = forms.slice(forms.indexOf('export function Select'), forms.indexOf("export { Segmented"))
+    const chrome = forms.match(/const fieldChrome = '([^']+)'/)?.[1]
+    const surfaces = forms.match(/const surfaces:[^\n]+/)?.[0]
+    expect(select).toMatch(/className=\{cx\(fieldChrome,/)
+    expect(select).toContain('surfaces[surface]')
+    expect(select).toContain("surface = 'container'")
+    expect(surfaces).toMatch(/container: 'bg-surface-container'/)
+    expect(chrome).toMatch(/focus:ring-2/)
+    expect(chrome).toMatch(/rounded-md/)
+    expect(select).toMatch(/appearance-none/)
+    expect(select).toContain('disabled={disabled}')
   })
 
   it('the docs no longer advertise a pinned dark scheme', () => {
