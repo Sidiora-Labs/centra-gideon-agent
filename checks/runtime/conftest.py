@@ -526,6 +526,12 @@ def _close_sqlite_connections(monkeypatch):
 
     yield
 
+    from gideon.cognition.session_search import shutdown_indexers
+    from gideon.engine.session_search import reset_for_tests
+
+    shutdown_indexers()
+    reset_for_tests()
+
     for conn in opened:
         try:
             conn.close()

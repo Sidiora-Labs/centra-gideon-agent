@@ -60,14 +60,19 @@ class _DatabaseLease:
         self.warned = False
 
     def release(self):
-        previous, self.connection = self.connection, None
-        if previous is not None:
-            try:
-                previous.close()
-            except sqlite3.Error:
-                pass
+        with _DB_LOCK:
+            previous, self.connection = self.connection, None
+            if previous is not None:
+                try:
+                    previous.close()
+                except sqlite3.Error:
+                    pass
 
     def acquire(self):
+        with _DB_LOCK:
+            return self._acquire_locked()
+
+    def _acquire_locked(self):
         if not probe().fts5:
             if not self.warned:
                 logger.warning("Session full-text search disabled. %s", FTS5_REMEDY)
@@ -93,9 +98,7 @@ class _DatabaseLease:
             except sqlite3.DatabaseError:
                 logger.debug("session_search: pragma setup skipped", exc_info=True)
             opened.executescript(_SCHEMA)
-            columns = {
-                row[1] for row in opened.execute("PRAGMA table_info(indexed)")
-            }
+            columns = {row[1] for row in opened.execute("PRAGMA table_info(indexed)")}
             legacy_scope = "scope" not in columns
             for name, declaration in (
                 ("scope", "TEXT NOT NULL DEFAULT ''"),
@@ -103,7 +106,9 @@ class _DatabaseLease:
                 ("long", "INTEGER NOT NULL DEFAULT 0"),
             ):
                 if name not in columns:
-                    opened.execute(f"ALTER TABLE indexed ADD COLUMN {name} {declaration}")
+                    opened.execute(
+                        f"ALTER TABLE indexed ADD COLUMN {name} {declaration}"
+                    )
             if legacy_scope:
                 opened.execute("DELETE FROM sessions_fts")
                 opened.execute("DELETE FROM indexed")
@@ -133,9 +138,10 @@ def _connect() -> "sqlite3.Connection | None":
 
 
 def reset_for_tests() -> None:
-    _database.release()
-    _database.location = ""
-    _database.warned = False
+    with _DB_LOCK:
+        _database.release()
+        _database.location = ""
+        _database.warned = False
 
 
 def is_restricted(session_key: str, *, memory_mode: str = "") -> bool:
@@ -505,14 +511,25 @@ def search_sessions(
         return []
     try:
         scope = scope if scope is not None else (_scope_for(log) if log else None)
-        scope_filter = "JOIN indexed i ON i.session_key = sessions_fts.session_key " if scope is not None else ""
+        scope_filter = (
+            "JOIN indexed i ON i.session_key = sessions_fts.session_key "
+            if scope is not None
+            else ""
+        )
         where_scope = " AND i.scope = ?" if scope is not None else ""
-        params = (expression, scope, max(1, min(int(limit or 30), 200))) if scope is not None else (expression, max(1, min(int(limit or 30), 200)))
+        params = (
+            (expression, scope, max(1, min(int(limit or 30), 200)))
+            if scope is not None
+            else (expression, max(1, min(int(limit or 30), 200)))
+        )
         with _DB_LOCK:
             rows = connection.execute(
                 "SELECT sessions_fts.session_key, sessions_fts.title, snippet(sessions_fts, 2, '<<', '>>', '…', 24) AS snippet, rank "
-                "FROM sessions_fts " + scope_filter +
-                "WHERE sessions_fts MATCH ?" + where_scope + " ORDER BY rank LIMIT ?",
+                "FROM sessions_fts "
+                + scope_filter
+                + "WHERE sessions_fts MATCH ?"
+                + where_scope
+                + " ORDER BY rank LIMIT ?",
                 params,
             ).fetchall()
     except Exception:
@@ -570,7 +587,11 @@ def indexed_state(log=None, *, scope: str | None = None) -> dict:
         prefix = resolved_scope + "\x1f" if resolved_scope else ""
         return {
             "available": True,
-            "keys": {row["session_key"][len(prefix) :] for row in rows if not prefix or row["session_key"].startswith(prefix)},
+            "keys": {
+                row["session_key"][len(prefix) :]
+                for row in rows
+                if not prefix or row["session_key"].startswith(prefix)
+            },
             "identities": {
                 row["session_key"][len(prefix) :]: row["source_identity"]
                 for row in rows

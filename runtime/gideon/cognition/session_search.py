@@ -59,8 +59,12 @@ class SessionIndexer:
         self._stop.set()
         self._wake.set()
         thread = self._thread
-        if wait and thread is not None and thread is not threading.current_thread():
+        if wait and thread is not None and thread.is_alive():
+            if thread is threading.current_thread():
+                raise RuntimeError("Session index worker cannot join itself")
             thread.join(timeout=5)
+            if thread.is_alive():
+                raise TimeoutError("Session index worker did not stop within 5 seconds")
 
     def note_changed(self, key: str) -> None:
         key = str(key or "").strip()
@@ -155,6 +159,17 @@ class SessionIndexer:
             if not changed:
                 self._wake.wait(_BACKGROUND_REST_SECS)
                 self._wake.clear()
+
+
+def shutdown_indexers() -> None:
+    """Stop and join registered workers before their shared database can be closed."""
+    with _INDEXERS_LOCK:
+        indexers = tuple(_INDEXERS.values())
+        for indexer in indexers:
+            indexer.stop()
+        for indexer in indexers:
+            indexer.stop(wait=True)
+        _INDEXERS.clear()
 
 
 def get_indexer(log) -> SessionIndexer:
