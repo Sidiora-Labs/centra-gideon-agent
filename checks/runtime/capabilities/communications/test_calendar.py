@@ -216,14 +216,40 @@ def test_recurrence_is_explicitly_partial_and_cancelled_excluded(tmp_path):
         event("cancelled", title="Cancelled appointment", extra="STATUS:CANCELLED\r\n"),
     )
     receipt = upload(store, row, data)
-    assert receipt["coverage"] == "partial"
-    assert receipt["warnings"] == [{"uid": "recurring", "unsupported": ["RRULE"]}]
-    review = calendar.daily(store, "2026-09-25")
-    assert review["coverage"] == "partial"
-    assert len(review["events"]) == 1
-    assert review["events"][0]["recurrence_unexpanded"] is True
-    assert review["events"][0]["uid"] == "recurring"
-    assert calendar.daily(store, "2026-09-26")["events"] == []
+    assert receipt["coverage"] == "available_snapshot"
+    assert receipt["warnings"] == []
+    assert receipt["events"] == 4
+    occurrence_ids = set()
+    for date in ("2026-09-25", "2026-09-26", "2026-09-27"):
+        review = calendar.daily(store, date)
+        assert review["coverage"] == "available_snapshot"
+        assert len(review["events"]) == 1
+        occurrence = review["events"][0]
+        assert occurrence["recurrence_unexpanded"] is False
+        assert occurrence["uid"] == "recurring"
+        assert occurrence["start"].startswith(date)
+        occurrence_ids.add(occurrence["id"])
+    assert len(occurrence_ids) == 3
+    assert calendar.daily(store, "2026-09-28")["events"] == []
+
+    partial = upload(
+        store,
+        row,
+        ics(
+            event("recurring", extra="RRULE:FREQ=DAILY;COUNT=3\r\n"),
+            event(
+                "recurring",
+                start="DTSTART:20261001T090000Z",
+                end="DTEND:20261001T100000Z",
+                extra="RECURRENCE-ID:20261001T090000Z\r\n",
+            ),
+        ),
+    )
+    assert partial["coverage"] == "partial"
+    assert partial["warnings"] == [
+        {"uid": "recurring", "unmatched_overrides": ["2026-10-01T09:00:00+00:00"]}
+    ]
+    assert calendar.daily(store, "2026-09-25")["coverage"] == "partial"
 
 
 @pytest.mark.parametrize(

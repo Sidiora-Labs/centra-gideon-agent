@@ -10,6 +10,10 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from gideon.automation.workflows.project_archive import decrypt_archive, encrypt_archive
+from gideon.core.config.credentials import (
+    CONFIG_SECRET_REFERENCE_PREFIX,
+    get_credential,
+)
 from gideon.core.config.loader import AgentProfile
 from gideon.interfaces.dashboard.handlers.capabilities_identity_bundles import (
     PREFIX,
@@ -212,7 +216,7 @@ def test_conflict_preview_stale_token_and_request_mismatch_preserve_existing_sou
 
 
 def test_agent_definition_whitelist_preserves_destination_credentials_and_authority(
-    tmp_path,
+    tmp_path, monkeypatch,
 ):
     source = ExtendedBundleService(tmp_path / "source")
     source_config = {
@@ -256,6 +260,7 @@ def test_agent_definition_whitelist_preserves_destination_credentials_and_author
     assert "/private" not in json.dumps(payload)
     assert "secret-provider" not in json.dumps(payload)
     destination = ExtendedBundleService(tmp_path / "destination")
+    monkeypatch.setenv("GIDEON_HOME", str(destination.home))
     destination_config = {
         "provider": {"api_key": "DESTINATION-SECRET"},
         "default_agent": "kept",
@@ -283,7 +288,14 @@ def test_agent_definition_whitelist_preserves_destination_credentials_and_author
     assert imported.default_dir == ""
     assert imported.tools == []
     assert imported.triggers == []
-    assert actual["provider"] == destination_config["provider"]
+    secret_reference = actual["provider"]["api_key"]
+    assert secret_reference.startswith(CONFIG_SECRET_REFERENCE_PREFIX)
+    assert (
+        get_credential(secret_reference, home=destination.home) == "DESTINATION-SECRET"
+    )
+    assert get_credential(secret_reference, home=source.home) == ""
+    assert "DESTINATION-SECRET" not in (destination.home / "config.json").read_text()
+    assert "SOURCE-SECRET" not in (destination.home / "config.json").read_text()
     assert actual["opaque"] == destination_config["opaque"]
     assert actual["default_agent"] == "kept"
     assert actual["agents"]["kept"] == destination_config["agents"]["kept"]

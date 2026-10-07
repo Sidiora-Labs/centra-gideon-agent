@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import tomllib
 from pathlib import Path
 
 from aiohttp.test_utils import TestClient, TestServer
@@ -102,8 +103,10 @@ async def test_enabled_playback_rejects_bad_digest_before_device_dispatch(tmp_pa
 
 def test_swift_source_is_declared_as_wheel_package_data():
     project = Path(__file__).parents[4] / "pyproject.toml"
-    source = project.read_text()
-    assert '"gideon.workspace.capabilities.experience.assets" = ["*.swift"]' in source
+    package_data = tomllib.loads(project.read_text())["tool"]["setuptools"][
+        "package-data"
+    ]
+    assert "*.swift" in package_data["gideon.workspace.capabilities.experience.assets"]
     assert (
         project.parent
         / "runtime/gideon/workspace/capabilities/experience/assets/native_duplex.swift"
