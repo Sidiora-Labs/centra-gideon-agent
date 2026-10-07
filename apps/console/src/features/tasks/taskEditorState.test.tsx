@@ -1,7 +1,11 @@
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { resolve } from 'node:path'
 import { useState } from 'react'
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import type { ActionPlanItem, ExitCriterion, TaskItem, TaskNote } from '../../shared/data/api'
+import type { TaskItem, TaskNote } from '../../shared/data/api'
 import { ChecklistEditor, DependencyEditor, NotesEditor } from './formControls'
 import { TaskRequestLease, chooseTaskProject, dependencyCandidates, draftToPayload, emptyDraft, taskChecklistPatch, toDraft, useTaskOperation } from './taskEditorState'
 
@@ -49,11 +53,40 @@ describe('task draft and selection rules', () => {
   })
   it('toggles legacy exit states consistently without replacing untouched criteria or plan details', () => {
     const record = { ...task('work'), exit_criteria: [{ description: 'Legacy', status: 'complete' }, { description: 'Pending', met: false }], action_plan: [{ description: 'Step', content: 'Content', completed: false, sequence: 3 }] } satisfies TaskItem
-    const exit = taskChecklistPatch(record, 'exit', 0).exit_criteria as ExitCriterion[]
-    expect(exit[0]).toEqual({ description: 'Legacy', status: 'incomplete', met: false })
-    expect(exit[1]).toBe(record.exit_criteria[1])
-    expect((taskChecklistPatch(record, 'step', 0).action_plan as ActionPlanItem[])[0]).toMatchObject({ completed: true, content: 'Content', sequence: 3 })
-    expect(record.action_plan[0].completed).toBe(false)
+    const untouched = record.exit_criteria[1]
+    const exitPatch = taskChecklistPatch(record, 'exit', 0)
+    const stepPatch = taskChecklistPatch(record, 'step', 0)
+    expect(exitPatch).toEqual({ checklist_toggle: { kind: 'exit', index: 0 } })
+    expect(stepPatch).toEqual({ checklist_toggle: { kind: 'step', index: 0 } })
+    const repository = resolve(process.cwd(), '../..')
+    const home = mkdtempSync(resolve(tmpdir(), 'gideon-task-toggle-'))
+    try {
+      const result = JSON.parse(execFileSync(process.env.GIDEON_TEST_PYTHON || resolve(repository, '.venv/bin/python'), ['-c', `
+import asyncio, json, sys
+from gideon.engine.tasks.native import NativeTaskProvider
+from gideon.engine.tasks.models import TaskDocument
+async def main():
+    fixture = json.loads(sys.argv[1])
+    provider = NativeTaskProvider()
+    created = await provider.create_task(title=fixture['record']['title'], exit_criteria=fixture['record']['exit_criteria'], action_plan=fixture['record']['action_plan'])
+    for patch in fixture['patches']:
+        operation = patch['checklist_toggle']
+        changed = await provider.toggle_checklist_item(created.id, operation['kind'], operation['index'])
+        assert changed is not None
+    stored = await provider.get_task(created.id)
+    assert stored is not None
+    print(json.dumps(TaskDocument.encode(stored)))
+asyncio.run(main())
+`, JSON.stringify({ record, patches: [exitPatch, stepPatch] })], {
+        env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: resolve(repository, 'runtime') }, encoding: 'utf8',
+      })) as { exit_criteria: Array<Record<string, unknown>>; action_plan: Array<Record<string, unknown>> }
+      expect(result.exit_criteria[0]).toMatchObject({ description: 'Legacy', status: 'incomplete', met: false })
+      expect(result.exit_criteria[1]).toMatchObject({ description: 'Pending', met: false })
+      expect(result.action_plan[0]).toMatchObject({ completed: true, content: 'Content', sequence: 3 })
+      expect(record.exit_criteria[1]).toBe(untouched)
+      expect(record.exit_criteria[0]).toEqual({ description: 'Legacy', status: 'complete' })
+      expect(record.action_plan[0].completed).toBe(false)
+    } finally { rmSync(home, { recursive: true, force: true }) }
   })
 })
 

@@ -94,8 +94,8 @@ describe('#/triggers/new?preset=… — the seeded flow', () => {
       }),
     })
     const cfg = (body.action as { config: Record<string, unknown> }).config
-    expect(cfg.agent).toBeUndefined()
-    expect(cfg.approval_mode).toBeUndefined()
+    expect(cfg.agent).toBeNull()
+    expect(cfg.approval_mode).toBeNull()
   })
 
   it('keeps a notify preset\'s declared value over the schema default', async () => {

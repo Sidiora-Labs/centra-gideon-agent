@@ -9,7 +9,8 @@ const tasks = [
 vi.mock('../../shared/data/api', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../shared/data/api')>()
   return { ...original, api: { ...original.api,
-    tasks: vi.fn(async () => ({ tasks, owner: '' })), projects: vi.fn(async () => []),
+    allTasks: vi.fn(async () => ({ tasks, total: tasks.length, owner: '' })),
+    tasks: vi.fn(async () => ({ tasks, total: tasks.length, owner: '' })), projects: vi.fn(async () => []),
     taskLists: vi.fn(async () => []), uLoops: vi.fn(async () => []), taskGraph: vi.fn(async () => ({ analysis: null })),
   } }
 })
