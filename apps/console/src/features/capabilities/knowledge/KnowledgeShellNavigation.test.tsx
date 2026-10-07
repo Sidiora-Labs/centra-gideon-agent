@@ -1,5 +1,5 @@
 import { patchRouteQuery } from '../../../app/shell/useHashRoute'
-import { cleanup, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -13,7 +13,7 @@ let server: ChildProcess, origin = '', token = ''
 
 beforeAll(async () => {
   const root = resolve(process.cwd(), '../..')
-  server = spawn(process.env.GIDEON_TEST_PYTHON || '/tmp/gideon-runtime-venv/bin/python', [resolve(root, 'checks/runtime/capabilities/knowledge/shell_ui_server.py')], {
+  server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', [resolve(root, 'checks/runtime/capabilities/knowledge/shell_ui_server.py')], {
     cwd: root,
     env: { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: home },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -35,8 +35,10 @@ beforeAll(async () => {
   origin = `http://127.0.0.1:${ready.port}`
   token = ready.token
   globalThis.fetch = (input, init) => {
-    if (typeof input !== 'string' || !input.startsWith('/')) return nativeFetch(input, init)
-    return nativeFetch(origin + input + (input.includes('?') ? '&' : '?') + `token=${encodeURIComponent(token)}`, init)
+    const url = new URL(input instanceof Request ? input.url : String(input), origin)
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+    if (url.origin === origin) headers.set('Authorization', `Bearer ${token}`)
+    return nativeFetch(url, { ...init, headers })
   }
 }, 30000)
 
@@ -57,9 +59,13 @@ it('navigates the assembled Knowledge shell and enforces authentication on both 
   const view = render(<CapabilitiesSection {...routeProps} sub="knowledge/links" navigate={navigate} />)
   expect(screen.getByRole('status')).toHaveTextContent('Loading')
   expect(await screen.findByRole('heading', { name: 'Links and repository study' })).toBeVisible()
-  const tools = screen.getByRole('navigation', { name: 'Area tools' })
-  expect(within(tools).getByRole('link', { name: 'links' })).toHaveAttribute('href', '#/capabilities/knowledge/links')
-  expect(within(tools).getByRole('link', { name: 'vaults' })).toHaveAttribute('href', '#/capabilities/knowledge/vaults')
+  const tools = screen.getByRole('navigation', { name: 'Reading & capture sections' })
+  const links = within(tools).getByRole('button', { name: 'Saved links' })
+  expect(links).toHaveAttribute('aria-pressed', 'true')
+  const vaults = within(tools).getByRole('button', { name: 'Connected folders' })
+  expect(vaults).toHaveAttribute('aria-pressed', 'false')
+  fireEvent.click(vaults)
+  expect(navigate).toHaveBeenLastCalledWith('capabilities/knowledge/vaults')
   expect(screen.getByRole('region', { name: 'Link buckets' })).toBeVisible()
   expect(screen.queryByRole('alert')).toBeNull()
 
@@ -67,6 +73,7 @@ it('navigates the assembled Knowledge shell and enforces authentication on both 
   expect(screen.getByRole('status')).toHaveTextContent('Loading')
   expect(await screen.findByRole('heading', { name: 'External knowledge vaults' })).toBeVisible()
   expect(screen.getByText('Allowed roots: None configured')).toBeVisible()
+  expect(within(screen.getByRole('navigation', { name: 'Reading & capture sections' })).getByRole('button', { name: 'Connected folders' })).toHaveAttribute('aria-pressed', 'true')
   expect(screen.getByRole('region', { name: 'Vault registration' })).toBeVisible()
   expect(screen.queryByRole('alert')).toBeNull()
 
