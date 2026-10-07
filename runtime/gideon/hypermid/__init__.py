@@ -45,6 +45,7 @@ from .lifecycle import (
     start_runtime,
     stop_runtime,
 )
+from .memory_client import MemoryClient
 from .models import (
     EVENT_CHUNK_BYTES,
     MAX_FRAME_BYTES,
@@ -63,7 +64,6 @@ from .models import (
     SubscriptionSnapshot,
     Trace,
 )
-from .memory_client import MemoryClient
 from .modules import (
     HypermidModuleSupervisor,
     ModuleHealth,
@@ -96,6 +96,7 @@ def __getattr__(name: str):
 
         return HypermidOperatorLifecycle
     raise AttributeError(name)
+
 
 __all__ = [
     "AccessRequest",

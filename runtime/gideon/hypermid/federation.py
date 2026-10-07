@@ -37,7 +37,9 @@ class PeerHello:
     def __post_init__(self) -> None:
         if self.protocol != PROTOCOL:
             raise FederationViolation("peer protocol is incompatible")
-        if len(self.capabilities) > 256 or len(set(self.capabilities)) != len(self.capabilities):
+        if len(self.capabilities) > 256 or len(set(self.capabilities)) != len(
+            self.capabilities
+        ):
             raise FederationViolation("peer capabilities are invalid")
         if tuple(sorted(self.capabilities)) != self.capabilities:
             raise FederationViolation("peer capabilities must be sorted")
@@ -53,7 +55,9 @@ class PeerGrant:
     expires_ms: int
 
     def __post_init__(self) -> None:
-        if not self.operations or any(not value or len(value) > 160 for value in self.operations):
+        if not self.operations or any(
+            not value or len(value) > 160 for value in self.operations
+        ):
             raise FederationViolation("peer grant operations are invalid")
         if isinstance(self.expires_ms, bool) or self.expires_ms < 1:
             raise FederationViolation("peer grant expiry is invalid")
@@ -133,8 +137,13 @@ class FederationSession:
         timestamp = int(time.time() * 1000) if now_ms is None else now_ms
         if hello.peer_id != grant.peer_id:
             raise FederationViolation("authenticated peer does not match its grant")
-        if hello.owner_id != expected_scope.owner_id or hello.project_id != expected_scope.project_id:
-            raise FederationViolation("peer owner or project identity does not match the target")
+        if (
+            hello.owner_id != expected_scope.owner_id
+            or hello.project_id != expected_scope.project_id
+        ):
+            raise FederationViolation(
+                "peer owner or project identity does not match the target"
+            )
         if grant.scope != expected_scope:
             raise FederationViolation("peer grant must exactly match the target scope")
         if timestamp >= grant.expires_ms:
@@ -154,7 +163,9 @@ class FederationSession:
         if timestamp >= self.grant.expires_ms or timestamp >= call.deadline_ms:
             raise FederationViolation("federated call or grant has expired")
         if call.principal.id != self.grant.principal_id:
-            raise FederationViolation("originating principal does not match the peer grant")
+            raise FederationViolation(
+                "originating principal does not match the peer grant"
+            )
         if call.scope != self.scope or call.scope != self.grant.scope:
             raise FederationViolation("federated call attempted to widen its scope")
         if call.operation not in self.grant.operations:
@@ -171,7 +182,9 @@ class FederationSession:
                 or required not in self.local_scopes
                 or required not in principal_scopes
             ):
-                raise FederationViolation("required scope is absent from an authority boundary")
+                raise FederationViolation(
+                    "required scope is absent from an authority boundary"
+                )
         if (
             call.operation in _WRITER_OPERATIONS
             or call.operation.startswith("writer.")

@@ -273,8 +273,7 @@ class ContextPortabilityManifest:
             cursor=Cursor.from_wire(raw["cursor"]),
             session_binding_digest=Digest(raw["session_binding_digest"]),
             entries=tuple(
-                ContextPortabilityEntry.from_mapping(entry)
-                for entry in raw["entries"]
+                ContextPortabilityEntry.from_mapping(entry) for entry in raw["entries"]
             ),
             entries_digest=Digest(raw["entries_digest"]),
             created_at=raw["created_at"],
@@ -503,8 +502,7 @@ def validate_context_export(bundle: ContextExportBundle, target_scope: Scope) ->
         total_bytes += len(payload_bytes)
         if (
             len(payload_bytes) != entry.byte_length
-            or Digest(hashlib.sha256(payload_bytes).hexdigest())
-            != entry.content_digest
+            or Digest(hashlib.sha256(payload_bytes).hexdigest()) != entry.content_digest
         ):
             raise ContextPortabilityError(
                 "DIGEST_MISMATCH", "record digest does not match"
@@ -819,10 +817,13 @@ class MemoryExportEntry:
             raise ContextPortabilityError("INVALID_ITEM", "memory item kind is invalid")
         object.__setattr__(self, "item_digest", Digest(self.item_digest))
         if Digest.sha256(_canonical_bytes(self.payload)) != self.item_digest:
-            raise ContextPortabilityError("DIGEST_MISMATCH", "memory item digest mismatch")
+            raise ContextPortabilityError(
+                "DIGEST_MISMATCH", "memory item digest mismatch"
+            )
         if _contains_forbidden_memory_field(self.payload):
             raise ContextPortabilityError(
-                "FORBIDDEN_STATE", "memory export contains transient or secret-bearing state"
+                "FORBIDDEN_STATE",
+                "memory export contains transient or secret-bearing state",
             )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -836,7 +837,9 @@ class MemoryExportEntry:
     @classmethod
     def from_mapping(cls, value: object) -> MemoryExportEntry:
         raw = _mapping(value, "memory export entry")
-        _require_keys(raw, {"item_key", "kind", "payload", "item_digest"}, "memory export entry")
+        _require_keys(
+            raw, {"item_key", "kind", "payload", "item_digest"}, "memory export entry"
+        )
         return cls(
             str(raw["item_key"]),
             str(raw["kind"]),
@@ -867,9 +870,13 @@ class MemoryExportManifest:
             or not 1 <= self.schema_version <= MEMORY_PORTABILITY_SCHEMA_VERSION
             or min(self.record_count, self.item_count, self.created_at_ms) < 0
         ):
-            raise ContextPortabilityError("INVALID_MANIFEST", "memory export manifest is invalid")
+            raise ContextPortabilityError(
+                "INVALID_MANIFEST", "memory export manifest is invalid"
+            )
         if not isinstance(self.include_grants, bool):
-            raise ContextPortabilityError("INVALID_MANIFEST", "include_grants must be a boolean")
+            raise ContextPortabilityError(
+                "INVALID_MANIFEST", "include_grants must be a boolean"
+            )
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -888,11 +895,32 @@ class MemoryExportManifest:
     @classmethod
     def from_mapping(cls, value: object) -> MemoryExportManifest:
         raw = _mapping(value, "memory export manifest")
-        _require_keys(raw, {"export_id", "schema_version", "scope", "record_count", "item_count", "stream_digest", "created_at_ms", "cursor", "trace", "include_grants"}, "memory export manifest")
+        _require_keys(
+            raw,
+            {
+                "export_id",
+                "schema_version",
+                "scope",
+                "record_count",
+                "item_count",
+                "stream_digest",
+                "created_at_ms",
+                "cursor",
+                "trace",
+                "include_grants",
+            },
+            "memory export manifest",
+        )
         return cls(
-            Id(raw["export_id"]), raw["schema_version"], Scope.from_wire(raw["scope"]),
-            raw["record_count"], raw["item_count"], Digest(raw["stream_digest"]),
-            raw["created_at_ms"], Cursor.from_wire(raw["cursor"]), Trace.from_wire(raw["trace"]),
+            Id(raw["export_id"]),
+            raw["schema_version"],
+            Scope.from_wire(raw["scope"]),
+            raw["record_count"],
+            raw["item_count"],
+            Digest(raw["stream_digest"]),
+            raw["created_at_ms"],
+            Cursor.from_wire(raw["cursor"]),
+            Trace.from_wire(raw["trace"]),
             raw["include_grants"],
         )
 
@@ -905,21 +933,37 @@ class MemoryExportBundle:
     def __post_init__(self) -> None:
         object.__setattr__(self, "entries", tuple(self.entries))
         if len(self.entries) != self.manifest.item_count:
-            raise ContextPortabilityError("COUNT_MISMATCH", "memory export item count mismatch")
+            raise ContextPortabilityError(
+                "COUNT_MISMATCH", "memory export item count mismatch"
+            )
         keys = [entry.item_key for entry in self.entries]
         if len(keys) != len(set(keys)):
-            raise ContextPortabilityError("ITEM_ORDER", "memory export entry keys are not unique")
+            raise ContextPortabilityError(
+                "ITEM_ORDER", "memory export entry keys are not unique"
+            )
         if _memory_stream_digest(self.entries) != self.manifest.stream_digest:
-            raise ContextPortabilityError("DIGEST_MISMATCH", "memory export stream digest mismatch")
-        if sum(entry.kind == "record" for entry in self.entries) != self.manifest.record_count:
-            raise ContextPortabilityError("COUNT_MISMATCH", "memory export record count mismatch")
+            raise ContextPortabilityError(
+                "DIGEST_MISMATCH", "memory export stream digest mismatch"
+            )
+        if (
+            sum(entry.kind == "record" for entry in self.entries)
+            != self.manifest.record_count
+        ):
+            raise ContextPortabilityError(
+                "COUNT_MISMATCH", "memory export record count mismatch"
+            )
 
     def to_mapping(self) -> dict[str, Any]:
-        return {"manifest": self.manifest.to_mapping(), "entries": [entry.to_mapping() for entry in self.entries]}
+        return {
+            "manifest": self.manifest.to_mapping(),
+            "entries": [entry.to_mapping() for entry in self.entries],
+        }
 
     def to_jsonl(self) -> bytes:
         lines = [
-            _canonical_bytes({"kind": "manifest", "manifest": self.manifest.to_mapping()})
+            _canonical_bytes(
+                {"kind": "manifest", "manifest": self.manifest.to_mapping()}
+            )
         ]
         lines.extend(
             _canonical_bytes({"kind": "entry", "entry": entry.to_mapping()})
@@ -944,29 +988,43 @@ class MemoryExportBundle:
             or not value.endswith(b"\n")
             or len(value) > MAX_PORTABILITY_TOTAL_BYTES
         ):
-            raise ContextPortabilityError("INVALID_JSONL", "memory export JSONL is invalid")
+            raise ContextPortabilityError(
+                "INVALID_JSONL", "memory export JSONL is invalid"
+            )
         raw_lines = value.splitlines()
         if not raw_lines or len(raw_lines) > MAX_PORTABILITY_ENTRIES + 1:
-            raise ContextPortabilityError("INVALID_JSONL", "memory export JSONL is invalid")
+            raise ContextPortabilityError(
+                "INVALID_JSONL", "memory export JSONL is invalid"
+            )
         decoded = []
         for line in raw_lines:
             try:
                 item = json.loads(line)
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise ContextPortabilityError("INVALID_JSONL", "memory export JSONL is invalid") from exc
+                raise ContextPortabilityError(
+                    "INVALID_JSONL", "memory export JSONL is invalid"
+                ) from exc
             if _canonical_bytes(item) != line:
-                raise ContextPortabilityError("INVALID_JSONL", "memory export JSONL is not canonical")
+                raise ContextPortabilityError(
+                    "INVALID_JSONL", "memory export JSONL is not canonical"
+                )
             decoded.append(_mapping(item, "memory export JSONL row"))
         _require_keys(decoded[0], {"kind", "manifest"}, "memory export manifest row")
         if decoded[0]["kind"] != "manifest":
-            raise ContextPortabilityError("INVALID_JSONL", "memory export manifest row is missing")
+            raise ContextPortabilityError(
+                "INVALID_JSONL", "memory export manifest row is missing"
+            )
         entries = []
         for row in decoded[1:]:
             _require_keys(row, {"kind", "entry"}, "memory export entry row")
             if row["kind"] != "entry":
-                raise ContextPortabilityError("INVALID_JSONL", "memory export entry row is invalid")
+                raise ContextPortabilityError(
+                    "INVALID_JSONL", "memory export entry row is invalid"
+                )
             entries.append(MemoryExportEntry.from_mapping(row["entry"]))
-        return cls(MemoryExportManifest.from_mapping(decoded[0]["manifest"]), tuple(entries))
+        return cls(
+            MemoryExportManifest.from_mapping(decoded[0]["manifest"]), tuple(entries)
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -988,7 +1046,9 @@ class MemoryImportManifest:
             or not 1 <= self.schema_version <= MEMORY_PORTABILITY_SCHEMA_VERSION
             or min(self.item_count, self.created_at_ms) < 0
         ):
-            raise ContextPortabilityError("INVALID_MANIFEST", "memory import manifest is invalid")
+            raise ContextPortabilityError(
+                "INVALID_MANIFEST", "memory import manifest is invalid"
+            )
         mapped: dict[str, Scope] = {}
         for digest, scope in self.scope_mapping.items():
             mapped[str(Digest(digest))] = scope
@@ -1001,7 +1061,10 @@ class MemoryImportManifest:
             "source_scope": self.source_scope.to_wire(),
             "target_scope": self.target_scope.to_wire(),
             "item_count": self.item_count,
-            "scope_mapping": {key: scope.to_wire() for key, scope in sorted(self.scope_mapping.items())},
+            "scope_mapping": {
+                key: scope.to_wire()
+                for key, scope in sorted(self.scope_mapping.items())
+            },
             "created_at_ms": self.created_at_ms,
             "trace": self.trace.to_wire(),
         }
@@ -1030,7 +1093,10 @@ class MemoryImportManifest:
             Scope.from_wire(_mapping(raw["source_scope"], "source scope")),
             Scope.from_wire(_mapping(raw["target_scope"], "target scope")),
             raw["item_count"],
-            {str(Digest(key)): Scope.from_wire(_mapping(scope, "mapped scope")) for key, scope in mapping.items()},
+            {
+                str(Digest(key)): Scope.from_wire(_mapping(scope, "mapped scope"))
+                for key, scope in mapping.items()
+            },
             raw["created_at_ms"],
             Trace.from_wire(_mapping(raw["trace"], "import trace")),
         )
@@ -1047,14 +1113,20 @@ class MemoryImportBatch:
     def __post_init__(self) -> None:
         object.__setattr__(self, "batch_id", Id(self.batch_id))
         if self.state not in {"staged", "validated", "applied", "rejected"}:
-            raise ContextPortabilityError("INVALID_BATCH", "memory import state is invalid")
+            raise ContextPortabilityError(
+                "INVALID_BATCH", "memory import state is invalid"
+            )
         if not isinstance(self.replayed, bool):
-            raise ContextPortabilityError("INVALID_BATCH", "memory import replay flag is invalid")
+            raise ContextPortabilityError(
+                "INVALID_BATCH", "memory import replay flag is invalid"
+            )
         normalized = []
         for value in self.rejected:
             raw = _mapping(value, "memory import rejection")
             _require_keys(raw, {"item_key", "error_code"}, "memory import rejection")
-            normalized.append({"item_key": str(raw["item_key"]), "error_code": str(raw["error_code"])})
+            normalized.append(
+                {"item_key": str(raw["item_key"]), "error_code": str(raw["error_code"])}
+            )
         object.__setattr__(self, "rejected", tuple(normalized))
 
     def to_mapping(self) -> dict[str, Any]:
@@ -1069,10 +1141,16 @@ class MemoryImportBatch:
     @classmethod
     def from_mapping(cls, value: object) -> MemoryImportBatch:
         raw = _mapping(value, "memory import batch")
-        _require_keys(raw, {"batch_id", "manifest", "state", "rejected", "replayed"}, "memory import batch")
+        _require_keys(
+            raw,
+            {"batch_id", "manifest", "state", "rejected", "replayed"},
+            "memory import batch",
+        )
         rejected = raw["rejected"]
         if not isinstance(rejected, list):
-            raise ContextPortabilityError("INVALID_BATCH", "memory import rejections must be a list")
+            raise ContextPortabilityError(
+                "INVALID_BATCH", "memory import rejections must be a list"
+            )
         return cls(
             Id(raw["batch_id"]),
             MemoryImportManifest.from_mapping(raw["manifest"]),
@@ -1095,7 +1173,9 @@ class LegacyImportReceipt:
         object.__setattr__(self, "destination_digest", Digest(self.destination_digest))
         for value in (self.record_count, self.item_count):
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise ContextPortabilityError("INVALID_RECEIPT", "legacy import count is invalid")
+                raise ContextPortabilityError(
+                    "INVALID_RECEIPT", "legacy import count is invalid"
+                )
 
     def to_mapping(self) -> dict[str, Any]:
         return {
@@ -1111,7 +1191,13 @@ class LegacyImportReceipt:
         raw = _mapping(value, "legacy import receipt")
         _require_keys(
             raw,
-            {"source_digest", "destination_digest", "batch", "record_count", "item_count"},
+            {
+                "source_digest",
+                "destination_digest",
+                "batch",
+                "record_count",
+                "item_count",
+            },
             "legacy import receipt",
         )
         return cls(
@@ -1127,25 +1213,58 @@ class MemoryPortabilityClient:
     def __init__(self, client: HypermidClient) -> None:
         self._client = client
 
-    async def export(self, *, scope: Scope, export_id: Id, include_grants: bool, trace: Trace) -> MemoryExportBundle:
+    async def export(
+        self, *, scope: Scope, export_id: Id, include_grants: bool, trace: Trace
+    ) -> MemoryExportBundle:
         result = await self._client.request(
             "memory.portability.export",
-            {"scope": scope.to_wire(), "export_id": str(export_id), "include_grants": include_grants},
-            scope=scope, trace=trace, effect_kind="durable",
+            {
+                "scope": scope.to_wire(),
+                "export_id": str(export_id),
+                "include_grants": include_grants,
+            },
+            scope=scope,
+            trace=trace,
+            effect_kind="durable",
         )
         return MemoryExportBundle.from_mapping(result)
 
-    async def stage(self, *, bundle: MemoryExportBundle, target_scope: Scope, scope_mapping: Mapping[str, Scope], batch_id: Id, trace: Trace) -> Mapping[str, Any]:
-        return _mapping(await self._client.request(
-            "memory.portability.stage",
-            {"batch_id": str(batch_id), "bundle": bundle.to_mapping(), "target_scope": target_scope.to_wire(),
-             "scope_mapping": {key: scope.to_wire() for key, scope in sorted(scope_mapping.items())}},
-            trace=trace, effect_kind="durable",
-        ), "memory import batch")
+    async def stage(
+        self,
+        *,
+        bundle: MemoryExportBundle,
+        target_scope: Scope,
+        scope_mapping: Mapping[str, Scope],
+        batch_id: Id,
+        trace: Trace,
+    ) -> Mapping[str, Any]:
+        return _mapping(
+            await self._client.request(
+                "memory.portability.stage",
+                {
+                    "batch_id": str(batch_id),
+                    "bundle": bundle.to_mapping(),
+                    "target_scope": target_scope.to_wire(),
+                    "scope_mapping": {
+                        key: scope.to_wire()
+                        for key, scope in sorted(scope_mapping.items())
+                    },
+                },
+                trace=trace,
+                effect_kind="durable",
+            ),
+            "memory import batch",
+        )
 
-    async def apply(self, *, batch_id: Id, source_digest: Digest, trace: Trace) -> Mapping[str, Any]:
-        return _mapping(await self._client.request(
-            "memory.portability.apply",
-            {"batch_id": str(batch_id), "source_digest": str(source_digest)},
-            trace=trace, effect_kind="durable",
-        ), "memory import receipt")
+    async def apply(
+        self, *, batch_id: Id, source_digest: Digest, trace: Trace
+    ) -> Mapping[str, Any]:
+        return _mapping(
+            await self._client.request(
+                "memory.portability.apply",
+                {"batch_id": str(batch_id), "source_digest": str(source_digest)},
+                trace=trace,
+                effect_kind="durable",
+            ),
+            "memory import receipt",
+        )

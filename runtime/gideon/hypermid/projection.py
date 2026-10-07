@@ -17,7 +17,11 @@ class ProjectionViolation(ValueError):
 def _canonical(value: object) -> bytes:
     try:
         return json.dumps(
-            value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+            value,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
         ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise ProjectionViolation("INVALID_PROJECTION", str(exc)) from exc
@@ -59,7 +63,9 @@ def _validate_part(part: Mapping[str, Any]) -> dict[str, Any]:
     payload = _part_payload(normalized)
     expected = hashlib.sha256(payload).hexdigest()
     if normalized.get("content_digest") != expected:
-        raise ProjectionViolation("DIGEST_MISMATCH", "part content digest does not match")
+        raise ProjectionViolation(
+            "DIGEST_MISMATCH", "part content digest does not match"
+        )
     return normalized
 
 
@@ -72,8 +78,14 @@ class ProjectionResult:
 
 def project(request: Mapping[str, Any]) -> ProjectionResult:
     raw_items = request.get("items")
-    if not isinstance(raw_items, Sequence) or isinstance(raw_items, (str, bytes)) or not raw_items:
-        raise ProjectionViolation("EMPTY_PROJECTION", "projection requires source items")
+    if (
+        not isinstance(raw_items, Sequence)
+        or isinstance(raw_items, (str, bytes))
+        or not raw_items
+    ):
+        raise ProjectionViolation(
+            "EMPTY_PROJECTION", "projection requires source items"
+        )
     source_cursor = Cursor.from_wire(request.get("source_cursor"))
     budget = request.get("budget_inputs")
     if not isinstance(budget, Mapping):
@@ -94,16 +106,30 @@ def project(request: Mapping[str, Any]) -> ProjectionResult:
         item = dict(raw_item)
         item_id = item.get("item_id")
         if not isinstance(item_id, str) or not item_id or item_id in seen:
-            raise ProjectionViolation("DUPLICATE_ITEM", "source identities must be unique")
+            raise ProjectionViolation(
+                "DUPLICATE_ITEM", "source identities must be unique"
+            )
         seen.add(item_id)
         cursor = Cursor.from_wire(item.get("cursor"))
-        if cursor.epoch != source_cursor.epoch or cursor > source_cursor or (previous and cursor <= previous):
-            raise ProjectionViolation("INVALID_CURSOR_ORDER", "items must cover an ordered committed cursor")
+        if (
+            cursor.epoch != source_cursor.epoch
+            or cursor > source_cursor
+            or (previous and cursor <= previous)
+        ):
+            raise ProjectionViolation(
+                "INVALID_CURSOR_ORDER", "items must cover an ordered committed cursor"
+            )
         previous = cursor
         parts = item.get("parts")
-        if not isinstance(parts, Sequence) or isinstance(parts, (str, bytes)) or not parts:
+        if (
+            not isinstance(parts, Sequence)
+            or isinstance(parts, (str, bytes))
+            or not parts
+        ):
             raise ProjectionViolation("EMPTY_PARTS", "source items require parts")
-        normalized_parts = [_validate_part(part) for part in parts if isinstance(part, Mapping)]
+        normalized_parts = [
+            _validate_part(part) for part in parts if isinstance(part, Mapping)
+        ]
         if len(normalized_parts) != len(parts):
             raise ProjectionViolation("INVALID_PART", "part must be an object")
         item["parts"] = normalized_parts
@@ -112,7 +138,9 @@ def project(request: Mapping[str, Any]) -> ProjectionResult:
             raise ProjectionViolation("INVALID_MASS", "token mass must be non-negative")
         total_mass += token_mass
         normalized_items.append(item)
-        part_digests = [bytes.fromhex(part["content_digest"]) for part in normalized_parts]
+        part_digests = [
+            bytes.fromhex(part["content_digest"]) for part in normalized_parts
+        ]
         blocks.append(
             {
                 "block_id": f"block:{item_id}",
@@ -148,8 +176,10 @@ def project(request: Mapping[str, Any]) -> ProjectionResult:
 
     output_digest = hashlib.sha256(_canonical(blocks)).hexdigest()
     source_digest = request.get("source_digest")
-    if not isinstance(source_digest, str) or len(source_digest) != 64 or any(
-        character not in "0123456789abcdef" for character in source_digest
+    if (
+        not isinstance(source_digest, str)
+        or len(source_digest) != 64
+        or any(character not in "0123456789abcdef" for character in source_digest)
     ):
         raise ProjectionViolation(
             "INVALID_SOURCE_DIGEST", "journal source digest is required"

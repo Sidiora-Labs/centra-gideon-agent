@@ -20,7 +20,7 @@ from gideon.integrations.tool_providers.base import (
 )
 
 from .foundation import EffectState, Id, Scope, Trace
-from .roles import ROLE_PROTOCOL, TOOL_ROLE_V1, RoleProcess, RoleRequest
+from .roles import TOOL_ROLE_V1, RoleProcess, RoleRequest
 
 
 class HypermidToolViolation(ValueError):

@@ -19,7 +19,11 @@ _MAX_SOURCE_BYTES = 4 * 1024 * 1024
 
 def _canonical(value: object) -> bytes:
     return json.dumps(
-        value, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
     ).encode("utf-8")
 
 
@@ -120,7 +124,11 @@ def capture_git_source(
 
 def _canonical_git_content(snapshot: LocalGitSnapshot) -> str:
     return _canonical(
-        {"head": snapshot.head, "refs": list(snapshot.refs), "commits": list(snapshot.commits)}
+        {
+            "head": snapshot.head,
+            "refs": list(snapshot.refs),
+            "commits": list(snapshot.commits),
+        }
     ).decode("utf-8")
 
 

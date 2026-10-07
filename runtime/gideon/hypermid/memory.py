@@ -293,12 +293,10 @@ class HypermidMemoryProvider(MemoryProvider):
             _privacy_mode.reset(token)
 
     def _reads_allowed(self) -> bool:
-        from gideon.security.session_credentials import memory_reach
 
         return _privacy_mode.get() != "temporary" and self._reach().read_allowed
 
     def _writes_allowed(self) -> bool:
-        from gideon.security.session_credentials import memory_reach
 
         writer = self._writer
         snapshot = writer.snapshot() if writer is not None else None

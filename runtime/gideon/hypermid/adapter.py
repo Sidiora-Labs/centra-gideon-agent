@@ -111,7 +111,9 @@ class HypermidAdapter:
                 await client.close()
             except Exception:
                 log.debug("Hypermid client cleanup failed", exc_info=True)
-            log.warning("Hypermid is unavailable; Gideon remains authoritative: %s", error)
+            log.warning(
+                "Hypermid is unavailable; Gideon remains authoritative: %s", error
+            )
             return self._status.unavailable(self._mode, error)
         self._started = True
         return status
@@ -150,7 +152,9 @@ class HypermidAdapter:
         except Exception as error:
             self._started = False
             self._status.unavailable(self._mode, error)
-            log.warning("Hypermid pass-through failed; retaining Gideon value: %s", error)
+            log.warning(
+                "Hypermid pass-through failed; retaining Gideon value: %s", error
+            )
             return payload
         return result
 

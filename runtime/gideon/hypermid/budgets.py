@@ -84,8 +84,7 @@ class BudgetLedger:
             (policy.owner_id, policy.project_id): policy for policy in policies
         }
         self._lock = threading.RLock()
-        self._connection.executescript(
-            """
+        self._connection.executescript("""
             CREATE TABLE IF NOT EXISTS hypermid_budget_reservations (
                 reservation_id TEXT PRIMARY KEY,
                 owner_id TEXT NOT NULL,
@@ -111,8 +110,7 @@ class BudgetLedger:
             );
             CREATE INDEX IF NOT EXISTS hypermid_budget_owner_time
             ON hypermid_budget_reservations(owner_id, project_id, reserved_at_ms);
-            """
-        )
+            """)
 
     @classmethod
     def open(
@@ -152,12 +150,27 @@ class BudgetLedger:
                 )
                 if active >= limits.max_concurrent:
                     raise BudgetDenied("concurrency")
-                self._require_total(request, request.now_ms - 3_600_000, None,
-                                    limits.max_hourly_nanodollars, "hourly")
-                self._require_total(request, request.now_ms - 86_400_000, None,
-                                    limits.max_daily_nanodollars, "daily")
-                self._require_total(request, None, request.job_id,
-                                    limits.max_job_nanodollars, "job_total")
+                self._require_total(
+                    request,
+                    request.now_ms - 3_600_000,
+                    None,
+                    limits.max_hourly_nanodollars,
+                    "hourly",
+                )
+                self._require_total(
+                    request,
+                    request.now_ms - 86_400_000,
+                    None,
+                    limits.max_daily_nanodollars,
+                    "daily",
+                )
+                self._require_total(
+                    request,
+                    None,
+                    request.job_id,
+                    limits.max_job_nanodollars,
+                    "job_total",
+                )
                 self._connection.execute(
                     """
                     INSERT INTO hypermid_budget_reservations(
@@ -206,7 +219,11 @@ class BudgetLedger:
             try:
                 request, reserved = self._load_reserved(reservation_id)
                 status = "unknown" if charge_unknown else "settled"
-                actual_cost = None if charge_unknown or actual is None else actual.cost_nanodollars
+                actual_cost = (
+                    None
+                    if charge_unknown or actual is None
+                    else actual.cost_nanodollars
+                )
                 self._connection.execute(
                     """
                     UPDATE hypermid_budget_reservations SET
@@ -266,9 +283,18 @@ class BudgetLedger:
             return None
         request = AdmissionRequest(
             reservation_id,
-            str(row[0]), str(row[1]), str(row[2]), str(row[3]),
-            str(row[4]), str(row[5]), str(row[6]), bool(row[7]),
-            int(row[8]), int(row[9]), int(row[10]), int(row[11]),
+            str(row[0]),
+            str(row[1]),
+            str(row[2]),
+            str(row[3]),
+            str(row[4]),
+            str(row[5]),
+            str(row[6]),
+            bool(row[7]),
+            int(row[8]),
+            int(row[9]),
+            int(row[10]),
+            int(row[11]),
         )
         return Reservation(reservation_id, str(row[12]), int(row[10]), request)
 
@@ -297,8 +323,12 @@ class BudgetLedger:
               AND (? IS NULL OR job_id=?)
             """,
             (
-                request.owner_id, request.project_id,
-                since_ms, since_ms, job_id, job_id,
+                request.owner_id,
+                request.project_id,
+                since_ms,
+                since_ms,
+                job_id,
+                job_id,
             ),
         )
         if used + request.estimated_cost_nanodollars > limit:

@@ -7,7 +7,7 @@ import json
 import secrets
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal, Mapping, cast
+from typing import Literal, Mapping, cast
 
 from .client import HypermidClient, HypermidOutcomeUnknown
 from .foundation import Cursor, Digest, Id, Scope

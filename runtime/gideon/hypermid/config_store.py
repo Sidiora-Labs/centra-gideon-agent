@@ -99,13 +99,14 @@ class ContextConfigStore:
                 )
 
     def _initialize_schema(self) -> None:
-        stored_version = int(self._connection.execute("PRAGMA user_version").fetchone()[0])
+        stored_version = int(
+            self._connection.execute("PRAGMA user_version").fetchone()[0]
+        )
         if stored_version > _SCHEMA_VERSION:
             raise ConfigStoreAhead(stored_version)
         self._connection.execute("BEGIN IMMEDIATE")
         try:
-            self._connection.execute(
-                """
+            self._connection.execute("""
                 CREATE TABLE IF NOT EXISTS hypermid_context_config_state (
                     singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
                     policy_revision INTEGER NOT NULL
@@ -129,10 +130,8 @@ class ContextConfigStore:
                          AND pending_digest IS NOT NULL)
                     )
                 )
-                """
-            )
-            self._connection.execute(
-                """
+                """)
+            self._connection.execute("""
                 CREATE TABLE IF NOT EXISTS hypermid_context_config_revisions (
                     policy_revision INTEGER PRIMARY KEY,
                     config_json TEXT NOT NULL,
@@ -140,8 +139,7 @@ class ContextConfigStore:
                     previous_config_digest TEXT,
                     applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
-                """
-            )
+                """)
             if stored_version == 0:
                 self._connection.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
             self._connection.commit()
@@ -195,7 +193,9 @@ class ContextConfigStore:
             self._require_open()
             row = self._read_row()
             if row is None:
-                raise ConfigStoreUninitialized("configuration store has not been seeded")
+                raise ConfigStoreUninitialized(
+                    "configuration store has not been seeded"
+                )
             return self._decode_state(row)[0]
 
     def pending(self) -> PendingConfiguration | None:
@@ -203,7 +203,9 @@ class ContextConfigStore:
             self._require_open()
             row = self._read_row()
             if row is None:
-                raise ConfigStoreUninitialized("configuration store has not been seeded")
+                raise ConfigStoreUninitialized(
+                    "configuration store has not been seeded"
+                )
             return self._decode_state(row)[1]
 
     def stage(
@@ -213,9 +215,15 @@ class ContextConfigStore:
         expected_revision: int,
         expected_digest: str,
     ) -> PendingConfiguration | None:
-        if type(expected_revision) is not int or not 1 <= expected_revision <= MAX_SAFE_INTEGER:
+        if (
+            type(expected_revision) is not int
+            or not 1 <= expected_revision <= MAX_SAFE_INTEGER
+        ):
             raise ValueError("expected_revision is outside the supported range")
-        if not isinstance(expected_digest, str) or _DIGEST.fullmatch(expected_digest) is None:
+        if (
+            not isinstance(expected_digest, str)
+            or _DIGEST.fullmatch(expected_digest) is None
+        ):
             raise ValueError("expected_digest is not a Hypermid digest")
         next_json = next_config.canonical_bytes.decode("utf-8")
         next_digest = next_config.digest
@@ -374,14 +382,12 @@ class ContextConfigStore:
         self._connection.execute("BEGIN IMMEDIATE")
 
     def _read_row(self) -> sqlite3.Row | None:
-        return self._connection.execute(
-            """
+        return self._connection.execute("""
             SELECT policy_revision, active_config_json, active_digest,
                    pending_expected_revision, pending_previous_digest,
                    pending_config_json, pending_digest
             FROM hypermid_context_config_state WHERE singleton=1
-            """
-        ).fetchone()
+            """).fetchone()
 
     def _decode_state(
         self, row: sqlite3.Row

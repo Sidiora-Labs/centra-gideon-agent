@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from enum import Enum
-import json
 from threading import Lock
 from typing import Mapping, Protocol
 
@@ -34,11 +34,21 @@ class BusMessage:
     def __post_init__(self) -> None:
         if not 1 <= len(self.subject) <= 512:
             raise BusViolation("subject length is outside 1..=512")
-        if len(self.headers) > 64 or any(not key or len(key) > 128 or len(value) > 4096 for key, value in self.headers.items()):
+        if len(self.headers) > 64 or any(
+            not key or len(key) > 128 or len(value) > 4096
+            for key, value in self.headers.items()
+        ):
             raise BusViolation("headers exceed the bounded wire contract")
 
     def to_wire(self) -> dict[str, object]:
-        return {"subject": self.subject, "id": str(self.id), "digest": str(self.digest), "headers": dict(self.headers), "scope": self.scope.to_wire(), "trace": self.trace.to_wire()}
+        return {
+            "subject": self.subject,
+            "id": str(self.id),
+            "digest": str(self.digest),
+            "headers": dict(self.headers),
+            "scope": self.scope.to_wire(),
+            "trace": self.trace.to_wire(),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +73,9 @@ class PropertyClassification:
 
 def deterministic_classifications() -> dict[BackendProperty, PropertyClassification]:
     reason = "requires a provisioned NATS server boundary"
-    return {property: PropertyClassification(False, reason) for property in BackendProperty}
+    return {
+        property: PropertyClassification(False, reason) for property in BackendProperty
+    }
 
 
 @dataclass(slots=True)
@@ -112,7 +124,9 @@ class MemoryBusLimits:
             )
 
 
-def _execute_once(endpoint: MemoryEndpoint, request: BoundMemoryRequest) -> MemoryResponse:
+def _execute_once(
+    endpoint: MemoryEndpoint, request: BoundMemoryRequest
+) -> MemoryResponse:
     if request.request.operation.mutates:
         acknowledged = endpoint.acknowledged(request)
         if acknowledged is not None:
@@ -126,7 +140,9 @@ def dispatch_memory_in_process(
     authenticated_scope: Scope,
     request: MemoryRequest,
 ) -> MemoryResponse:
-    bound = bind_authenticated_request(principal, authenticated_scope, request.envelope())
+    bound = bind_authenticated_request(
+        principal, authenticated_scope, request.envelope()
+    )
     return _execute_once(endpoint, bound)
 
 
@@ -211,8 +227,6 @@ class AuthenticatedMemoryBus:
                 raise MemoryTransportViolation(
                     "MEMORY_BUS_DISCONNECTED", "the memory bus is disconnected"
                 )
-        batch = self._endpoint.resume(
-            self._authenticated_scope, after, maximum_events
-        )
+        batch = self._endpoint.resume(self._authenticated_scope, after, maximum_events)
         batch.validate(maximum_events)
         return batch

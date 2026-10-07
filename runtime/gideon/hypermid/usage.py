@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Literal, Protocol
 
 from gideon.hypermid.budgets import ActualUsage
 from gideon.operations.usage_ledger import EventAccounting, UsageJournal
-
 
 UsageOutcome = Literal["no_call", "measured", "partial", "unknown"]
 
@@ -75,7 +74,9 @@ class UsageReconciliationEvent:
 
 
 class UsageAccountingConsumer:
-    def __init__(self, budget_ledger: BudgetLedgerProtocol, usage_journal: UsageJournal):
+    def __init__(
+        self, budget_ledger: BudgetLedgerProtocol, usage_journal: UsageJournal
+    ):
         self._budgets = budget_ledger
         self._journal = usage_journal
 
@@ -266,14 +267,20 @@ def _event_cost_nanodollars(event: object) -> int | None:
     metadata = metadata if isinstance(metadata, dict) else {}
     reported = metadata.get("usage_reported")
     raw_cost = getattr(event, "cost_usd", None)
-    if reported is not True or isinstance(raw_cost, bool) or not isinstance(raw_cost, (int, float)):
+    if (
+        reported is not True
+        or isinstance(raw_cost, bool)
+        or not isinstance(raw_cost, (int, float))
+    ):
         return None
-    from decimal import Decimal, ROUND_HALF_EVEN
+    from decimal import ROUND_HALF_EVEN, Decimal
 
     value = Decimal(str(raw_cost))
     if not value.is_finite() or value < 0:
         raise ValueError("provider-reported cost must be finite and non-negative")
-    return int((value * Decimal(1_000_000_000)).quantize(Decimal(1), rounding=ROUND_HALF_EVEN))
+    return int(
+        (value * Decimal(1_000_000_000)).quantize(Decimal(1), rounding=ROUND_HALF_EVEN)
+    )
 
 
 __all__ = [

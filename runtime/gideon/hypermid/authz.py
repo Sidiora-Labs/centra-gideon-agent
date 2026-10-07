@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TypeVar
 
-
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$")
 _T = TypeVar("_T")
 
@@ -82,7 +81,9 @@ class CapabilityGrant:
         ):
             raise ValueError("invalid capability identifier")
         if not self.operations or not self.resources:
-            raise ValueError("capability grants must enumerate operations and resources")
+            raise ValueError(
+                "capability grants must enumerate operations and resources"
+            )
         if any(not _ID.fullmatch(resource) for resource in self.resources):
             raise ValueError("invalid resource identifier")
         if self.expires_at_ms < 0:
@@ -170,8 +171,7 @@ class AuthorizationLedger:
         self._connection = connection
         self._lock = threading.RLock()
         self._connection.execute("PRAGMA foreign_keys = ON")
-        self._connection.executescript(
-            """
+        self._connection.executescript("""
             CREATE TABLE IF NOT EXISTS hypermid_capabilities (
                 capability_id TEXT PRIMARY KEY,
                 issuer_owner_id TEXT NOT NULL,
@@ -194,8 +194,7 @@ class AuthorizationLedger:
             );
             INSERT OR IGNORE INTO hypermid_authorization_cursor(singleton, sequence)
             VALUES (1, 0);
-            """
-        )
+            """)
 
     @property
     def cursor(self) -> int:
@@ -269,9 +268,7 @@ class AuthorizationLedger:
             self._connection.commit()
             return revision
 
-    def revoke(
-        self, issuer: AuthenticatedPrincipal, capability_id: str
-    ) -> bool:
+    def revoke(self, issuer: AuthenticatedPrincipal, capability_id: str) -> bool:
         with self._lock:
             if issuer.kind is not PrincipalKind.FOREGROUND:
                 raise AuthorizationDenied()
@@ -310,9 +307,7 @@ class AuthorizationLedger:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
             try:
-                grant, revision = self._load_live(
-                    current_context.capability_id
-                )
+                grant, revision = self._load_live(current_context.capability_id)
                 if revision != authorization.revision:
                     raise AuthorizationDenied()
                 prior = authorization.context
@@ -324,8 +319,7 @@ class AuthorizationLedger:
                     or prior.request.target_scope
                     != current_context.request.target_scope
                     or prior.request.operation != current_context.request.operation
-                    or prior.request.resource_id
-                    != current_context.request.resource_id
+                    or prior.request.resource_id != current_context.request.resource_id
                     or current_context.request.now_ms < prior.request.now_ms
                 ):
                     raise AuthorizationDenied()
@@ -337,12 +331,10 @@ class AuthorizationLedger:
                 if not current_context.request.operation.mutates:
                     raise AuthorizationDenied()
                 result = mutation(self._connection)
-                self._connection.execute(
-                    """
+                self._connection.execute("""
                     UPDATE hypermid_authorization_cursor
                     SET sequence = sequence + 1 WHERE singleton = 1
-                    """
-                )
+                    """)
                 self._connection.execute("COMMIT")
                 return result
             except BaseException:

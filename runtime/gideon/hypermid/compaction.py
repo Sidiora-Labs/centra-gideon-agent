@@ -4,14 +4,13 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Mapping
 
 from .foundation import ContractViolation, Cursor, Error, Id
-
 
 ROLE_VERSION = "hypermid.compaction/v1"
 OPERATIONS = ("describe", "ready", "setup", "step")
@@ -43,9 +42,17 @@ class MessageDelta:
         if not isinstance(messages, list):
             raise CompactionViolation("delta messages must be an array")
         instance = cls(
-            after=Cursor.from_wire(value["after"]) if value.get("after") is not None else None,
+            after=(
+                Cursor.from_wire(value["after"])
+                if value.get("after") is not None
+                else None
+            ),
             messages=tuple(_mapping(item, "delta message") for item in messages),
-            next=Cursor.from_wire(value["next"]) if value.get("next") is not None else None,
+            next=(
+                Cursor.from_wire(value["next"])
+                if value.get("next") is not None
+                else None
+            ),
             byte_cap=_integer(value["byte_cap"], "byte_cap", 1, MAX_DELTA_BYTES),
             delivered_bytes=_integer(
                 value["delivered_bytes"], "delivered_bytes", 0, MAX_DELTA_BYTES
@@ -74,7 +81,9 @@ class MessageDelta:
             message_ids.add(message_id)
             previous = cursor
         if self.next != previous:
-            raise CompactionViolation("delta cursor must stop at the last delivered message")
+            raise CompactionViolation(
+                "delta cursor must stop at the last delivered message"
+            )
         encoded = json.dumps(
             list(self.messages), separators=(",", ":"), sort_keys=True
         ).encode("utf-8")
@@ -182,7 +191,10 @@ class CompactionProvider:
         request = StepRequest.from_wire(params)
         state = self._state.read()
         sessions = state.get("sessions")
-        if not isinstance(sessions, dict) or str(request.session_handle) not in sessions:
+        if (
+            not isinstance(sessions, dict)
+            or str(request.session_handle) not in sessions
+        ):
             raise CompactionViolation("step references an unknown setup session")
         state["newest_request_id"] = str(request.request_id)
         state["deadline_ms"] = request.deadline_ms
@@ -253,8 +265,15 @@ def _serve(state_root: Path, crash_at: str | None) -> None:
         request_id = "unknown-request"
         try:
             envelope = _mapping(json.loads(line), "request envelope")
-            _keys(envelope, {"protocol", "role_version", "method", "params", "trace"}, {"scope"})
-            if envelope["protocol"] != "hypermid.v1" or envelope["role_version"] != ROLE_VERSION:
+            _keys(
+                envelope,
+                {"protocol", "role_version", "method", "params", "trace"},
+                {"scope"},
+            )
+            if (
+                envelope["protocol"] != "hypermid.v1"
+                or envelope["role_version"] != ROLE_VERSION
+            ):
                 raise CompactionViolation("incompatible compaction protocol")
             trace = _mapping(envelope["trace"], "trace")
             request_id = str(Id(trace.get("request_id")))
@@ -272,7 +291,9 @@ def _serve(state_root: Path, crash_at: str | None) -> None:
 
 
 def _startup_crash_point(state_root: Path, name: str) -> None:
-    if not name or any(character not in "abcdefghijklmnopqrstuvwxyz0123456789._-" for character in name):
+    if not name or any(
+        character not in "abcdefghijklmnopqrstuvwxyz0123456789._-" for character in name
+    ):
         raise CompactionViolation("crash point name is invalid")
     points = state_root / "points"
     points.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -324,9 +345,9 @@ def _boolean(value: Any, label: str) -> bool:
 
 
 def _canonical_json(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
-        "utf-8"
-    )
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:

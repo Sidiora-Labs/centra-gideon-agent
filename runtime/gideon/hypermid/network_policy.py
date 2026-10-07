@@ -6,7 +6,6 @@ import secrets
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping, TypeVar
 
-
 EGRESS_DENIED = "HYPERMID_EGRESS_DENIED"
 SECRET_DENIED = "HYPERMID_SECRET_DENIED"
 REDACTED = "[redacted]"
@@ -92,7 +91,11 @@ class Destination:
 
     @classmethod
     def normalized(cls, scheme: str, hostname: str, port: int) -> Destination:
-        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        if (
+            isinstance(port, bool)
+            or not isinstance(port, int)
+            or not 1 <= port <= 65535
+        ):
             raise EgressDenied("destination.invalid")
         return cls(normalize_scheme(scheme), normalize_hostname(hostname), port)
 
@@ -160,7 +163,9 @@ class NetworkGrant:
             or normalize_scheme(self.scheme) != self.scheme
             or normalize_hostname(self.hostname) != self.hostname
             or not self.ports
-            or any(isinstance(port, bool) or not 1 <= port <= 65535 for port in self.ports)
+            or any(
+                isinstance(port, bool) or not 1 <= port <= 65535 for port in self.ports
+            )
             or not self.address_classes
             or isinstance(self.redirect_limit, bool)
             or not 0 <= self.redirect_limit <= 255
@@ -301,7 +306,10 @@ def address_class(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> str
         return "link_local"
     if address.is_multicast:
         return "multicast"
-    if any(address.version == network.version and address in network for network in _RESERVED_NETWORKS):
+    if any(
+        address.version == network.version and address in network
+        for network in _RESERVED_NETWORKS
+    ):
         return "reserved"
     if address.is_private:
         return "private"
@@ -363,9 +371,7 @@ class Redactor:
     def redact(self, value: Any) -> Any:
         if isinstance(value, Mapping):
             return {
-                key: REDACTED
-                if _sensitive_field(str(key))
-                else self.redact(item)
+                key: REDACTED if _sensitive_field(str(key)) else self.redact(item)
                 for key, item in value.items()
             }
         if isinstance(value, list):

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-
 _FIELDS = (
     "items",
     "input_tokens",
@@ -74,7 +73,9 @@ class ModelBudget:
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> ModelBudget:
-        return cls(**{name: _uint(value.get(name), name) for name in cls.__dataclass_fields__})
+        return cls(
+            **{name: _uint(value.get(name), name) for name in cls.__dataclass_fields__}
+        )
 
 
 @dataclass(frozen=True, slots=True)

@@ -310,9 +310,7 @@ class WriterCoordinator:
         self._lock = asyncio.Lock()
         self._highest_fence_epoch = 1
         self._pending: _PendingOperation | None = None
-        self._snapshot = WriterSnapshot(
-            mode, "gideon", "none", None, authority_epoch=1
-        )
+        self._snapshot = WriterSnapshot(mode, "gideon", "none", None, authority_epoch=1)
 
     def snapshot(self) -> WriterSnapshot:
         return self._snapshot
@@ -327,7 +325,9 @@ class WriterCoordinator:
             self._highest_fence_epoch = status.authority_epoch
             if status.authority == "gideon":
                 if status.active_lease is not None:
-                    raise RuntimeError("Gideon writer status unexpectedly contains a lease")
+                    raise RuntimeError(
+                        "Gideon writer status unexpectedly contains a lease"
+                    )
                 self._snapshot = WriterSnapshot(
                     self.mode,
                     "gideon",
@@ -363,24 +363,21 @@ class WriterCoordinator:
 
         status = await self.authority.status(scope=self.scope)
         snapshot = self._snapshot
-        matches = (
-            status.scope == self.scope
-            and (
-                (
-                    snapshot.owns_writes
-                    and status.authority == "hypermid"
-                    and status.active_lease == snapshot.lease
-                    and status.authority_epoch == snapshot.authority_epoch
-                )
-                or (
-                    snapshot.writer == "gideon"
-                    and snapshot.lease_state == "none"
-                    and status.authority == "gideon"
-                    and status.active_lease is None
-                    and status.authority_epoch == snapshot.authority_epoch
-                )
-                or snapshot.lease_state in {"unknown", "recovering", "releasing"}
+        matches = status.scope == self.scope and (
+            (
+                snapshot.owns_writes
+                and status.authority == "hypermid"
+                and status.active_lease == snapshot.lease
+                and status.authority_epoch == snapshot.authority_epoch
             )
+            or (
+                snapshot.writer == "gideon"
+                and snapshot.lease_state == "none"
+                and status.authority == "gideon"
+                and status.active_lease is None
+                and status.authority_epoch == snapshot.authority_epoch
+            )
+            or snapshot.lease_state in {"unknown", "recovering", "releasing"}
         )
         if not matches:
             self._snapshot = WriterSnapshot(
@@ -422,7 +419,10 @@ class WriterCoordinator:
             except BaseException:
                 await self.hooks.resume_gideon()
                 raise
-            if lease.scope != self.scope or lease.fence_epoch <= self._highest_fence_epoch:
+            if (
+                lease.scope != self.scope
+                or lease.fence_epoch <= self._highest_fence_epoch
+            ):
                 raise RuntimeError("writer authority returned a stale or foreign lease")
             return await self._commit_cutover(receipt, lease)
 
@@ -532,7 +532,9 @@ class WriterCoordinator:
             or receipt.lease.cursor != receipt.cursor
             or receipt.journal_digest != barrier_receipt.barrier.after_digest
         ):
-            raise RuntimeError("writer cutover receipt does not match the prepared barrier")
+            raise RuntimeError(
+                "writer cutover receipt does not match the prepared barrier"
+            )
 
     def _validate_restore(
         self,
@@ -572,8 +574,13 @@ class WriterCoordinator:
                     )
                     return self._snapshot
                 if not isinstance(effect, ScopedWriterLease):
-                    raise RuntimeError("writer acquire reconciliation returned wrong effect")
-                if effect.scope != self.scope or effect.fence_epoch <= self._highest_fence_epoch:
+                    raise RuntimeError(
+                        "writer acquire reconciliation returned wrong effect"
+                    )
+                if (
+                    effect.scope != self.scope
+                    or effect.fence_epoch <= self._highest_fence_epoch
+                ):
                     raise RuntimeError("reconciled writer lease is stale or foreign")
                 return await self._commit_cutover(pending.receipt, effect)
             if pending.kind == "cutover":
@@ -584,8 +591,12 @@ class WriterCoordinator:
                     await self._restore_pending_lease(pending.receipt, lease)
                     return self._snapshot
                 if not isinstance(effect, CutoverReceipt):
-                    raise RuntimeError("writer cutover reconciliation returned wrong effect")
-                self._validate_cutover(effect, pending.request_id, pending.receipt, lease)
+                    raise RuntimeError(
+                        "writer cutover reconciliation returned wrong effect"
+                    )
+                self._validate_cutover(
+                    effect, pending.request_id, pending.receipt, lease
+                )
                 await self.hooks.validate(pending.receipt)
                 await self.hooks.install(effect.lease)
                 await self.hooks.resume_primary()
@@ -612,10 +623,10 @@ class WriterCoordinator:
             elif isinstance(effect, GideonRestoreReceipt):
                 restored = effect
             else:
-                raise RuntimeError("writer restore reconciliation returned wrong effect")
-            self._validate_restore(
-                restored, pending.request_id, pending.receipt, lease
-            )
+                raise RuntimeError(
+                    "writer restore reconciliation returned wrong effect"
+                )
+            self._validate_restore(restored, pending.request_id, pending.receipt, lease)
             await self.hooks.uninstall()
             await self.hooks.resume_gideon()
             self._highest_fence_epoch = restored.gideon_epoch
@@ -645,7 +656,9 @@ class WriterCoordinator:
                 await self._restore_pending_lease(receipt, lease)
                 return self._snapshot
             elif self._snapshot.lease_state == "unknown":
-                raise RuntimeError("unknown writer outcome must be reconciled before fallback")
+                raise RuntimeError(
+                    "unknown writer outcome must be reconciled before fallback"
+                )
             await self.hooks.resume_gideon()
             self._snapshot = WriterSnapshot(
                 self.mode,

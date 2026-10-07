@@ -54,8 +54,12 @@ def _identity(repository: Path) -> str:
     return hashlib.sha256(str(canonical_common).encode("utf-8")).hexdigest()
 
 
-def _resolve_refs(repository: Path, refs: tuple[str, ...]) -> tuple[tuple[str, ...], str]:
-    resolved = tuple(_git(repository, "rev-parse", "--verify", ref).strip() for ref in refs)
+def _resolve_refs(
+    repository: Path, refs: tuple[str, ...]
+) -> tuple[tuple[str, ...], str]:
+    resolved = tuple(
+        _git(repository, "rev-parse", "--verify", ref).strip() for ref in refs
+    )
     digest = hashlib.sha256("\n".join(resolved).encode("ascii")).hexdigest()
     return resolved, digest
 
@@ -72,7 +76,11 @@ def scan_repository(
     repository = Path(repository).resolve(strict=True)
     identity = _identity(repository)
     resolved, refs_digest = _resolve_refs(repository, refs)
-    arguments = ["log", f"--max-count={max_commits}", "--format=%H%x1f%P%x1f%ct%x1f%B%x1e"]
+    arguments = [
+        "log",
+        f"--max-count={max_commits}",
+        "--format=%H%x1f%P%x1f%ct%x1f%B%x1e",
+    ]
     if skip_merges:
         arguments.append("--no-merges")
     arguments.extend(resolved)

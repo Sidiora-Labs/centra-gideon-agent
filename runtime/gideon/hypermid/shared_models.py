@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, replace
-from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN
-from enum import Enum
 import fcntl
 import json
 import os
-from pathlib import Path
 import tempfile
+from dataclasses import dataclass, field, replace
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation
+from enum import Enum
+from pathlib import Path
 from typing import Any, Mapping
 
 from gideon.hypermid.foundation import Id
@@ -60,7 +60,9 @@ class CacheState:
             reconciliation_pending=False,
         )
 
-    def defer(self, expected_version: int, *, boundary_present: bool) -> tuple[CacheState, bytes | None]:
+    def defer(
+        self, expected_version: int, *, boundary_present: bool
+    ) -> tuple[CacheState, bytes | None]:
         self._check(expected_version)
         if self.frozen is None:
             return replace(self, version=self.version + 1), None
@@ -126,13 +128,13 @@ class CacheState:
                 raise ValueError("frozen cache pass must be an object")
             rendered = frozen_value.get("rendered")
             if not isinstance(rendered, list) or any(
-                isinstance(item, bool) or not isinstance(item, int) or not 0 <= item <= 255
+                isinstance(item, bool)
+                or not isinstance(item, int)
+                or not 0 <= item <= 255
                 for item in rendered
             ):
                 raise ValueError("frozen rendered bytes are invalid")
-            frozen = FrozenPass(
-                Id(frozen_value.get("boundary_id")), bytes(rendered)
-            )
+            frozen = FrozenPass(Id(frozen_value.get("boundary_id")), bytes(rendered))
         return cls(
             version=_nonnegative_int(value.get("version"), "version"),
             durability=Durability(value.get("durability")),
@@ -159,9 +161,7 @@ class FileCacheStore:
             raise ValueError("cache document must be an object")
         return CacheState.from_wire(value)
 
-    def compare_and_swap(
-        self, expected_version: int | None, state: CacheState
-    ) -> None:
+    def compare_and_swap(self, expected_version: int | None, state: CacheState) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         lock_path = self.path.with_suffix(self.path.suffix + ".lock")
         descriptor = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
@@ -182,7 +182,9 @@ class FileCacheStore:
                 )
                 try:
                     os.fchmod(temporary_descriptor, 0o600)
-                    with os.fdopen(temporary_descriptor, "w", encoding="utf-8") as output:
+                    with os.fdopen(
+                        temporary_descriptor, "w", encoding="utf-8"
+                    ) as output:
                         output.write(encoded + "\n")
                         output.flush()
                         os.fsync(output.fileno())
@@ -316,7 +318,11 @@ class Money:
     def __post_init__(self) -> None:
         if not 0 <= self.exponent <= 18:
             raise ValueError("money exponent is outside the supported range")
-        if len(self.currency) != 3 or not self.currency.isascii() or not self.currency.isupper():
+        if (
+            len(self.currency) != 3
+            or not self.currency.isascii()
+            or not self.currency.isupper()
+        ):
             raise ValueError("currency must be three uppercase ASCII letters")
 
 
@@ -334,7 +340,10 @@ class UsageWindow:
             raise ValueError("usage window kind is invalid")
         if (self.kind == "per_model") != (self.model_id is not None):
             raise ValueError("only per-model windows carry model_id")
-        for value in (self.raw_percent_basis_points, self.effective_percent_basis_points):
+        for value in (
+            self.raw_percent_basis_points,
+            self.effective_percent_basis_points,
+        ):
             if value is not None and not 0 <= value <= 10_000:
                 raise ValueError("usage percentage exceeds 100 percent")
 
@@ -384,7 +393,9 @@ class ProviderUsage:
         windows = value.get("windows", [])
         breakdowns = value.get("breakdowns", [])
         balances = value.get("balances", [])
-        if not all(isinstance(items, list) for items in (windows, breakdowns, balances)):
+        if not all(
+            isinstance(items, list) for items in (windows, breakdowns, balances)
+        ):
             raise ValueError("usage collections must be arrays")
         account = value.get("account")
         credits = value.get("saved_credits")
@@ -396,8 +407,12 @@ class ProviderUsage:
             saved_credits=_money(credits) if credits is not None else None,
             account=(
                 AccountIdentity(
-                    label=_text(_object(account, "account").get("label"), "account label"),
-                    subject=_text(_object(account, "account").get("subject"), "account subject"),
+                    label=_text(
+                        _object(account, "account").get("label"), "account label"
+                    ),
+                    subject=_text(
+                        _object(account, "account").get("subject"), "account subject"
+                    ),
                     provenance=_text(
                         _object(account, "account").get("provenance"),
                         "account provenance",
@@ -406,7 +421,9 @@ class ProviderUsage:
                 if account is not None
                 else None
             ),
-            observed_at_ms=_nonnegative_int(value.get("observed_at_ms"), "observed_at_ms"),
+            observed_at_ms=_nonnegative_int(
+                value.get("observed_at_ms"), "observed_at_ms"
+            ),
             stale_after_ms=(
                 _nonnegative_int(value.get("stale_after_ms"), "stale_after_ms")
                 if value.get("stale_after_ms") is not None

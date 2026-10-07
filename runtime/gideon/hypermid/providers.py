@@ -45,7 +45,11 @@ class EmbeddingProviderAuthority(Protocol):
 
 def _failure(code: str, trace: Trace, *, retryable: bool) -> EmbeddingProviderFailure:
     return EmbeddingProviderFailure(
-        Error(code=code, message="Embedding provider request was not completed.", retryable=retryable),
+        Error(
+            code=code,
+            message="Embedding provider request was not completed.",
+            retryable=retryable,
+        ),
         trace,
     )
 
@@ -107,7 +111,9 @@ class GideonEmbeddingProviderAuthority:
         )
 
     @staticmethod
-    def _classified_failure(exc: BaseException, trace: Trace) -> EmbeddingProviderFailure:
+    def _classified_failure(
+        exc: BaseException, trace: Trace
+    ) -> EmbeddingProviderFailure:
         name = type(exc).__name__.lower()
         if "credential" in name or "authentication" in name:
             return _failure("EMBEDDING_CREDENTIAL_MISSING", trace, retryable=False)

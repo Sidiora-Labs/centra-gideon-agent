@@ -12,7 +12,7 @@ import asyncio
 import hashlib
 import json
 import math
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 

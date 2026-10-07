@@ -4,15 +4,14 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 import time
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Any, Mapping
 
 from .foundation import ContractViolation, Error, Id, Scope, Trace
-
 
 ROLE_VERSION = "hypermid.transform/v1"
 OPERATIONS = ("declare", "describe", "hook")
@@ -60,12 +59,16 @@ class TransformSubscription:
 
     def __post_init__(self) -> None:
         if not 1 <= self.budget_ms <= MAX_BUDGET_MS or not self.ops:
-            raise TransformViolation("subscription budget and operations must be bounded")
+            raise TransformViolation(
+                "subscription budget and operations must be bounded"
+            )
         if self.hook is Hook.PRE_TOOL:
             if self.phase is None:
                 raise TransformViolation("pre-tool subscription requires a phase")
         elif self.phase is not None or self.tools:
-            raise TransformViolation("phase and tool filter are only legal for pre-tool")
+            raise TransformViolation(
+                "phase and tool filter are only legal for pre-tool"
+            )
 
     @classmethod
     def from_wire(cls, value: Mapping[str, Any]) -> TransformSubscription:
@@ -194,7 +197,9 @@ class TransformProvider:
         suffix = configuration.get("suffix", "")
         if not isinstance(suffix, str) or len(suffix.encode("utf-8")) > 4096:
             raise TransformViolation("configured suffix is invalid")
-        declaration_id = f"trf-{hashlib.sha256(_canonical_json(params)).hexdigest()[:24]}"
+        declaration_id = (
+            f"trf-{hashlib.sha256(_canonical_json(params)).hexdigest()[:24]}"
+        )
         declaration = {
             "declaration_id": declaration_id,
             "pure": True,
@@ -288,8 +293,15 @@ def _serve(state_root: Path, crash_at: str | None) -> None:
         request_id = "unknown-request"
         try:
             envelope = _mapping(json.loads(line), "request envelope")
-            _keys(envelope, {"protocol", "role_version", "method", "params", "trace"}, {"scope"})
-            if envelope["protocol"] != "hypermid.v1" or envelope["role_version"] != ROLE_VERSION:
+            _keys(
+                envelope,
+                {"protocol", "role_version", "method", "params", "trace"},
+                {"scope"},
+            )
+            if (
+                envelope["protocol"] != "hypermid.v1"
+                or envelope["role_version"] != ROLE_VERSION
+            ):
                 raise TransformViolation("incompatible transform protocol")
             trace = _mapping(envelope["trace"], "trace")
             request_id = str(Id(trace.get("request_id")))
@@ -307,7 +319,9 @@ def _serve(state_root: Path, crash_at: str | None) -> None:
 
 
 def _startup_crash_point(state_root: Path, name: str) -> None:
-    if not name or any(character not in "abcdefghijklmnopqrstuvwxyz0123456789._-" for character in name):
+    if not name or any(
+        character not in "abcdefghijklmnopqrstuvwxyz0123456789._-" for character in name
+    ):
         raise TransformViolation("crash point name is invalid")
     points = state_root / "points"
     points.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -353,9 +367,9 @@ def _integer(value: Any, label: str, minimum: int, maximum: int | None = None) -
 
 
 def _canonical_json(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
-        "utf-8"
-    )
+    return json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:

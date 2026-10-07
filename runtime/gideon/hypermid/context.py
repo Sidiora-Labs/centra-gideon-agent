@@ -17,7 +17,6 @@ from gideon.cognition.history import (
 
 from .foundation import Cursor, Digest, Id, Scope
 from .history import (
-    ContextItem,
     ContextPart,
     HistoryJournal,
     JournalRange,
@@ -79,9 +78,7 @@ class ContextSyncReceipt:
 class ConversationLogSourceAdapter:
     """Resolve HistoryJournal references from the sole transcript authority."""
 
-    def __init__(
-        self, log: ConversationLog, *, scope: Scope, session_key: str
-    ) -> None:
+    def __init__(self, log: ConversationLog, *, scope: Scope, session_key: str) -> None:
         self.log = log
         self.scope = scope
         self.session_key = session_key
@@ -123,7 +120,11 @@ class ConversationContextBridge:
         meta = meta if isinstance(meta, dict) else {}
         raw_call_id = meta.get("tool_call_id")
         parts: tuple[ContextPart, ...]
-        if event.message.get("role") == "tool" and isinstance(raw_call_id, str) and raw_call_id:
+        if (
+            event.message.get("role") == "tool"
+            and isinstance(raw_call_id, str)
+            and raw_call_id
+        ):
             call_id = _stable_id("call", raw_call_id)
             arguments_json = _json_text(meta.get("input", ""))
             tool_call = ContextPart(
@@ -176,7 +177,11 @@ class ConversationContextBridge:
 
     def sync_session(self, session_key: str) -> ContextSyncReceipt:
         before = self.log.flush_for_hypermid((session_key,))
-        checkpoint = before[0] if before else ConversationCheckpoint(session_key, Digest.sha256(b""), 0)
+        checkpoint = (
+            before[0]
+            if before
+            else ConversationCheckpoint(session_key, Digest.sha256(b""), 0)
+        )
         journal = self.journal(session_key)
         committed = {
             str(item.source_event_id): str(item.source_digest)

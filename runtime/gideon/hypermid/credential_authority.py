@@ -7,7 +7,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Protocol, TypeVar
+from typing import Protocol, TypeVar
 
 from .foundation import Id, Scope
 from .memory_client import MemoryClient

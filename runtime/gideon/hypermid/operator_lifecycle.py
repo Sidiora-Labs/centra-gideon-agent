@@ -8,7 +8,11 @@ from pathlib import Path
 from typing import Literal, Mapping
 
 from .client import HypermidClient
-from .enrollment_provisioning import EnrollmentReceipt, StagedEnrollment, stage_enrollment
+from .enrollment_provisioning import (
+    EnrollmentReceipt,
+    StagedEnrollment,
+    stage_enrollment,
+)
 from .models import Cursor, JsonValue, Scope
 from .operations import (
     ActionPlan,
@@ -127,7 +131,11 @@ class LifecyclePlan:
             raise OperatorContractError("lifecycle inventory must be an object")
         parsed_inventory: dict[str, tuple[str, ...]] = {}
         for key, items in inventory.items():
-            if not isinstance(key, str) or not isinstance(items, list) or len(items) > 4096:
+            if (
+                not isinstance(key, str)
+                or not isinstance(items, list)
+                or len(items) > 4096
+            ):
                 raise OperatorContractError("lifecycle inventory is invalid")
             parsed_inventory[key] = tuple(
                 _text(item, "inventory item", 4096) for item in items
@@ -138,9 +146,13 @@ class LifecyclePlan:
             raise OperatorContractError("export exclusions must be an array of strings")
 
         if action in ("install", "update") and target_version is None:
-            raise OperatorContractError("install and update plans require target_version")
+            raise OperatorContractError(
+                "install and update plans require target_version"
+            )
         if action == "update" and rollback_digest is None:
-            raise OperatorContractError("update plan requires verified rollback material")
+            raise OperatorContractError(
+                "update plan requires verified rollback material"
+            )
         if action == "uninstall" and (
             disposition is None
             or "runtime" not in parsed_inventory
@@ -229,7 +241,9 @@ class RecoveredLifecycle:
             "outcome_unknown",
         ):
             raise OperatorContractError("lifecycle recovery state is invalid")
-        return cls(LifecycleReceipt.from_wire(raw.get("receipt"), expected_scope), state)
+        return cls(
+            LifecycleReceipt.from_wire(raw.get("receipt"), expected_scope), state
+        )
 
 
 class HypermidOperatorLifecycle:
@@ -283,7 +297,9 @@ class HypermidOperatorLifecycle:
             if plan.data_disposition == "purge" and not confirm_purge:
                 raise ValueError("data purge requires a distinct confirmation")
             if plan.data_disposition != "purge" and confirm_purge:
-                raise ValueError("retain/export plans cannot be upgraded to purge at apply")
+                raise ValueError(
+                    "retain/export plans cannot be upgraded to purge at apply"
+                )
         staged_enrollment: StagedEnrollment | None = None
         if plan.action == "install":
             raw = plan.plan.raw
@@ -355,7 +371,9 @@ class HypermidOperatorLifecycle:
         value = await self.client.request("lifecycle.recover", {"job_id": job_id})
         return RecoveredLifecycle.from_wire(value, self.client.scope)
 
-    async def resume(self, job_id: str, *, after: Cursor | None = None) -> LifecycleReceipt:
+    async def resume(
+        self, job_id: str, *, after: Cursor | None = None
+    ) -> LifecycleReceipt:
         payload: dict[str, JsonValue] = {"job_id": job_id}
         if after is not None:
             payload["after"] = after.to_wire()

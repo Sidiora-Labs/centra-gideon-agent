@@ -127,7 +127,10 @@ class OwnershipFence:
             lease,
             idempotency_key,
             "rebind",
-            {"previous_scope": previous_scope.to_wire(), "next_scope": next_scope.to_wire()},
+            {
+                "previous_scope": previous_scope.to_wire(),
+                "next_scope": next_scope.to_wire(),
+            },
             now_ms=now_ms,
         )
         state = self._sessions[session_id]
@@ -175,7 +178,9 @@ class OwnershipFence:
         self._require_lease(state, lease, now_ms)
         if expected_cursor != state.cursor:
             raise OwnershipError("STALE_CURSOR", "expected cursor is not current")
-        next_cursor = Cursor(epoch=state.cursor.epoch, sequence=state.cursor.sequence + 1)
+        next_cursor = Cursor(
+            epoch=state.cursor.epoch, sequence=state.cursor.sequence + 1
+        )
         outcome = MutationOutcome(
             operation=operation,
             cursor=next_cursor,

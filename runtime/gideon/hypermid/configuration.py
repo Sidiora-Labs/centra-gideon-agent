@@ -27,8 +27,7 @@ def _mapping(value: object, operation: str) -> dict[str, Any]:
 def _contains_secret_field(value: object) -> bool:
     if isinstance(value, Mapping):
         return any(
-            str(key).lower() in _CREDENTIAL_SECRET_KEYS
-            or _contains_secret_field(child)
+            str(key).lower() in _CREDENTIAL_SECRET_KEYS or _contains_secret_field(child)
             for key, child in value.items()
         )
     if isinstance(value, (list, tuple)):
@@ -90,7 +89,9 @@ class HypermidConfigurationService:
                 "status": "staged" if pending is not None else "unchanged",
                 "previous_config_digest": current.config_digest,
                 "next_config_digest": (
-                    pending.next_config_digest if pending is not None else snapshot.config_digest
+                    pending.next_config_digest
+                    if pending is not None
+                    else snapshot.config_digest
                 ),
                 "applies_at": "turn_boundary",
             }
@@ -106,7 +107,11 @@ class HypermidConfigurationService:
         return _mapping(
             await self.client.request(
                 "models.binding.plan",
-                {"duty": duty, "model_id": model_id, "expected_digest": expected_digest},
+                {
+                    "duty": duty,
+                    "model_id": model_id,
+                    "expected_digest": expected_digest,
+                },
             ),
             "models.binding.plan",
         )
@@ -117,7 +122,11 @@ class HypermidConfigurationService:
         return _mapping(
             await self.client.request(
                 "models.binding.set",
-                {"duty": duty, "model_id": model_id, "expected_digest": expected_digest},
+                {
+                    "duty": duty,
+                    "model_id": model_id,
+                    "expected_digest": expected_digest,
+                },
                 effect_kind="durable",
             ),
             "models.binding.set",
@@ -199,7 +208,9 @@ def service_for(state: Any, adapter: Any, root: Path) -> HypermidConfigurationSe
     if isinstance(existing, HypermidConfigurationService):
         return existing
     store = ContextConfigStore(root / "hypermid" / "configuration.sqlite3")
-    store.seed_if_empty(ContextConfig(mode=ContextMode(getattr(adapter, "mode", "off"))))
+    store.seed_if_empty(
+        ContextConfig(mode=ContextMode(getattr(adapter, "mode", "off")))
+    )
     service = HypermidConfigurationService(adapter, store)
     state._hypermid_configuration_service = service
     return service

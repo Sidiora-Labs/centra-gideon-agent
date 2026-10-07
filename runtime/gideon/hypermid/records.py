@@ -8,7 +8,6 @@ from typing import Any, Mapping
 
 from .protocol import Cursor, Scope, Trace, _require_digest, _require_id
 
-
 MAX_CONTENT_BYTES = 262_144
 MAX_CATEGORY_BYTES = 128
 
@@ -132,10 +131,13 @@ class SourceSnapshot:
             and content_digest(self.captured_content) != self.source_digest
         ):
             raise MemoryContractError(
-                "SOURCE_DIGEST_MISMATCH", "captured source bytes do not match source_digest"
+                "SOURCE_DIGEST_MISMATCH",
+                "captured source bytes do not match source_digest",
             )
 
-    def recover(self, span_start: int | None = None, span_end: int | None = None) -> str:
+    def recover(
+        self, span_start: int | None = None, span_end: int | None = None
+    ) -> str:
         if self.captured_content is None:
             raise MemoryContractError(
                 "SOURCE_CONTENT_UNAVAILABLE", "source has only an external reference"
@@ -143,10 +145,14 @@ class SourceSnapshot:
         if span_start is None and span_end is None:
             return self.captured_content
         if span_start is None or span_end is None:
-            raise MemoryContractError("INVALID_SOURCE_SPAN", "source span is incomplete")
+            raise MemoryContractError(
+                "INVALID_SOURCE_SPAN", "source span is incomplete"
+            )
         raw = self.captured_content.encode("utf-8")
         if span_start < 0 or span_end < span_start or span_end > len(raw):
-            raise MemoryContractError("INVALID_SOURCE_SPAN", "source span is outside content")
+            raise MemoryContractError(
+                "INVALID_SOURCE_SPAN", "source span is outside content"
+            )
         try:
             return raw[span_start:span_end].decode("utf-8")
         except UnicodeDecodeError as exc:
@@ -165,9 +171,13 @@ class ProvenanceSpan:
     def __post_init__(self) -> None:
         _require_id(self.source_id, "source_id")
         if (self.span_start is None) != (self.span_end is None):
-            raise MemoryContractError("INVALID_SOURCE_SPAN", "source span is incomplete")
+            raise MemoryContractError(
+                "INVALID_SOURCE_SPAN", "source span is incomplete"
+            )
         if self.span_start is not None and (
-            self.span_start < 0 or self.span_end is None or self.span_end < self.span_start
+            self.span_start < 0
+            or self.span_end is None
+            or self.span_end < self.span_start
         ):
             raise MemoryContractError("INVALID_SOURCE_SPAN", "source span is invalid")
         if self.quoted_digest is not None:
@@ -175,11 +185,17 @@ class ProvenanceSpan:
 
     def recover(self, source: SourceSnapshot) -> str:
         if source.source_id != self.source_id:
-            raise MemoryContractError("SOURCE_MISMATCH", "provenance names another source")
-        recovered = source.recover(self.span_start, self.span_end)
-        if self.quoted_digest is not None and content_digest(recovered) != self.quoted_digest:
             raise MemoryContractError(
-                "QUOTED_DIGEST_MISMATCH", "recovered source span failed its digest guard"
+                "SOURCE_MISMATCH", "provenance names another source"
+            )
+        recovered = source.recover(self.span_start, self.span_end)
+        if (
+            self.quoted_digest is not None
+            and content_digest(recovered) != self.quoted_digest
+        ):
+            raise MemoryContractError(
+                "QUOTED_DIGEST_MISMATCH",
+                "recovered source span failed its digest guard",
             )
         return recovered
 
@@ -216,13 +232,21 @@ class MemoryRevision:
             _require_digest(self.parent_revision_digest, "parent_revision_digest")
         _bounded_text(self.content, "content", MAX_CONTENT_BYTES)
         if content_digest(self.content) != self.content_digest:
-            raise MemoryContractError("CONTENT_DIGEST_MISMATCH", "content digest is stale")
-        if self.revision < 1 or (self.revision > 1) != (self.parent_revision_digest is not None):
-            raise MemoryContractError("INVALID_REVISION", "revision parent is inconsistent")
+            raise MemoryContractError(
+                "CONTENT_DIGEST_MISMATCH", "content digest is stale"
+            )
+        if self.revision < 1 or (self.revision > 1) != (
+            self.parent_revision_digest is not None
+        ):
+            raise MemoryContractError(
+                "INVALID_REVISION", "revision parent is inconsistent"
+            )
         if self.authored_at_ms < 0:
             raise MemoryContractError("INVALID_REVISION", "authored_at_ms is invalid")
         if len(self.provenance) > 128 or len(self.lineage) > 128:
-            raise MemoryContractError("INVALID_REVISION", "revision edges are unbounded")
+            raise MemoryContractError(
+                "INVALID_REVISION", "revision edges are unbounded"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,15 +270,21 @@ class MemoryRecord:
         _require_id(self.record_id, "record_id")
         _bounded_text(self.category, "category", MAX_CATEGORY_BYTES)
         if self.current.record_id != self.record_id:
-            raise MemoryContractError("INVALID_REVISION", "revision belongs to another record")
+            raise MemoryContractError(
+                "INVALID_REVISION", "revision belongs to another record"
+            )
         _probability(self.importance, "importance")
         _probability(self.confidence, "confidence")
         if self.kind is RecordKind.ANCHOR and self.expires_at_ms is not None:
             raise MemoryContractError("IMMUTABLE_ANCHOR", "anchors cannot expire")
         if self.status is RecordStatus.TOMBSTONED and self.deleted_at_ms is None:
-            raise MemoryContractError("INVALID_TOMBSTONE", "tombstone requires deleted_at_ms")
+            raise MemoryContractError(
+                "INVALID_TOMBSTONE", "tombstone requires deleted_at_ms"
+            )
         if self.updated_at_ms < self.created_at_ms:
-            raise MemoryContractError("INVALID_MEMORY", "updated_at_ms predates creation")
+            raise MemoryContractError(
+                "INVALID_MEMORY", "updated_at_ms predates creation"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,7 +314,9 @@ def instruction_shaped(content: str) -> bool:
 
 
 def render_as_untrusted_data(record: MemoryRecord) -> str:
-    label = " instruction-shaped=true" if instruction_shaped(record.current.content) else ""
+    label = (
+        " instruction-shaped=true" if instruction_shaped(record.current.content) else ""
+    )
     return (
         f'<hypermid-memory id="{record.record_id}" kind="{record.kind.value}"'
         f' revision="{record.current.revision_digest}"{label}>'

@@ -11,8 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from .foundation import Id, Scope, Trace
-
+from .foundation import Scope, Trace
 
 ROLE_PROTOCOL = "hypermid.v1"
 MAX_ROLE_LINE_BYTES = 8 * 1024 * 1024
@@ -31,7 +30,11 @@ class RoleMajor:
     stability: str
 
     def to_wire(self) -> dict[str, Any]:
-        return {"version": self.version, "ops": list(self.ops), "stability": self.stability}
+        return {
+            "version": self.version,
+            "ops": list(self.ops),
+            "stability": self.stability,
+        }
 
 
 @dataclass(frozen=True)
@@ -115,10 +118,15 @@ class RoleProcess:
         if len(response_line.encode("utf-8")) > MAX_ROLE_LINE_BYTES:
             raise RoleProtocolError("role response exceeds eight MiB")
         response = json.loads(response_line)
-        if not isinstance(response, dict) or response.get("request_id") != request.trace.request_id:
+        if (
+            not isinstance(response, dict)
+            or response.get("request_id") != request.trace.request_id
+        ):
             raise RoleProtocolError("role response does not match the request")
         if ("result" in response) == ("error" in response):
-            raise RoleProtocolError("role response must contain exactly one terminal outcome")
+            raise RoleProtocolError(
+                "role response must contain exactly one terminal outcome"
+            )
         return response
 
     def kill(self) -> int:
@@ -168,7 +176,9 @@ def structural_schema_digest(schema: Mapping[str, Any]) -> str:
             return [strip(child) for child in value]
         return value
 
-    return hashlib.sha256(_canonical_json(strip(dict(schema))).encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        _canonical_json(strip(dict(schema))).encode("utf-8")
+    ).hexdigest()
 
 
 class LocalRoleModule:
@@ -182,21 +192,29 @@ class LocalRoleModule:
         trace = request.get("trace")
         request_id = trace.get("request_id") if isinstance(trace, dict) else None
         if not isinstance(request_id, str):
-            return self._error("invalid", "INVALID_REQUEST", "trace request_id is required")
+            return self._error(
+                "invalid", "INVALID_REQUEST", "trace request_id is required"
+            )
         if request.get("protocol") != ROLE_PROTOCOL:
-            return self._error(request_id, "UNSUPPORTED_PROTOCOL", "unsupported role protocol")
+            return self._error(
+                request_id, "UNSUPPORTED_PROTOCOL", "unsupported role protocol"
+            )
         role = request.get("role_version")
         method = request.get("method")
         params = request.get("params")
         if not isinstance(params, dict):
-            return self._error(request_id, "INVALID_REQUEST", "params must be an object")
+            return self._error(
+                request_id, "INVALID_REQUEST", "params must be an object"
+            )
         try:
             if role == TOOL_ROLE_V1:
                 result = self._tool(method, params)
             elif role == RUNNER_ROLE_V1:
                 result = self._runner(method, params)
             else:
-                return self._error(request_id, "UNSUPPORTED_ROLE", "unsupported role version")
+                return self._error(
+                    request_id, "UNSUPPORTED_ROLE", "unsupported role version"
+                )
         except RoleProtocolError as exc:
             return self._error(request_id, "ROLE_REFUSED", str(exc))
         return {"request_id": request_id, "result": result}
@@ -218,25 +236,42 @@ class LocalRoleModule:
             "input_schema": schema,
         }
         if method == "describe":
-            return RoleDescriptor("1.0.0", (RoleMajor(TOOL_ROLE_V1, ("describe", "catalog", "call"), "stable"),)).to_wire()
+            return RoleDescriptor(
+                "1.0.0",
+                (RoleMajor(TOOL_ROLE_V1, ("describe", "catalog", "call"), "stable"),),
+            ).to_wire()
         if method == "catalog":
             bound = {
-                "preset": params.get("preset"), "parameters": params.get("parameters", {}),
-                "composition": params.get("composition"), "tools": [entry],
-                "system_text": "Local file tools" if params.get("system_text") == "include" else None,
+                "preset": params.get("preset"),
+                "parameters": params.get("parameters", {}),
+                "composition": params.get("composition"),
+                "tools": [entry],
+                "system_text": (
+                    "Local file tools"
+                    if params.get("system_text") == "include"
+                    else None
+                ),
                 "session_capabilities": ["synchronous"],
             }
             return {
                 "generation": 1,
-                "catalog_digest": hashlib.sha256(_canonical_json(bound).encode()).hexdigest(),
-                "composition_digest": hashlib.sha256(_canonical_json(params.get("composition")).encode()).hexdigest(),
+                "catalog_digest": hashlib.sha256(
+                    _canonical_json(bound).encode()
+                ).hexdigest(),
+                "composition_digest": hashlib.sha256(
+                    _canonical_json(params.get("composition")).encode()
+                ).hexdigest(),
                 "tools": [] if params.get("digest_only") else [entry],
                 "system_text": bound["system_text"],
                 "session_capabilities": ["synchronous"],
             }
         if method == "call":
             pin = params.get("schema_pin")
-            expected = {"tool_name": entry["name"], "schema_digest": entry["schema_digest"], "semantics": 1}
+            expected = {
+                "tool_name": entry["name"],
+                "schema_digest": entry["schema_digest"],
+                "semantics": 1,
+            }
             if pin != expected:
                 raise RoleProtocolError("schema pin is stale or incompatible")
             arguments = params.get("arguments")
@@ -244,15 +279,34 @@ class LocalRoleModule:
             if not isinstance(path, str):
                 raise RoleProtocolError("path is required")
             data = Path(path).read_bytes()
-            return {"kind": "final", "result": {"sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}}
+            return {
+                "kind": "final",
+                "result": {
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                    "bytes": len(data),
+                },
+            }
         raise RoleProtocolError("unsupported tool operation")
 
     def _runner(self, method: Any, params: Mapping[str, Any]) -> Any:
         state = self._load_state()
         if method == "describe":
             return {
-                **RoleDescriptor("1.0.0", (RoleMajor(RUNNER_ROLE_V1, ("describe", "send", "transcript"), "alpha"),)).to_wire(),
-                "capabilities": ["transcript_reads", "queue", "run_results", "streaming", "dispatch_attribution"],
+                **RoleDescriptor(
+                    "1.0.0",
+                    (
+                        RoleMajor(
+                            RUNNER_ROLE_V1, ("describe", "send", "transcript"), "alpha"
+                        ),
+                    ),
+                ).to_wire(),
+                "capabilities": [
+                    "transcript_reads",
+                    "queue",
+                    "run_results",
+                    "streaming",
+                    "dispatch_attribution",
+                ],
             }
         if method == "send":
             send_id = params.get("send_id")
@@ -265,11 +319,20 @@ class LocalRoleModule:
                     raise RoleProtocolError("send Id was reused with different content")
                 return {"outcome": "duplicate", "cursor": state["cursor"]}
             ordinal = len(state["messages"])
-            state["messages"].append({"message_id": f"message-{ordinal + 1}", "ordinal": ordinal, "role": "user", "content": content})
+            state["messages"].append(
+                {
+                    "message_id": f"message-{ordinal + 1}",
+                    "ordinal": ordinal,
+                    "role": "user",
+                    "content": content,
+                }
+            )
             state["sends"][send_id] = content
             state["cursor"]["sequence"] += 1
             self._store_state(state)
-            (self.state_root / "points" / "owner-send-recorded").write_text(send_id, encoding="utf-8")
+            (self.state_root / "points" / "owner-send-recorded").write_text(
+                send_id, encoding="utf-8"
+            )
             return {"outcome": "accepted", "cursor": state["cursor"]}
         if method == "transcript":
             return {
@@ -280,15 +343,26 @@ class LocalRoleModule:
                 "head": {
                     "lineage_id": state["lineage_id"] if state["messages"] else None,
                     "next_ordinal": len(state["messages"]),
-                    "last_message_id": state["messages"][-1]["message_id"] if state["messages"] else None,
-                    "digest": hashlib.sha256(_canonical_json(state["messages"]).encode()).hexdigest(),
+                    "last_message_id": (
+                        state["messages"][-1]["message_id"]
+                        if state["messages"]
+                        else None
+                    ),
+                    "digest": hashlib.sha256(
+                        _canonical_json(state["messages"]).encode()
+                    ).hexdigest(),
                 },
             }
         raise RoleProtocolError("unsupported runner operation")
 
     def _load_state(self) -> dict[str, Any]:
         if not self.state_file.exists():
-            return {"lineage_id": "lineage-1", "cursor": {"epoch": 1, "sequence": 0}, "messages": [], "sends": {}}
+            return {
+                "lineage_id": "lineage-1",
+                "cursor": {"epoch": 1, "sequence": 0},
+                "messages": [],
+                "sends": {},
+            }
         value = json.loads(self.state_file.read_text(encoding="utf-8"))
         if not isinstance(value, dict):
             raise RoleProtocolError("durable role state is malformed")
@@ -304,11 +378,20 @@ class LocalRoleModule:
 
     @staticmethod
     def _error(request_id: str, code: str, message: str) -> dict[str, Any]:
-        return {"request_id": request_id, "error": {"code": code, "message": message, "retryable": False}}
+        return {
+            "request_id": request_id,
+            "error": {"code": code, "message": message, "retryable": False},
+        }
 
 
 def _canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True)
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
 
 def serve_stdio(state_root: Path) -> int:
@@ -318,9 +401,17 @@ def serve_stdio(state_root: Path) -> int:
             return 2
         try:
             request = json.loads(line)
-            response = module.dispatch(request) if isinstance(request, dict) else LocalRoleModule._error("invalid", "INVALID_REQUEST", "request must be an object")
+            response = (
+                module.dispatch(request)
+                if isinstance(request, dict)
+                else LocalRoleModule._error(
+                    "invalid", "INVALID_REQUEST", "request must be an object"
+                )
+            )
         except (json.JSONDecodeError, UnicodeError):
-            response = LocalRoleModule._error("invalid", "INVALID_REQUEST", "request is not valid JSON")
+            response = LocalRoleModule._error(
+                "invalid", "INVALID_REQUEST", "request is not valid JSON"
+            )
         sys.stdout.write(_canonical_json(response) + "\n")
         sys.stdout.flush()
     return 0

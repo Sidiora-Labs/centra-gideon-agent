@@ -12,7 +12,7 @@ import hashlib
 import inspect
 import time
 from dataclasses import dataclass
-from typing import Any, Awaitable, Literal, Protocol, Sequence
+from typing import Awaitable, Literal, Protocol, Sequence
 from uuid import uuid4
 
 from .contracts import AccessRequest, GrantOperation

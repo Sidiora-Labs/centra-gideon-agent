@@ -43,7 +43,11 @@ class MessageIndexState:
             self.dirty_floor_sequence = min(self.dirty_floor_sequence, sequence)
 
     def reconcile_from(self) -> int:
-        return self.dirty_floor_sequence if self.dirty_floor_sequence is not None else self.cursor_sequence + 1
+        return (
+            self.dirty_floor_sequence
+            if self.dirty_floor_sequence is not None
+            else self.cursor_sequence + 1
+        )
 
     def publish_reconciliation(self, *, started_at: int, through_sequence: int) -> None:
         expected = self.reconcile_from()
@@ -52,7 +56,10 @@ class MessageIndexState:
         if through_sequence < self.cursor_sequence:
             raise ValueError("message cursor cannot move backwards")
         self.cursor_sequence = through_sequence
-        if self.dirty_floor_sequence is not None and through_sequence >= self.dirty_floor_sequence:
+        if (
+            self.dirty_floor_sequence is not None
+            and through_sequence >= self.dirty_floor_sequence
+        ):
             self.dirty_floor_sequence = None
 
 
@@ -65,7 +72,11 @@ def prepare_message_documents(
     del scope
     selected = sorted(
         (snapshot for snapshot in snapshots if snapshot.sequence >= from_sequence),
-        key=lambda snapshot: (snapshot.sequence, snapshot.session_id, snapshot.message_id),
+        key=lambda snapshot: (
+            snapshot.sequence,
+            snapshot.session_id,
+            snapshot.message_id,
+        ),
     )
     return tuple(
         MessageIndexDocument(

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import stat
@@ -22,9 +21,12 @@ from .migration import (
     canonical_bytes,
     canonical_digest,
 )
-from .portability import ContextExportBundle, validate_context_export
-from .portability import MemoryExportBundle, MemoryImportBatch
-
+from .portability import (
+    ContextExportBundle,
+    MemoryExportBundle,
+    MemoryImportBatch,
+    validate_context_export,
+)
 
 EXPORT_SCHEMA_VERSION = 1
 MAX_EXPORT_BYTES = 512 * 1024 * 1024
@@ -96,44 +98,70 @@ class PortableArchive:
         }
         if not required.issubset(value):
             raise MigrationError("INVALID_EXPORT", "export is missing required fields")
-        if value["format"] != "hypermid-portable" or value["schema_version"] != EXPORT_SCHEMA_VERSION:
+        if (
+            value["format"] != "hypermid-portable"
+            or value["schema_version"] != EXPORT_SCHEMA_VERSION
+        ):
             raise MigrationError("UNSUPPORTED_VERSION", "export schema is unsupported")
         if value["source_version"] != 1:
-            raise MigrationError("UNSUPPORTED_VERSION", "export source version is unsupported")
+            raise MigrationError(
+                "UNSUPPORTED_VERSION", "export source version is unsupported"
+            )
         try:
             scope = Scope.from_wire(value["scope"])
             cursor = Cursor.from_wire(value["cursor"])
             source_digest = Digest(value["source_digest"])
             destination_digest = Digest(value["destination_digest"])
         except (TypeError, ValueError) as exc:
-            raise MigrationError("INVALID_EXPORT", "export identity fields are invalid") from exc
+            raise MigrationError(
+                "INVALID_EXPORT", "export identity fields are invalid"
+            ) from exc
         entries_value = value["entries"]
         bundles_value = value["context_bundles"]
         if not isinstance(entries_value, list) or not isinstance(bundles_value, list):
             raise MigrationError("INVALID_EXPORT", "export collections must be arrays")
         entries = tuple(_entry(entry) for entry in entries_value)
-        bundles = tuple(ContextExportBundle.from_mapping(bundle) for bundle in bundles_value)
+        bundles = tuple(
+            ContextExportBundle.from_mapping(bundle) for bundle in bundles_value
+        )
         for bundle in bundles:
             validate_context_export(bundle, scope)
-        archive = cls(dict(value), scope, cursor, source_digest, destination_digest, entries, bundles)
+        archive = cls(
+            dict(value),
+            scope,
+            cursor,
+            source_digest,
+            destination_digest,
+            entries,
+            bundles,
+        )
         archive.validate()
         return archive
 
     def validate(self) -> None:
         if self.cursor.sequence != len(self.entries):
-            raise MigrationError("CURSOR_MISMATCH", "export cursor does not cover its entries")
+            raise MigrationError(
+                "CURSOR_MISMATCH", "export cursor does not cover its entries"
+            )
         previous = "0" * 64
         for expected_sequence, entry in enumerate(self.entries, start=1):
             if entry["sequence"] != expected_sequence:
-                raise MigrationError("CURSOR_MISMATCH", "export entries are not in cursor order")
+                raise MigrationError(
+                    "CURSOR_MISMATCH", "export entries are not in cursor order"
+                )
             if entry["previous_digest"] != previous:
                 raise MigrationError("CHAIN_MISMATCH", "export digest chain is broken")
             payload = entry["payload"]
             if canonical_digest(payload) != Digest(entry["destination_digest"]):
-                raise MigrationError("DIGEST_MISMATCH", "export destination record changed")
+                raise MigrationError(
+                    "DIGEST_MISMATCH", "export destination record changed"
+                )
             expected = canonical_digest(
                 {
-                    "cursor": {"epoch": self.cursor.epoch, "sequence": expected_sequence},
+                    "cursor": {
+                        "epoch": self.cursor.epoch,
+                        "sequence": expected_sequence,
+                    },
                     "previous_digest": previous,
                     "destination_digest": entry["destination_digest"],
                 }
@@ -174,7 +202,9 @@ def _entry(value: object) -> Mapping[str, Any]:
         Digest(value["previous_digest"])
         Digest(value["entry_digest"])
     except (TypeError, ValueError) as exc:
-        raise MigrationError("INVALID_EXPORT", "export entry identity is invalid") from exc
+        raise MigrationError(
+            "INVALID_EXPORT", "export entry identity is invalid"
+        ) from exc
     if not isinstance(value["payload"], Mapping):
         raise MigrationError("INVALID_EXPORT", "export entry payload must be an object")
     return dict(value)
@@ -189,7 +219,9 @@ def archive_from_store(
 ) -> PortableArchive:
     status = store.status()
     if not status["validation_digest"]:
-        raise MigrationError("VALIDATION_REQUIRED", "only a validated store can be exported")
+        raise MigrationError(
+            "VALIDATION_REQUIRED", "only a validated store can be exported"
+        )
     rows = store.rows_for_export()
     entries: list[dict[str, Any]] = []
     for row in rows:
@@ -199,9 +231,16 @@ def archive_from_store(
     bundles = tuple(context_bundles)
     for bundle in bundles:
         validate_context_export(bundle, store.scope)
-    logs = store.conversation_logs_for_export() if conversation_logs is None else tuple(conversation_logs)
+    logs = (
+        store.conversation_logs_for_export()
+        if conversation_logs is None
+        else tuple(conversation_logs)
+    )
     if tuple(logs) != store.conversation_logs_for_export():
-        raise MigrationError("SOURCE_MISMATCH", "export ConversationLog evidence differs from validated store")
+        raise MigrationError(
+            "SOURCE_MISMATCH",
+            "export ConversationLog evidence differs from validated store",
+        )
     raw: dict[str, Any] = {
         "format": "hypermid-portable",
         "schema_version": EXPORT_SCHEMA_VERSION,
@@ -222,13 +261,19 @@ def archive_from_store(
     return PortableArchive.from_mapping(raw)
 
 
-def write_export(archive: PortableArchive, destination: str | os.PathLike[str]) -> ExportReceipt:
+def write_export(
+    archive: PortableArchive, destination: str | os.PathLike[str]
+) -> ExportReceipt:
     archive.validate()
     target = Path(destination)
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(target.parent, 0o700)
-    if target.exists() and (target.is_symlink() or not stat.S_ISREG(target.stat().st_mode)):
-        raise MigrationError("INVALID_DESTINATION", "export destination must be a regular file")
+    if target.exists() and (
+        target.is_symlink() or not stat.S_ISREG(target.stat().st_mode)
+    ):
+        raise MigrationError(
+            "INVALID_DESTINATION", "export destination must be a regular file"
+        )
     data = canonical_bytes(archive.to_mapping())
     if len(data) > MAX_EXPORT_BYTES:
         raise MigrationError("EXPORT_TOO_LARGE", "export exceeds the size limit")
@@ -252,7 +297,9 @@ def write_export(archive: PortableArchive, destination: str | os.PathLike[str]) 
             pass
         Path(temporary).unlink(missing_ok=True)
         raise
-    return ExportReceipt(target, Digest.sha256(data), len(data), archive.cursor, archive.source_digest)
+    return ExportReceipt(
+        target, Digest.sha256(data), len(data), archive.cursor, archive.source_digest
+    )
 
 
 def load_export(
@@ -267,16 +314,22 @@ def load_export(
     data = path.read_bytes()
     artifact_digest = Digest.sha256(data)
     if expected_digest is not None and artifact_digest != Digest(expected_digest):
-        raise MigrationError("ARTIFACT_DIGEST_MISMATCH", "export artifact digest does not match")
+        raise MigrationError(
+            "ARTIFACT_DIGEST_MISMATCH", "export artifact digest does not match"
+        )
     try:
         value = json.loads(data)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise MigrationError("INVALID_EXPORT", "export is not valid UTF-8 JSON") from exc
+        raise MigrationError(
+            "INVALID_EXPORT", "export is not valid UTF-8 JSON"
+        ) from exc
     archive = PortableArchive.from_mapping(value)
     canonical = canonical_bytes(archive.to_mapping())
     if canonical != data:
         raise MigrationError("NON_CANONICAL_EXPORT", "export is not canonical JSON")
-    return archive, ExportReceipt(path, artifact_digest, len(data), archive.cursor, archive.source_digest)
+    return archive, ExportReceipt(
+        path, artifact_digest, len(data), archive.cursor, archive.source_digest
+    )
 
 
 def restore_export(
@@ -286,13 +339,17 @@ def restore_export(
     expected_scope: Scope,
 ) -> MigrationStore:
     if archive.scope != expected_scope:
-        raise MigrationError("SCOPE_MISMATCH", "export does not belong to the target scope")
+        raise MigrationError(
+            "SCOPE_MISMATCH", "export does not belong to the target scope"
+        )
     items: list[SourceItem] = []
     for entry in archive.entries:
         destination = entry["payload"]
         payload = destination.get("payload")
         if not isinstance(payload, Mapping):
-            raise MigrationError("INVALID_EXPORT", "destination record has no source payload")
+            raise MigrationError(
+                "INVALID_EXPORT", "destination record has no source payload"
+            )
         item = SourceItem.build(
             entry["item_key"],
             KnowledgeCategory(entry["category"]),
@@ -300,15 +357,21 @@ def restore_export(
             payload,
         )
         if item.source_digest != Digest(entry["source_digest"]):
-            raise MigrationError("SOURCE_DIGEST_MISMATCH", "restored source item changed")
+            raise MigrationError(
+                "SOURCE_DIGEST_MISMATCH", "restored source item changed"
+            )
         items.append(item)
     logs: list[ConversationLogEvidence] = []
     raw_logs = archive.raw["conversation_logs"]
     if not isinstance(raw_logs, list):
-        raise MigrationError("INVALID_EXPORT", "conversation log evidence must be an array")
+        raise MigrationError(
+            "INVALID_EXPORT", "conversation log evidence must be an array"
+        )
     for entry in raw_logs:
         if not isinstance(entry, Mapping):
-            raise MigrationError("INVALID_EXPORT", "conversation log evidence is invalid")
+            raise MigrationError(
+                "INVALID_EXPORT", "conversation log evidence is invalid"
+            )
         logs.append(
             ConversationLogEvidence(
                 relative_path=str(entry["relative_path"]),
@@ -318,13 +381,20 @@ def restore_export(
         )
     snapshot = GideonSourceSnapshot.build(expected_scope, items, logs)
     if snapshot.source_digest != archive.source_digest:
-        raise MigrationError("SOURCE_DIGEST_MISMATCH", "restored inventory digest does not match")
+        raise MigrationError(
+            "SOURCE_DIGEST_MISMATCH", "restored inventory digest does not match"
+        )
     store = MigrationStore(target, expected_scope)
     try:
         receipt = store.import_snapshot(snapshot)
         validation = store.validate(snapshot)
-        if receipt.destination_digest != archive.destination_digest or validation.destination_digest != archive.destination_digest:
-            raise MigrationError("DIGEST_MISMATCH", "restored destination chain differs")
+        if (
+            receipt.destination_digest != archive.destination_digest
+            or validation.destination_digest != archive.destination_digest
+        ):
+            raise MigrationError(
+                "DIGEST_MISMATCH", "restored destination chain differs"
+            )
     except BaseException:
         store.close()
         raise
@@ -337,8 +407,12 @@ def write_memory_bundle(
     target = Path(destination)
     target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(target.parent, 0o700)
-    if target.exists() and (target.is_symlink() or not stat.S_ISREG(target.stat().st_mode)):
-        raise MigrationError("INVALID_DESTINATION", "memory export destination is unsafe")
+    if target.exists() and (
+        target.is_symlink() or not stat.S_ISREG(target.stat().st_mode)
+    ):
+        raise MigrationError(
+            "INVALID_DESTINATION", "memory export destination is unsafe"
+        )
     data = canonical_bytes(bundle.to_mapping())
     if len(data) > MAX_EXPORT_BYTES:
         raise MigrationError("EXPORT_TOO_LARGE", "memory export exceeds the size limit")
@@ -379,20 +453,28 @@ def load_memory_bundle(
 ) -> tuple[MemoryExportBundle, MemoryBundleReceipt]:
     path = Path(source)
     if path.is_symlink() or not path.is_file():
-        raise MigrationError("INVALID_SOURCE", "memory export source must be a regular file")
+        raise MigrationError(
+            "INVALID_SOURCE", "memory export source must be a regular file"
+        )
     if path.stat().st_size > MAX_EXPORT_BYTES:
         raise MigrationError("EXPORT_TOO_LARGE", "memory export exceeds the size limit")
     data = path.read_bytes()
     artifact_digest = Digest.sha256(data)
     if artifact_digest != Digest(expected_digest):
-        raise MigrationError("ARTIFACT_DIGEST_MISMATCH", "memory export artifact digest changed")
+        raise MigrationError(
+            "ARTIFACT_DIGEST_MISMATCH", "memory export artifact digest changed"
+        )
     try:
         value = json.loads(data)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise MigrationError("INVALID_EXPORT", "memory export is not valid UTF-8 JSON") from exc
+        raise MigrationError(
+            "INVALID_EXPORT", "memory export is not valid UTF-8 JSON"
+        ) from exc
     bundle = MemoryExportBundle.from_mapping(value)
     if canonical_bytes(bundle.to_mapping()) != data:
-        raise MigrationError("NON_CANONICAL_EXPORT", "memory export is not canonical JSON")
+        raise MigrationError(
+            "NON_CANONICAL_EXPORT", "memory export is not canonical JSON"
+        )
     manifest = bundle.manifest
     return bundle, MemoryBundleReceipt(
         path,
@@ -449,10 +531,14 @@ class RustMemoryPortability:
             scope_mapping=scope_mapping,
         )
         if staged.state != "validated" or staged.rejected:
-            raise MigrationError("IMPORT_REJECTED", "Rust memory import did not validate")
+            raise MigrationError(
+                "IMPORT_REJECTED", "Rust memory import did not validate"
+            )
         applied = await self.client.apply_import(request, batch=staged, bundle=bundle)
         if applied.state != "applied" or applied.rejected:
-            raise MigrationError("IMPORT_NOT_APPLIED", "Rust memory import did not apply")
+            raise MigrationError(
+                "IMPORT_NOT_APPLIED", "Rust memory import did not apply"
+            )
         destination = await self.client.export_scope(
             verification_request,
             export_id=Id(verification_export_id),

@@ -10,7 +10,7 @@ import json
 import os
 import sqlite3
 import stat
-from dataclasses import asdict, dataclass, fields, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Mapping, Sequence
@@ -31,7 +31,6 @@ from .portability import (
     ContextMigrationCheckpoint,
     ContextMigrationCoordinator,
     ContextPortabilityEntryKind,
-    ContextPortabilityError,
     validate_context_export,
 )
 

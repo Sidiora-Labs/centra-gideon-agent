@@ -19,11 +19,17 @@ class ContextMode(str, Enum):
     @property
     def capabilities(self) -> ModeCapabilities:
         if self is ContextMode.OFF:
-            return ModeCapabilities(False, False, False, False, False, False, False, False, True)
+            return ModeCapabilities(
+                False, False, False, False, False, False, False, False, True
+            )
         if self is ContextMode.PASS_THROUGH:
-            return ModeCapabilities(True, True, False, False, False, False, False, False, True)
+            return ModeCapabilities(
+                True, True, False, False, False, False, False, False, True
+            )
         if self is ContextMode.SHADOW:
-            return ModeCapabilities(True, True, True, False, False, False, False, False, True)
+            return ModeCapabilities(
+                True, True, True, False, False, False, False, False, True
+            )
         return ModeCapabilities(True, True, True, True, True, True, True, True, False)
 
 

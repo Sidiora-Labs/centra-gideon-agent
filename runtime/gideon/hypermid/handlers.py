@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from .lifecycle import HypermidLifecycle
     from .status import HypermidStatus
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from typing import Any, Callable, Mapping
 
 from .foundation import Cursor

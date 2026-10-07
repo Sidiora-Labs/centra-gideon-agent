@@ -11,9 +11,7 @@ from .network_policy import NetworkGrant, ProxyPolicy
 
 _VERIFICATION = frozenset({"unverified", "verified", "rejected"})
 _TRUST_CLASS = frozenset({"data", "privileged_instruction"})
-_FORBIDDEN_CODES = frozenset(
-    {"AUTHORIZATION_DENIED", "FORBIDDEN", "SCOPE_DENIED"}
-)
+_FORBIDDEN_CODES = frozenset({"AUTHORIZATION_DENIED", "FORBIDDEN", "SCOPE_DENIED"})
 _STALE_CODES = frozenset({"STALE_MEMORY_REVISION", "STALE_REVISION"})
 _UNAVAILABLE_CODES = frozenset(
     {
@@ -23,9 +21,7 @@ _UNAVAILABLE_CODES = frozenset(
         "UNKNOWN_OPERATION",
     }
 )
-_NOT_FOUND_CODES = frozenset(
-    {"MEMORY_PROVENANCE_NOT_FOUND", "NETWORK_GRANT_NOT_FOUND"}
-)
+_NOT_FOUND_CODES = frozenset({"MEMORY_PROVENANCE_NOT_FOUND", "NETWORK_GRANT_NOT_FOUND"})
 
 
 class SecurityStatusError(RuntimeError):
@@ -98,12 +94,16 @@ class ProvenanceRecord:
         object.__setattr__(self, "source_id", Id(self.source_id))
         object.__setattr__(self, "author_principal_id", Id(self.author_principal_id))
         if self.reviewer_principal_id is not None:
-            object.__setattr__(self, "reviewer_principal_id", Id(self.reviewer_principal_id))
+            object.__setattr__(
+                self, "reviewer_principal_id", Id(self.reviewer_principal_id)
+            )
         _bounded(self.source_type, "memory source type", 64)
         if (
             not isinstance(self.content_digest, str)
             or len(self.content_digest) != 64
-            or any(character not in "0123456789abcdef" for character in self.content_digest)
+            or any(
+                character not in "0123456789abcdef" for character in self.content_digest
+            )
         ):
             raise ValueError("memory authority returned invalid content digest")
         if self.verification not in _VERIFICATION:
@@ -119,9 +119,7 @@ class NetworkSecurityAuthority(Protocol):
 
     async def snapshot(self, scope: Scope) -> NetworkSecuritySnapshot: ...
 
-    async def revoke(
-        self, scope: Scope, grant_id: Id
-    ) -> NetworkSecuritySnapshot: ...
+    async def revoke(self, scope: Scope, grant_id: Id) -> NetworkSecuritySnapshot: ...
 
 
 @runtime_checkable
@@ -181,7 +179,9 @@ class SecurityStatusFacade:
             snapshot = await authority.revoke(self.scope, Id(grant_id))
             return _network_status(self.scope, snapshot)
         except Exception as error:
-            raise _translate(error, "network grant revocation is unavailable") from error
+            raise _translate(
+                error, "network grant revocation is unavailable"
+            ) from error
 
     async def lookup(self, memory_id: Id | str) -> dict[str, Any]:
         authority = self.provenance_authority
@@ -190,7 +190,9 @@ class SecurityStatusFacade:
         try:
             return _provenance(await authority.lookup(self.scope, Id(memory_id)))
         except Exception as error:
-            raise _translate(error, "memory provenance lookup is unavailable") from error
+            raise _translate(
+                error, "memory provenance lookup is unavailable"
+            ) from error
 
     async def promote(
         self, memory_id: Id | str, expected_revision: int
@@ -201,12 +203,12 @@ class SecurityStatusFacade:
         _uint(expected_revision, "expected revision", minimum=1)
         try:
             return _provenance(
-                await authority.promote(
-                    self.scope, Id(memory_id), expected_revision
-                )
+                await authority.promote(self.scope, Id(memory_id), expected_revision)
             )
         except Exception as error:
-            raise _translate(error, "memory provenance promotion is unavailable") from error
+            raise _translate(
+                error, "memory provenance promotion is unavailable"
+            ) from error
 
 
 def create_security_status(
@@ -243,13 +245,9 @@ class DaemonSecurityAuthority(NetworkSecurityAuthority, MemoryProvenanceAuthorit
 
     async def snapshot(self, scope: Scope) -> NetworkSecuritySnapshot:
         self._require_scope(scope)
-        return _snapshot(
-            await self._request("security.network.status", {}), scope
-        )
+        return _snapshot(await self._request("security.network.status", {}), scope)
 
-    async def revoke(
-        self, scope: Scope, grant_id: Id
-    ) -> NetworkSecuritySnapshot:
+    async def revoke(self, scope: Scope, grant_id: Id) -> NetworkSecuritySnapshot:
         self._require_scope(scope)
         return _snapshot(
             await self._request(
@@ -329,9 +327,7 @@ def create_daemon_security_status(client: _DaemonClient) -> SecurityStatusFacade
     )
 
 
-def _network_status(
-    scope: Scope, snapshot: NetworkSecuritySnapshot
-) -> dict[str, Any]:
+def _network_status(scope: Scope, snapshot: NetworkSecuritySnapshot) -> dict[str, Any]:
     if not isinstance(snapshot, NetworkSecuritySnapshot):
         raise TypeError("network authority returned an invalid snapshot")
     grants = sorted(snapshot.grants, key=lambda item: item.grant_id)
@@ -417,7 +413,10 @@ def _network_grant(value: object) -> NetworkGrant:
         operation=_bounded(raw.get("operation"), "operation", 160),
         scheme=_bounded(raw.get("scheme"), "scheme", 32),
         hostname=_bounded(raw.get("hostname"), "hostname", 253),
-        ports=frozenset(_uint(item, "port", minimum=1) for item in _sequence(raw.get("ports"), "ports")),
+        ports=frozenset(
+            _uint(item, "port", minimum=1)
+            for item in _sequence(raw.get("ports"), "ports")
+        ),
         address_classes=frozenset(
             _bounded(item, "address class", 32)
             for item in _sequence(raw.get("addressClasses"), "address classes")
@@ -489,7 +488,9 @@ def _translate(error: BaseException, fallback: str) -> SecurityStatusError:
     if code in _FORBIDDEN_CODES:
         return SecurityStatusError(code, "security action is not authorized", 403)
     if code in _STALE_CODES:
-        return SecurityStatusError("STALE_MEMORY_REVISION", "memory revision is stale", 409)
+        return SecurityStatusError(
+            "STALE_MEMORY_REVISION", "memory revision is stale", 409
+        )
     if code in _UNAVAILABLE_CODES:
         return SecurityStatusError(code, fallback, 503)
     return _unavailable(fallback)
@@ -504,7 +505,10 @@ def _error_code(value: object) -> str:
     if (
         not 2 <= len(code) <= 64
         or not code[0].isupper()
-        or any(not (character.isupper() or character.isdigit() or character == "_") for character in code)
+        or any(
+            not (character.isupper() or character.isdigit() or character == "_")
+            for character in code
+        )
     ):
         return "SECURITY_STATUS_UNAVAILABLE"
     return code

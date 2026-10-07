@@ -125,9 +125,7 @@ class HypermidStatusStore:
             return self._status
 
     def disabled(self, mode: object = "off") -> HypermidStatus:
-        return self._set(
-            HypermidStatus(mode=_mode(mode), checked_at_ms=self._now())
-        )
+        return self._set(HypermidStatus(mode=_mode(mode), checked_at_ms=self._now()))
 
     def starting(self, mode: object) -> HypermidStatus:
         return self._set(
@@ -177,15 +175,19 @@ class HypermidStatusStore:
             lease_state = "unknown"
         cursor = _cursor(raw.get("cursor"))
         capabilities_raw = raw.get("operations", raw.get("capabilities", ()))
-        capabilities = tuple(
-            sorted(
-                {
-                    item
-                    for item in capabilities_raw
-                    if isinstance(item, str) and 0 < len(item) <= 160
-                }
+        capabilities = (
+            tuple(
+                sorted(
+                    {
+                        item
+                        for item in capabilities_raw
+                        if isinstance(item, str) and 0 < len(item) <= 160
+                    }
+                )
             )
-        ) if isinstance(capabilities_raw, (list, tuple, set, frozenset)) else ()
+            if isinstance(capabilities_raw, (list, tuple, set, frozenset))
+            else ()
+        )
         writer = str(raw.get("writer", "gideon"))
         active_mode = _mode(mode)
         if active_mode != "primary" or lease_state != "held":
@@ -289,10 +291,13 @@ class HypermidStatusStore:
         code: str | None = None,
     ) -> HypermidStatus:
         failure_code = code or type(error).__name__.upper()
-        failure_code = "".join(
-            character if character.isalnum() or character == "_" else "_"
-            for character in failure_code
-        )[:64] or "UNAVAILABLE"
+        failure_code = (
+            "".join(
+                character if character.isalnum() or character == "_" else "_"
+                for character in failure_code
+            )[:64]
+            or "UNAVAILABLE"
+        )
         message = " ".join(str(error).split())[:_MAX_FAILURE_MESSAGE]
         return self._set(
             HypermidStatus(

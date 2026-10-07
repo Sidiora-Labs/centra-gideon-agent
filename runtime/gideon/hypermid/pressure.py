@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Mapping
+from typing import Mapping
 
 from .foundation import Digest
 
@@ -45,12 +45,16 @@ class PressurePolicy:
             < self.emergency_basis_points
             < 10_000
         ):
-            raise PressureError("INVALID_POLICY", "pressure thresholds must be strictly ordered")
+            raise PressureError(
+                "INVALID_POLICY", "pressure thresholds must be strictly ordered"
+            )
         if self.max_rewrite_cost_nanodollars is not None and (
             isinstance(self.max_rewrite_cost_nanodollars, bool)
             or self.max_rewrite_cost_nanodollars < 0
         ):
-            raise PressureError("INVALID_POLICY", "rewrite budget must be a non-negative integer")
+            raise PressureError(
+                "INVALID_POLICY", "rewrite budget must be a non-negative integer"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,13 +154,17 @@ def parse_reclaim_plan(
     }
     optional = {"estimated_bytes", "exclusions", "boundary"}
     if set(value) - required - optional or not required <= set(value):
-        raise PressureError("INVALID_PLAN", "reclaim plan fields do not match the contract")
+        raise PressureError(
+            "INVALID_PLAN", "reclaim plan fields do not match the contract"
+        )
     try:
         band = PressureBand(value["band"])
         disposition = ReclaimDisposition(value["disposition"])
         decision_digest = Digest(value["decision_digest"])
     except (TypeError, ValueError) as exc:
-        raise PressureError("INVALID_PLAN", "reclaim plan identity or state is invalid") from exc
+        raise PressureError(
+            "INVALID_PLAN", "reclaim plan identity or state is invalid"
+        ) from exc
     integers: dict[str, int] = {}
     for field in (
         "input_mass",
@@ -167,16 +175,22 @@ def parse_reclaim_plan(
     ):
         item = value[field]
         if isinstance(item, bool) or not isinstance(item, int) or item < 0:
-            raise PressureError("INVALID_PLAN", f"{field} must be a non-negative integer")
+            raise PressureError(
+                "INVALID_PLAN", f"{field} must be a non-negative integer"
+            )
         integers[field] = item
     if integers["input_mass"] != snapshot.calibrated_mass:
-        raise PressureError("STALE_PLAN", "reclaim plan was priced for another input mass")
+        raise PressureError(
+            "STALE_PLAN", "reclaim plan was priced for another input mass"
+        )
     if band is not calibrate_pressure(snapshot, policy):
         raise PressureError("STALE_PLAN", "reclaim plan uses the wrong pressure band")
     if integers["required_savings"] != max(
         0, integers["input_mass"] - integers["target_mass"]
     ):
-        raise PressureError("INVALID_PLAN", "required savings do not match the target mass")
+        raise PressureError(
+            "INVALID_PLAN", "required savings do not match the target mass"
+        )
     choices_raw = value["chosen"]
     if not isinstance(choices_raw, list) or len(choices_raw) > 100_000:
         raise PressureError("INVALID_PLAN", "chosen candidates exceed the result bound")
@@ -189,29 +203,49 @@ def parse_reclaim_plan(
         mass = item.get("recoverable_mass")
         price = item.get("rewrite_cost_nanodollars")
         if not isinstance(candidate_id, str) or not candidate_id:
-            raise PressureError("INVALID_PLAN", f"chosen[{index}] has no candidate identity")
+            raise PressureError(
+                "INVALID_PLAN", f"chosen[{index}] has no candidate identity"
+            )
         if isinstance(mass, bool) or not isinstance(mass, int) or mass <= 0:
-            raise PressureError("INVALID_PLAN", f"chosen[{index}] has invalid recoverable mass")
-        if price is not None and (isinstance(price, bool) or not isinstance(price, int) or price <= 0):
-            raise PressureError("UNPRICED_REWRITE", "rewrite price must be a positive exact integer")
+            raise PressureError(
+                "INVALID_PLAN", f"chosen[{index}] has invalid recoverable mass"
+            )
+        if price is not None and (
+            isinstance(price, bool) or not isinstance(price, int) or price <= 0
+        ):
+            raise PressureError(
+                "UNPRICED_REWRITE", "rewrite price must be a positive exact integer"
+            )
         priced_total += price or 0
         choices.append(ReclaimChoice(candidate_id, mass, price))
     if priced_total != integers["rewrite_cost_nanodollars"]:
-        raise PressureError("INVALID_PLAN", "rewrite price total does not match chosen work")
+        raise PressureError(
+            "INVALID_PLAN", "rewrite price total does not match chosen work"
+        )
     if priced_total and (
         policy.max_rewrite_cost_nanodollars is None
         or priced_total > policy.max_rewrite_cost_nanodollars
     ):
-        raise PressureError("REWRITE_BUDGET_EXCEEDED", "priced rewrite exceeds its authorized budget")
-    if integers["estimated_savings"] != sum(choice.recoverable_mass for choice in choices):
-        raise PressureError("INVALID_PLAN", "estimated savings do not match chosen candidates")
+        raise PressureError(
+            "REWRITE_BUDGET_EXCEEDED", "priced rewrite exceeds its authorized budget"
+        )
+    if integers["estimated_savings"] != sum(
+        choice.recoverable_mass for choice in choices
+    ):
+        raise PressureError(
+            "INVALID_PLAN", "estimated savings do not match chosen candidates"
+        )
     if band is PressureBand.HARD_WALL:
         safe = integers["estimated_savings"] >= integers["required_savings"]
         if safe == (disposition is ReclaimDisposition.REFUSED):
-            raise PressureError("UNSAFE_PLAN", "hard-wall disposition does not match safe savings")
+            raise PressureError(
+                "UNSAFE_PLAN", "hard-wall disposition does not match safe savings"
+            )
     reasons = value["reason_codes"]
-    if not isinstance(reasons, list) or not reasons or not all(
-        isinstance(reason, str) and reason for reason in reasons
+    if (
+        not isinstance(reasons, list)
+        or not reasons
+        or not all(isinstance(reason, str) and reason for reason in reasons)
     ):
         raise PressureError("INVALID_PLAN", "reclaim plan must contain reason codes")
     return ReclaimPlan(
@@ -236,7 +270,9 @@ class PressureLatch:
 
     def admit(self, snapshot: PressureSnapshot, plan: ReclaimPlan) -> LatchedDecision:
         if plan.input_mass != snapshot.calibrated_mass:
-            raise PressureError("STALE_PLAN", "plan does not match the pressure snapshot")
+            raise PressureError(
+                "STALE_PLAN", "plan does not match the pressure snapshot"
+            )
         key = (
             snapshot.projection_digest,
             snapshot.cache_generation,

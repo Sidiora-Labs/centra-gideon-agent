@@ -8,7 +8,6 @@ from typing import Mapping
 from .config import ContextMode
 from .foundation import Cursor, Digest, Id, Scope
 
-
 MAX_SNAPSHOT_ITEMS = 100_000
 MAX_CONTRIBUTION_BYTES = 1_048_576
 
@@ -42,8 +41,12 @@ class ModelBudget:
             self.delta_tokens,
             self.tail_tokens,
         )
-        if any(isinstance(value, bool) or not isinstance(value, int) for value in numbers):
-            raise SubagentContextError("INVALID_BUDGET", "budget values must be integers")
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) for value in numbers
+        ):
+            raise SubagentContextError(
+                "INVALID_BUDGET", "budget values must be integers"
+            )
         region_tokens = self.baseline_tokens + self.delta_tokens + self.tail_tokens
         if (
             self.context_window_tokens < 1
@@ -199,7 +202,11 @@ class SubagentContribution:
         content: str,
         authorized_by: str,
     ) -> SubagentContribution:
-        if not isinstance(content, str) or not content or len(content.encode()) > MAX_CONTRIBUTION_BYTES:
+        if (
+            not isinstance(content, str)
+            or not content
+            or len(content.encode()) > MAX_CONTRIBUTION_BYTES
+        ):
             raise SubagentContextError(
                 "INVALID_CONTRIBUTION", "contribution is empty or oversized"
             )
@@ -289,7 +296,8 @@ class SubagentContextRegistry:
             if previous is not None:
                 if previous.snapshot != snapshot:
                     raise SubagentContextError(
-                        "CHILD_IDENTITY_CONFLICT", "child identity names another snapshot"
+                        "CHILD_IDENTITY_CONFLICT",
+                        "child identity names another snapshot",
                     )
                 return previous.snapshot
             self._children[snapshot.child_session_id] = _ChildState(
@@ -315,9 +323,13 @@ class SubagentContextRegistry:
         with self._lock:
             state = self._child(child_session_id)
             self._scope(state, scope)
-            if cursor.epoch != state.cursor.epoch or cursor.sequence < state.cursor.sequence:
+            if (
+                cursor.epoch != state.cursor.epoch
+                or cursor.sequence < state.cursor.sequence
+            ):
                 raise SubagentContextError(
-                    "CHILD_CURSOR_MISMATCH", "child cursor moved backward or changed epoch"
+                    "CHILD_CURSOR_MISMATCH",
+                    "child cursor moved backward or changed epoch",
                 )
             state.cursor = cursor
             state.usage = state.usage.plus(usage)
@@ -342,9 +354,13 @@ class SubagentContextRegistry:
         with self._lock:
             child = self._child(contribution.child_session_id)
             if child.snapshot.scope != parent_journal.scope:
-                raise SubagentContextError("SCOPE_MISMATCH", "parent and child scopes differ")
+                raise SubagentContextError(
+                    "SCOPE_MISMATCH", "parent and child scopes differ"
+                )
             if child.snapshot.parent_session_id != parent_journal.parent_session_id:
-                raise SubagentContextError("PARENT_MISMATCH", "snapshot belongs to another parent")
+                raise SubagentContextError(
+                    "PARENT_MISMATCH", "snapshot belongs to another parent"
+                )
             if (
                 contribution.child_cursor.epoch != child.cursor.epoch
                 or contribution.child_cursor.sequence > child.cursor.sequence
@@ -383,12 +399,16 @@ class SubagentContextRegistry:
         try:
             return self._children[Id(child_session_id)]
         except KeyError as exc:
-            raise SubagentContextError("CHILD_NOT_FOUND", "child was not spawned") from exc
+            raise SubagentContextError(
+                "CHILD_NOT_FOUND", "child was not spawned"
+            ) from exc
 
     @staticmethod
     def _scope(state: _ChildState, scope: Scope) -> None:
         if state.snapshot.scope != scope:
-            raise SubagentContextError("SCOPE_MISMATCH", "scope does not own child context")
+            raise SubagentContextError(
+                "SCOPE_MISMATCH", "scope does not own child context"
+            )
 
 
 def _canonical(value: Mapping[str, object]) -> bytes:

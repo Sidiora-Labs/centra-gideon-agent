@@ -158,7 +158,10 @@ class EmbeddingRegistry:
         with self._lock:
             key = _scope_key(registration.scope)
             incumbent = self._active.get(key)
-            if incumbent is not None and incumbent.registration_id != registration.registration_id:
+            if (
+                incumbent is not None
+                and incumbent.registration_id != registration.registration_id
+            ):
                 self._all[incumbent.registration_id] = replace(
                     incumbent, state="retired"
                 )

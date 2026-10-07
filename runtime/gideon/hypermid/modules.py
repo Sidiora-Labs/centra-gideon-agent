@@ -6,7 +6,7 @@ import asyncio
 import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 from uuid import uuid4
 
 from .foundation import Id, Scope, Trace
@@ -128,7 +128,9 @@ class HypermidModuleSupervisor:
             self._modules[key] = _RunningModule(spec, route, provider)
             return provider
 
-    def providers_for_session(self, session_key: str) -> tuple[HypermidRoleToolProvider, ...]:
+    def providers_for_session(
+        self, session_key: str
+    ) -> tuple[HypermidRoleToolProvider, ...]:
         digest = _session_digest(session_key)
         return tuple(
             running.provider

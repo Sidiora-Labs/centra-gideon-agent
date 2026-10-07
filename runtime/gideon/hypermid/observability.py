@@ -2,24 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import IntEnum
 import fcntl
 import json
 import os
-from pathlib import Path
 import re
 import sys
+from dataclasses import dataclass, field
+from enum import IntEnum
+from pathlib import Path
 from typing import Any, Callable, Mapping
-
 
 _LOGGER = re.compile(r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _WAKE = re.compile(r"^[A-Za-z0-9_-]{16,256}$")
 _BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}")
-_ASSIGNMENT = re.compile(
-    r"(?i)\b(api[_-]?key|token|password|secret)\s*[:=]\s*[^\s,;]+"
-)
+_ASSIGNMENT = re.compile(r"(?i)\b(api[_-]?key|token|password|secret)\s*[:=]\s*[^\s,;]+")
 _SENSITIVE = {
     "authorization",
     "password",
@@ -152,9 +149,11 @@ def _redact_value(value: Any, redact: Callable[[str], str]) -> Any:
 def guard_controls(value: str) -> str:
     value = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", value)
     return "".join(
-        character
-        if not (ord(character) < 32 or ord(character) == 127)
-        else f"\\u{ord(character):04x}"
+        (
+            character
+            if not (ord(character) < 32 or ord(character) == 127)
+            else f"\\u{ord(character):04x}"
+        )
         for character in value
     )
 
@@ -173,7 +172,9 @@ def format_line(record: LogRecord) -> bytes:
     document["message"] = record.message
     if record.fields:
         document["fields"] = dict(sorted(record.fields.items()))
-    return (json.dumps(document, separators=(",", ":"), ensure_ascii=False) + "\n").encode()
+    return (
+        json.dumps(document, separators=(",", ":"), ensure_ascii=False) + "\n"
+    ).encode()
 
 
 def parse_line(line: bytes) -> LogRecord:
@@ -296,8 +297,8 @@ class CaptureSink:
             destination = Path(f"{self.path}.{generation}")
             if generation == self.generations:
                 destination.unlink(missing_ok=True)
-            source = self.path if generation == 1 else Path(
-                f"{self.path}.{generation - 1}"
+            source = (
+                self.path if generation == 1 else Path(f"{self.path}.{generation - 1}")
             )
             if source.exists():
                 os.replace(source, destination)

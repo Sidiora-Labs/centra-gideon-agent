@@ -23,7 +23,7 @@ from .enrollment_source import NativeEnrollmentSource
 from .foundation import Digest
 from .lifecycle import HypermidLifecycle
 from .models import JsonValue, Scope
-from .operations import ActionPlan, ActionReceipt, PlanStep
+from .operations import ActionReceipt, PlanStep
 from .operator_lifecycle import LifecyclePlan, LifecycleReceipt
 
 _PLAN_LIFETIME = timedelta(minutes=10)
