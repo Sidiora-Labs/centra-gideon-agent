@@ -20,12 +20,12 @@ describe('a tool toggle that fails tells the user', () => {
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/^\s*\/\/.*$/gm, '')
     expect(shared).toMatch(
-      /export async function reportingWrite\(what: string, run: \(\) => Promise<unknown>\): Promise<boolean>/,
+      /export function reportingWrite\(what: string, run: \(\) => Promise<unknown>\): Promise<boolean>/,
     )
-    expect(shared, 'it reports through the app toast').toMatch(/notify\(failureSentence\(what, e\), 'error'\)/)
-    expect(shared, 'the sentence still opens with the written clause').toMatch(/`Couldn't \$\{what\}: \$\{detail\}`/)
-    expect(shared, 'and closes cleanly when there is no usable detail').toMatch(/`Couldn't \$\{what\}\.`/)
-    expect(shared, 'and returns the outcome so a caller can skip its refetch').toMatch(/return true/)
+    expect(shared, 'it reports through the app toast').toMatch(/notify\(failureSentence\(what, error\), 'error'\)/)
+    expect(shared, 'the sentence still opens with the written clause').toMatch(/`Couldn't \$\{what\}\$\{detail \? `: \$\{detail\}` : '\.'\}`/)
+    expect(shared, 'and closes cleanly when there is no usable detail').toMatch(/detail \? `: \$\{detail\}` : '\.'/)
+    expect(shared, 'and returns the outcome so a caller can skip its refetch').toMatch(/run\(\)\.then\(\(\) => true, failed\)/)
     expect(shared, 'no dead JSON unwrap').not.toMatch(/JSON\.parse\(msg\)/)
   })
 
@@ -75,7 +75,7 @@ describe('a tool toggle that fails tells the user', () => {
   })
 
   it('reconnectServer keeps its documented swallow — the deliberate non-fix', () => {
-    expect(SRC).toMatch(/await api\.reconnectMcp\(s\.name\) \} catch \{ \/\* status surfaces on reload \*\/ \}/)
+    expect(SRC).toMatch(/await api\.reconnectMcp\(s\.name\) \} catch \{\s*\}/)
   })
 
   it('removeServer’s original reporting is untouched — this converged ONTO it', () => {

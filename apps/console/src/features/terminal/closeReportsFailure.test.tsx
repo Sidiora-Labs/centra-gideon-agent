@@ -85,12 +85,14 @@ describe('no surface flips local state on a write it discarded', () => {
   })
 
   it("the widget save toggle obeys the rule its own sibling states", () => {
-    const code = codeOf(join(SRC, 'shared/ui/widget/WidgetFrame.tsx'))
-    const at = code.indexOf('const toggleSave')
+    const frame = codeOf(join(SRC, 'shared/ui/widget/WidgetFrame.tsx'))
+    expect(frame).toContain('onClick={artifact.toggleSave}')
+    const code = codeOf(join(SRC, 'shared/ui/widget/widgetFrameState.ts'))
+    const at = code.indexOf('const mutate')
     const fn = code.slice(at, at + 900)
     expect(fn, 'the writes must not be swallowed').not.toMatch(/\.catch\(\(\)\s*=>\s*\{\s*\}\)/)
     expect(fn, 'and the flag moves only after the write returns')
-      .toMatch(/await api\.deleteArtifact\([^)]*\)\s*setSaved\(false\)/)
+      .toMatch(/await api\.deleteArtifact\([^)]*\);?\s*updateSaved\(false\)/)
     expect(code, 'pin still rolls back').toMatch(/setPinned\(false\)/)
   })
 
@@ -104,10 +106,8 @@ describe('no surface flips local state on a write it discarded', () => {
       }
     }
     expect(found.sort()).toEqual([
-      'features/ChatPage.tsx:sideOpen',
+      'app/shell/identity.tsx:dashboardConfig',
       'features/knowledge/KnowledgeDetailPage.tsx:deleteKnowledgeAnnotation',
-      'app/shell/identity.tsx:saveDashboardConfig',
-      'app/shell/identity.tsx:saveDashboardConfig',
     ].sort())
   })
 })

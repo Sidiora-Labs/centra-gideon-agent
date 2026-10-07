@@ -92,7 +92,7 @@ describe('native channel pairing in Apps', () => {
       expect(screen.getByRole('dialog')).toBeInTheDocument()
       peer.paired()
       await waitFor(() => expect(screen.queryByRole('img', { name: /Scan this QR/ })).toBeNull(), { timeout: 5000 })
-      expect(screen.getByRole('status')).toHaveTextContent('Connected')
+      expect(screen.getByText('Connected')).toHaveAttribute('role', 'status')
     } finally {
       globalThis.fetch = originalFetch
       await new Promise<void>((resolve, reject) => peer.server.close((error) => error ? reject(error) : resolve()))

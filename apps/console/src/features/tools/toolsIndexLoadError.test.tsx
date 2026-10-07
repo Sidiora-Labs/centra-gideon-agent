@@ -49,7 +49,8 @@ describe('#/tools distinguishes a failed index read from an empty toolbox', () =
     mockApi({ mcpServers: boom, importableMcp: boom, mcpPoolStats: boom, toolGroups: boom })
     await mount()
     await waitFor(() => expect(screen.getByText('read_file')).toBeInTheDocument())
-    expect(screen.queryByRole('alert'), 'a peripheral read is not a page failure').toBeNull()
+    expect(screen.getByRole('alert'), 'MCP failure is reported alongside the available tools').toHaveTextContent('MCP servers')
+    expect(screen.getByRole('button', { name: /Retry/ })).toBeInTheDocument()
   })
 })
 
@@ -77,13 +78,15 @@ describe('the composed fetcher keeps its asymmetry legible', () => {
       .not.toMatch(/api\.toolsIndex\(\)\s*\.catch/)
   })
 
-  it('the other four reads still DO carry one', () => {
+  it('optional index metadata carries fallbacks and MCP servers report independently', () => {
     const list = readList()
-    for (const read of ['api.mcpServers()', 'api.importableMcp()', 'api.mcpPoolStats()', 'api.toolGroups()']) {
+    for (const read of ['api.importableMcp()', 'api.mcpPoolStats()', 'api.toolGroups()']) {
       const at = list.indexOf(read)
       expect(at, `${read} must be in the list`).toBeGreaterThan(-1)
       expect(list.slice(at, at + 90), `${read} is peripheral and stays tolerant`).toMatch(/\.catch\(/)
     }
+    expect(code).toMatch(/useQuery<McpServer\[\]>\('tools:servers', \(\) => api\.mcpServers\(\)/)
+    expect(code).toMatch(/serverError && <LoadError what="MCP servers"/)
   })
 
   it('the error gate keeps a warm cache visible', () => {
