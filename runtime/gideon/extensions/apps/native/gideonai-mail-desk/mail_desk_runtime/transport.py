@@ -42,8 +42,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import replace
 import sys as _sys
+from dataclasses import replace
 from pathlib import Path as _Path
 from typing import Any
 
@@ -55,15 +55,6 @@ from typing import Any
 _APP_DIR = str(_Path(__file__).resolve().parents[1])
 if _APP_DIR not in _sys.path:
     _sys.path.insert(0, _APP_DIR)
-
-from gideon.sdk.channel import (
-    ChannelCapabilities,
-    ChannelMessage,
-    ChannelTransportProvider,
-    OutboundMessage,
-    redeem_pairing_code,
-)
-from gideon.sdk.util import app_data_dir
 
 # Import ALL runtime deps at MODULE level (not lazily inside methods): the loader only
 # keeps this app's dir on sys.path while it execs this module, so a
@@ -85,6 +76,15 @@ from mail_desk_runtime.settings import (
 from mail_desk_runtime.smtp_client import SmtplibSender
 from mail_desk_runtime.smtp_client import probe_login as smtp_probe
 from mail_desk_runtime.writes import SendRefused, live_writes_disabled
+
+from gideon.sdk.channel import (
+    ChannelCapabilities,
+    ChannelMessage,
+    ChannelTransportProvider,
+    OutboundMessage,
+    redeem_pairing_code,
+)
+from gideon.sdk.util import app_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -143,8 +143,14 @@ class MailDeskTransport(ChannelTransportProvider):
           chat reply would hit, so claiming a number would be a lie in the other direction.
         """
         return ChannelCapabilities(
-            inbound=True, threads=True, attachments=True, reactions=False,
-            edits=False, rich_text=True, typing_indicator=False, max_text_len=0,
+            inbound=True,
+            threads=True,
+            attachments=True,
+            reactions=False,
+            edits=False,
+            rich_text=True,
+            typing_indicator=False,
+            max_text_len=0,
             speaks_as_owner=True,
         )
 
@@ -198,7 +204,8 @@ class MailDeskTransport(ChannelTransportProvider):
         try:
             atomic_write(
                 self._cursor_path(),
-                json.dumps({"last_uid": int(last_uid), "uidvalidity": int(uidvalidity)}) + "\n",
+                json.dumps({"last_uid": int(last_uid), "uidvalidity": int(uidvalidity)})
+                + "\n",
             )
         except OSError:
             logger.debug("mail-desk: failed to persist IMAP cursor", exc_info=True)
@@ -209,7 +216,10 @@ class MailDeskTransport(ChannelTransportProvider):
         if self._client_factory is not None:
             return self._client_factory(settings, password)
         return Imap4Client(
-            settings.imap_host, settings.imap_port, settings.imap_user, password,
+            settings.imap_host,
+            settings.imap_port,
+            settings.imap_user,
+            password,
             use_ssl=settings.imap_use_ssl,
         )
 
@@ -217,7 +227,10 @@ class MailDeskTransport(ChannelTransportProvider):
         if self._sender_factory is not None:
             return self._sender_factory(settings, password)
         return SmtplibSender(
-            settings.smtp_host, settings.smtp_port, settings.smtp_user, password,
+            settings.smtp_host,
+            settings.smtp_port,
+            settings.smtp_user,
+            password,
             security=settings.smtp_security,
         )
 
@@ -237,20 +250,27 @@ class MailDeskTransport(ChannelTransportProvider):
                 self._make_sender(settings, smtp_pass),
                 settings.mailbox_address,
                 owner_id=settings.mailbox_address,
-                threads=ThreadStore(), transport=self,
+                threads=ThreadStore(),
+                transport=self,
             )
             if hasattr(services, "register_channel_delivery"):
                 services.register_channel_delivery(self._delivery)
             if getattr(services, "dashboard_state", None) is not None:
                 services.dashboard_state.channel_delivery = self._delivery
         else:
-            logger.info("MailDeskTransport: SMTP not configured — outbound delivery unavailable")
+            logger.info(
+                "MailDeskTransport: SMTP not configured — outbound delivery unavailable"
+            )
 
         if not (settings.inbound_configured and imap_pass):
-            logger.info("MailDeskTransport: IMAP not configured — inbound stays offline")
+            logger.info(
+                "MailDeskTransport: IMAP not configured — inbound stays offline"
+            )
             return
         if settings.dm_activation == ACTIVATION_OFF:
-            logger.info("MailDeskTransport: dm_activation=off — inbound disabled by settings")
+            logger.info(
+                "MailDeskTransport: dm_activation=off — inbound disabled by settings"
+            )
             return
 
         self._cursor, self._uidvalidity = self._load_cursor()
@@ -258,7 +278,9 @@ class MailDeskTransport(ChannelTransportProvider):
         self._poll_task = asyncio.ensure_future(self._poll_loop())
         logger.info(
             "MailDeskTransport: IMAP poll inbound started (folder=%s cursor=%d every %ds)",
-            settings.folder, self._cursor, settings.poll_secs,
+            settings.folder,
+            self._cursor,
+            settings.poll_secs,
         )
 
     async def stop_inbound(self) -> None:
@@ -284,9 +306,15 @@ class MailDeskTransport(ChannelTransportProvider):
             except asyncio.CancelledError:
                 raise
             except Exception:
-                backoff = min(backoff * 2, _MAX_BACKOFF) if backoff else float(settings.poll_secs)
+                backoff = (
+                    min(backoff * 2, _MAX_BACKOFF)
+                    if backoff
+                    else float(settings.poll_secs)
+                )
                 logger.warning(
-                    "mail-desk: poll cycle failed — retrying in %ss", backoff, exc_info=True
+                    "mail-desk: poll cycle failed — retrying in %ss",
+                    backoff,
+                    exc_info=True,
                 )
                 delay = backoff
             try:
@@ -302,7 +330,9 @@ class MailDeskTransport(ChannelTransportProvider):
         the loop. That split is the reason no ``imaplib`` call can stall the gateway."""
         imap_pass, _ = load_credentials()
         if not imap_pass:
-            logger.warning("mail-desk: no IMAP password in the credential store — cannot poll")
+            logger.warning(
+                "mail-desk: no IMAP password in the credential store — cannot poll"
+            )
             return
 
         fetched, uidvalidity, reset_to = await asyncio.to_thread(
@@ -316,7 +346,9 @@ class MailDeskTransport(ChannelTransportProvider):
         if reset_to is not None:
             logger.warning(
                 "mail-desk: UIDVALIDITY changed (%d → %d) — cursor reset to %d",
-                self._uidvalidity, uidvalidity, reset_to,
+                self._uidvalidity,
+                uidvalidity,
+                reset_to,
             )
             self._cursor = reset_to
             self._uidvalidity = uidvalidity
@@ -342,14 +374,20 @@ class MailDeskTransport(ChannelTransportProvider):
                     await self._dispatch(raw, uid, settings)
                 except Exception:
                     logger.warning(
-                        "mail-desk: message dispatch failed for uid %s", uid, exc_info=True
+                        "mail-desk: message dispatch failed for uid %s",
+                        uid,
+                        exc_info=True,
                     )
         finally:
             if advanced:
                 self._save_cursor(self._cursor, self._uidvalidity)
 
     def _fetch_batch(
-        self, settings: MailDeskSettings, password: str, last_uid: int, known_uidvalidity: int
+        self,
+        settings: MailDeskSettings,
+        password: str,
+        last_uid: int,
+        known_uidvalidity: int,
     ) -> tuple[list[tuple[int, bytes]], int, int | None]:
         """BLOCKING: connect, select, search, fetch.
 
@@ -377,11 +415,15 @@ class MailDeskTransport(ChannelTransportProvider):
             for uid in client.fetch_uids_since(settings.folder, last_uid):
                 raw = client.fetch_message(settings.folder, uid)
                 if not raw:
-                    logger.debug("mail-desk: empty fetch for uid %s — pausing at cursor", uid)
+                    logger.debug(
+                        "mail-desk: empty fetch for uid %s — pausing at cursor", uid
+                    )
                     break
                 out.append((uid, raw))
         except ImapError as exc:
-            logger.warning("mail-desk: IMAP poll failed: %s — will retry next cycle", exc)
+            logger.warning(
+                "mail-desk: IMAP poll failed: %s — will retry next cycle", exc
+            )
         finally:
             try:
                 client.close()
@@ -460,7 +502,9 @@ class MailDeskTransport(ChannelTransportProvider):
             # resolve an approval by mailing a token.
             from gideon.sdk.channel import is_allowed_sender
 
-            if is_allowed_sender(PROVIDER, cm.sender) and self._delivery.resolve_reply_token(text, mail=mail, account=self):
+            if is_allowed_sender(
+                PROVIDER, cm.sender
+            ) and self._delivery.resolve_reply_token(text, mail=mail, account=self):
                 return
 
         # The guarded door (EA-7). Core applies the trust gate, the non-owner-content fence,
@@ -491,7 +535,9 @@ class MailDeskTransport(ChannelTransportProvider):
         if verdict.allowed:
             publish_inbound(cm, text=text)
 
-    async def _try_pairing(self, cm: ChannelMessage, text: str, settings: MailDeskSettings) -> bool:
+    async def _try_pairing(
+        self, cm: ChannelMessage, text: str, settings: MailDeskSettings
+    ) -> bool:
         """Redeem a pairing code found in *text*. Returns whether pairing happened.
 
         Pairing on this channel is "a reply containing the code", so the code is searched
@@ -513,7 +559,9 @@ class MailDeskTransport(ChannelTransportProvider):
                             cm.thread_id,
                         )
                     except Exception:
-                        logger.debug("mail-desk: pairing confirmation send failed", exc_info=True)
+                        logger.debug(
+                            "mail-desk: pairing confirmation send failed", exc_info=True
+                        )
                 logger.info("mail-desk: sender %s paired via code", cm.sender)
                 return True
         return False
@@ -549,7 +597,9 @@ class MailDeskTransport(ChannelTransportProvider):
             settings.mailbox_address,
             owner_id=settings.mailbox_address,
         )
-        sent = await delivery.deliver_text(message.channel_id, message.text, message.thread_id)
+        sent = await delivery.deliver_text(
+            message.channel_id, message.text, message.thread_id
+        )
         return bool(sent)
 
     async def health(self) -> dict[str, Any]:
@@ -590,8 +640,13 @@ class MailDeskTransport(ChannelTransportProvider):
                 results.append("IMAP: no password configured")
             else:
                 good, detail = await asyncio.to_thread(
-                    imap_probe, settings.imap_host, settings.imap_port, settings.imap_user,
-                    imap_pass, settings.folder, use_ssl=settings.imap_use_ssl,
+                    imap_probe,
+                    settings.imap_host,
+                    settings.imap_port,
+                    settings.imap_user,
+                    imap_pass,
+                    settings.folder,
+                    use_ssl=settings.imap_use_ssl,
                 )
                 ok = ok and good
                 results.append(detail)
@@ -601,8 +656,12 @@ class MailDeskTransport(ChannelTransportProvider):
                 results.append("SMTP: no password configured")
             else:
                 good, detail = await asyncio.to_thread(
-                    smtp_probe, settings.smtp_host, settings.smtp_port, settings.smtp_user,
-                    smtp_pass, security=settings.smtp_security,
+                    smtp_probe,
+                    settings.smtp_host,
+                    settings.smtp_port,
+                    settings.smtp_user,
+                    smtp_pass,
+                    security=settings.smtp_security,
                 )
                 ok = ok and good
                 results.append(detail)

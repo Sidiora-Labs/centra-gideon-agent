@@ -46,13 +46,6 @@ _APP_DIR = str(_Path(__file__).resolve().parents[1])
 if _APP_DIR not in _sys.path:
     _sys.path.insert(0, _APP_DIR)
 
-from gideon.sdk.channel import (
-    ChannelCapabilities,
-    ChannelMessage,
-    ChannelTransportProvider,
-    OutboundMessage,
-)
-
 # Import ALL runtime deps at MODULE level (not lazily inside methods): the loader
 # only keeps this app's dir on sys.path while it execs this module, so a
 # ``from discord_desk.X import`` inside a method would run LATER, off the path,
@@ -68,6 +61,13 @@ from discord_desk.settings import (
     reload_settings,
 )
 from discord_desk.writes import SendRefused, live_writes_disabled
+
+from gideon.sdk.channel import (
+    ChannelCapabilities,
+    ChannelMessage,
+    ChannelTransportProvider,
+    OutboundMessage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +109,13 @@ class DiscordDeskTransport(ChannelTransportProvider):
         #   rich_text        → Discord renders standard markdown natively
         # Discord caps a message body at 2000 chars.
         return ChannelCapabilities(
-            inbound=True, threads=True, attachments=True, reactions=True,
-            edits=True, rich_text=True, typing_indicator=True,
+            inbound=True,
+            threads=True,
+            attachments=True,
+            reactions=True,
+            edits=True,
+            rich_text=True,
+            typing_indicator=True,
             max_text_len=DISCORD_DESK_MAX_TEXT,
             owner_pairing=True,
         )
@@ -167,7 +172,9 @@ class DiscordDeskTransport(ChannelTransportProvider):
             info = await self._api.get_gateway_bot()  # type: ignore[union-attr]
             return str(info.get("url", "")) or DEFAULT_GATEWAY_URL
         except Exception:
-            logger.warning("discord: GET /gateway/bot failed — using the default gateway URL")
+            logger.warning(
+                "discord: GET /gateway/bot failed — using the default gateway URL"
+            )
             return DEFAULT_GATEWAY_URL
 
     @staticmethod
@@ -220,7 +227,9 @@ class DiscordDeskTransport(ChannelTransportProvider):
         author = message.get("author") or {}
         if bool(author.get("bot")):
             return True
-        return bool(self._own_user_id) and str(author.get("id", "")) == self._own_user_id
+        return (
+            bool(self._own_user_id) and str(author.get("id", "")) == self._own_user_id
+        )
 
     def _to_channel_message(self, message: dict[str, Any]) -> ChannelMessage:
         author = message.get("author") or {}
@@ -235,7 +244,9 @@ class DiscordDeskTransport(ChannelTransportProvider):
             metadata={
                 # The presence/absence of guild_id is Discord's DM signal.
                 "guild_id": str(message.get("guild_id", "") or ""),
-                "sender_name": str(author.get("global_name") or author.get("username") or ""),
+                "sender_name": str(
+                    author.get("global_name") or author.get("username") or ""
+                ),
                 "username": str(author.get("username", "") or ""),
             },
         )
@@ -262,7 +273,9 @@ class DiscordDeskTransport(ChannelTransportProvider):
         # linking and the turn itself — the routing this transport used to carry a
         # copy of. This transport keeps only the channel-specific outbound half:
         # delivering the verdict's canned reply as a Discord message.
-        verdict = await self._services.deliver_channel_inbound(PROVIDER, cm, is_dm=is_dm)
+        verdict = await self._services.deliver_channel_inbound(
+            PROVIDER, cm, is_dm=is_dm
+        )
         if verdict.canned_reply and self._delivery is not None:
             try:
                 await self._delivery.deliver_text(cm.channel_id, verdict.canned_reply)

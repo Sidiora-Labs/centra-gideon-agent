@@ -29,14 +29,17 @@ conversation references both prior ones, in order, and a mail client shows one t
 from __future__ import annotations
 
 import asyncio
-import json
 import hashlib
-import re
+import json
 import logging
+import re
 import secrets
 from email.message import EmailMessage
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import quote
+
+from mail_desk_runtime.mime import build_outbound, build_references, reply_subject
+from mail_desk_runtime.smtp_client import SmtpError, SmtpSender
 
 from gideon.sdk.channel import (
     atomic_write,
@@ -45,9 +48,7 @@ from gideon.sdk.channel import (
     redact_exfiltration_urls,
 )
 from gideon.sdk.util import app_data_dir
-
-from mail_desk_runtime.mime import build_outbound, build_references, reply_subject
-from mail_desk_runtime.smtp_client import SmtpError, SmtpSender
+from gideon.security.approval_answer import Principal
 
 logger = logging.getLogger(__name__)
 
@@ -79,11 +80,24 @@ def _safe(text: str) -> str:
 class ThreadState:
     """What one mail thread needs for the next reply to land in the same conversation."""
 
-    __slots__ = ("root", "last_message_id", "references", "subject", "correspondent", "name")
+    __slots__ = (
+        "root",
+        "last_message_id",
+        "references",
+        "subject",
+        "correspondent",
+        "name",
+    )
 
     def __init__(
-        self, root: str, *, last_message_id: str = "", references: str = "",
-        subject: str = "", correspondent: str = "", name: str = "",
+        self,
+        root: str,
+        *,
+        last_message_id: str = "",
+        references: str = "",
+        subject: str = "",
+        correspondent: str = "",
+        name: str = "",
     ) -> None:
         self.root = root
         self.last_message_id = last_message_id
@@ -122,7 +136,9 @@ class ThreadStore:
 
     def __init__(self, path_provider: Any = None) -> None:
         self._threads: dict[str, ThreadState] = {}
-        self._path_provider = path_provider or (lambda: app_data_dir(_APP) / _THREADS_FILE)
+        self._path_provider = path_provider or (
+            lambda: app_data_dir(_APP) / _THREADS_FILE
+        )
         self._loaded = False
 
     def _path(self):
@@ -158,8 +174,14 @@ class ThreadStore:
         return self._threads.get(root)
 
     def note_message(
-        self, root: str, *, message_id: str, references: str = "", subject: str = "",
-        correspondent: str = "", name: str = "",
+        self,
+        root: str,
+        *,
+        message_id: str,
+        references: str = "",
+        subject: str = "",
+        correspondent: str = "",
+        name: str = "",
     ) -> ThreadState:
         """Record a message (inbound or outbound) as the newest link in *root*'s chain."""
         self._ensure_loaded()
@@ -181,27 +203,60 @@ class ThreadStore:
         return st
 
 
+if TYPE_CHECKING:
+    from .transport import MailDeskTransport
+
+
 class _PendingApproval:
-    __slots__ = ("future", "token", "request_id", "channel", "thread", "message_id", "answers", "delivery", "owner", "tenant", "answerer", "on_answer", "chosen_answer", "minimum_uid", "uidvalidity")
+    __slots__ = (
+        "future",
+        "token",
+        "request_id",
+        "channel",
+        "thread",
+        "message_id",
+        "answers",
+        "delivery",
+        "owner",
+        "tenant",
+        "answerer",
+        "on_answer",
+        "chosen_answer",
+        "minimum_uid",
+        "uidvalidity",
+    )
 
     def __init__(self, request_id: str, token: str, channel: str) -> None:
         self.future: asyncio.Future = asyncio.get_event_loop().create_future()
         self.token = token
         self.request_id = request_id
         self.channel = channel
-        self.thread = self.message_id = self.owner = self.tenant = self.chosen_answer = ""
-        self.answerer = self.on_answer = self.delivery = None
+        self.thread = self.message_id = self.owner = self.tenant = (
+            self.chosen_answer
+        ) = ""
+        self.answerer: Principal | None = None
+        self.on_answer: Callable[[str, Principal], bool] | None = None
+        self.delivery: MailDeskDelivery | None = None
         self.minimum_uid = self.uidvalidity = 0
-        from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
-        self.answers = ONE_CALL_ANSWERS
+        from gideon.integrations.channel_delivery import (
+            ONE_CALL_ANSWERS,
+            ApprovalAnswer,
+        )
+
+        self.answers: tuple[ApprovalAnswer, ...] = ONE_CALL_ANSWERS
 
 
 class MailDeskDelivery:
     """Renders + delivers gateway results over SMTP. Implements ChannelDelivery."""
 
     def __init__(
-        self, sender: SmtpSender, from_addr: str, owner_id: str = "",
-        threads: ThreadStore | None = None, *, transport: Any = None,
+        self,
+        sender: SmtpSender,
+        from_addr: str,
+        owner_id: str = "",
+        threads: ThreadStore | None = None,
+        *,
+        transport: MailDeskTransport | None = None,
     ) -> None:
         self._transport = transport
         self._approval_threads: dict[str, dict] = {}
@@ -219,9 +274,18 @@ class MailDeskDelivery:
         if self._transport is None:
             return ""
         settings = settings or self._transport._settings()
-        fields = (settings.mailbox_address.strip().lower(), settings.imap_host, settings.imap_port,
-                  settings.imap_user, settings.imap_use_ssl, settings.folder,
-                  settings.smtp_host, settings.smtp_port, settings.smtp_user, settings.smtp_security)
+        fields = (
+            settings.mailbox_address.strip().lower(),
+            settings.imap_host,
+            settings.imap_port,
+            settings.imap_user,
+            settings.imap_use_ssl,
+            settings.folder,
+            settings.smtp_host,
+            settings.smtp_port,
+            settings.smtp_user,
+            settings.smtp_security,
+        )
         return hashlib.sha256(json.dumps(fields).encode()).hexdigest()
 
     def note_account(self, settings: Any) -> None:
@@ -232,21 +296,38 @@ class MailDeskDelivery:
         from gideon.integrations.channel_delivery import raw_delivery_for
         from gideon.integrations.channel_transports import get_transport
         from gideon.integrations.channel_trust import is_allowed_sender
+
         owner = owner_id_for("mail-desk").strip().lower()
-        if (not owner or not self._account or self._received_account != self._account
+        if (
+            not owner
+            or not self._account
+            or self._received_account != self._account
             or self._account_identity() != self._account
-            or self._transport is None or self._transport._stopping
-            or not self._transport.connected or get_transport("mail-desk") is not self._transport
-            or raw_delivery_for("mail-desk") is not self or not is_allowed_sender("mail-desk", owner)):
+            or self._transport is None
+            or self._transport._stopping
+            or not self._transport.connected
+            or get_transport("mail-desk") is not self._transport
+            or raw_delivery_for("mail-desk") is not self
+            or not is_allowed_sender("mail-desk", owner)
+        ):
             return None
         settings = self._transport._settings()
         mailbox = settings.mailbox_address.strip().lower()
         observed = self._approval_threads.get(thread, {})
         tenant = f"mail-desk:{self._account}:{self._transport._uidvalidity}"
-        private = (channel.strip().lower() == owner and observed.get("sender") == owner
-                   and observed.get("recipients") == {mailbox} and observed.get("tenant") == tenant)
-        return {"owner": owner, "tenant": tenant, "transport": self._transport,
-                "private": bool(private), "mailbox": mailbox}
+        private = (
+            channel.strip().lower() == owner
+            and observed.get("sender") == owner
+            and observed.get("recipients") == {mailbox}
+            and observed.get("tenant") == tenant
+        )
+        return {
+            "owner": owner,
+            "tenant": tenant,
+            "transport": self._transport,
+            "private": bool(private),
+            "mailbox": mailbox,
+        }
 
     async def prepare_approval_channel(self, channel: str, *, thread: str = "") -> bool:
         identity = self.approval_identity(channel, thread=thread)
@@ -265,8 +346,11 @@ class MailDeskDelivery:
             return
         identity = self.approval_identity(str(getattr(mail, "from_addr", "")))
         if identity is not None:
-            self._approval_threads[root] = {"sender": str(mail.from_addr).strip().lower(),
-                "recipients": {str(addr).strip().lower() for addr in mail.to_addrs}, "tenant": identity["tenant"]}
+            self._approval_threads[root] = {
+                "sender": str(mail.from_addr).strip().lower(),
+                "recipients": {str(addr).strip().lower() for addr in mail.to_addrs},
+                "tenant": identity["tenant"],
+            }
             if len(self._approval_threads) > MAX_THREADS:
                 self._approval_threads.pop(next(iter(self._approval_threads)))
         self._threads.note_message(
@@ -293,8 +377,14 @@ class MailDeskDelivery:
             return False
 
     async def _deliver(
-        self, channel: str, thread_ts: str, subject: str, body: str, *,
-        html_body: str = "", attachments: list[tuple[str, str, bytes]] | None = None,
+        self,
+        channel: str,
+        thread_ts: str,
+        subject: str,
+        body: str,
+        *,
+        html_body: str = "",
+        attachments: list[tuple[str, str, bytes]] | None = None,
     ) -> str:
         """Build + send one message into *channel*, threaded onto *thread_ts*.
 
@@ -302,20 +392,29 @@ class MailDeskDelivery:
         when there was nothing to send to or the send failed."""
         to_addr = self._resolve_recipient(channel, thread_ts)
         if not to_addr:
-            logger.debug("mail-desk: no recipient for channel=%r thread=%r", channel, thread_ts)
+            logger.debug(
+                "mail-desk: no recipient for channel=%r thread=%r", channel, thread_ts
+            )
             return ""
 
         state = self._threads.get(thread_ts) if thread_ts else None
         in_reply_to = state.last_message_id if state else ""
-        references = build_references(
-            state.references if state else "", in_reply_to
-        ) if state else ""
+        references = (
+            build_references(state.references if state else "", in_reply_to)
+            if state
+            else ""
+        )
         subj = subject or (reply_subject(state.subject) if state else "Gideon")
 
         msg = build_outbound(
-            from_addr=self._from, to_addr=to_addr, subject=subj, body=_safe(body),
+            from_addr=self._from,
+            to_addr=to_addr,
+            subject=subj,
+            body=_safe(body),
             html_body=_safe(html_body) if html_body else "",
-            in_reply_to=in_reply_to, references=references, attachments=attachments,
+            in_reply_to=in_reply_to,
+            references=references,
+            attachments=attachments,
         )
         if not await self._send(msg):
             return ""
@@ -325,7 +424,11 @@ class MailDeskDelivery:
         # references it too — this is what makes three-message continuity hold.
         root = thread_ts or sent_id
         self._threads.note_message(
-            root, message_id=sent_id, references=references, subject=subj, correspondent=to_addr
+            root,
+            message_id=sent_id,
+            references=references,
+            subject=subj,
+            correspondent=to_addr,
         )
         return sent_id
 
@@ -357,16 +460,27 @@ class MailDeskDelivery:
     # ── text / rich ──
 
     async def deliver_text(
-        self, channel: str, text: str, thread_ts: str = "", *,
-        unfurl_links: bool | None = None, unfurl_media: bool | None = None,
+        self,
+        channel: str,
+        text: str,
+        thread_ts: str = "",
+        *,
+        unfurl_links: bool | None = None,
+        unfurl_media: bool | None = None,
         reply_broadcast: bool | None = None,
     ) -> str:
         """Post plain text. The link-preview/broadcast hints have no mail analogue."""
         return await self._deliver(channel, thread_ts, "", text)
 
     async def deliver_rich(
-        self, channel: str, payload: Any, fallback_text: str, *,
-        thread_ts: str = "", unfurl_links: bool = True, unfurl_media: bool = True,
+        self,
+        channel: str,
+        payload: Any,
+        fallback_text: str,
+        *,
+        thread_ts: str = "",
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
         reply_broadcast: bool = False,
     ) -> str:
         """Deliver a rich payload as an HTML alternative (C3: MAY, and we do).
@@ -377,7 +491,9 @@ class MailDeskDelivery:
         html = ""
         if isinstance(payload, dict) and isinstance(payload.get("html"), str):
             html = payload["html"]
-        return await self._deliver(channel, thread_ts, "", fallback_text, html_body=html)
+        return await self._deliver(
+            channel, thread_ts, "", fallback_text, html_body=html
+        )
 
     async def deliver_cron_result(
         self, channel: str, job_name: str, job_id: str, text: str, thread_ts: str = ""
@@ -392,7 +508,9 @@ class MailDeskDelivery:
         delivery target for this channel — see the README's deferral note."""
         return await self._deliver(channel, thread_ts, f"[Gideon] {title}", text)
 
-    async def deliver_chat_mirror(self, channel: str, text: str, thread_ts: str = "") -> None:
+    async def deliver_chat_mirror(
+        self, channel: str, text: str, thread_ts: str = ""
+    ) -> None:
         """Mirror a dashboard reply into the mail thread.
 
         A trailing ``[OPTIONS: …]`` block becomes a numbered list the recipient answers by
@@ -462,8 +580,14 @@ class MailDeskDelivery:
     # ── attachments (C3: SHOULD — MIME parts) ──
 
     async def upload_attachment(
-        self, channel: str, file_path: str, *, filename: str = "", thread_ts: str = "",
-        title: str = "", initial_comment: str = "",
+        self,
+        channel: str,
+        file_path: str,
+        *,
+        filename: str = "",
+        thread_ts: str = "",
+        title: str = "",
+        initial_comment: str = "",
     ) -> str:
         """Attach a file as a MIME part on a message into the thread.
 
@@ -476,17 +600,25 @@ class MailDeskDelivery:
         try:
             payload = await asyncio.to_thread(_read_bytes, file_path)
         except OSError:
-            logger.warning("mail-desk: cannot read attachment %s", file_path, exc_info=True)
+            logger.warning(
+                "mail-desk: cannot read attachment %s", file_path, exc_info=True
+            )
             return ""
         mimetype = mimetypes.guess_type(name)[0] or "application/octet-stream"
         body = initial_comment or title or f"Attached: {name}"
         return await self._deliver(
-            channel, thread_ts, title or "", body, attachments=[(name, mimetype, payload)]
+            channel,
+            thread_ts,
+            title or "",
+            body,
+            attachments=[(name, mimetype, payload)],
         )
 
     # ── streaming: MUST-NOT for this channel (C3). Explicit no-ops, not accidents. ──
 
-    async def start_stream(self, channel: str, thread_ts: str = "", initial_text: str = "") -> str:
+    async def start_stream(
+        self, channel: str, thread_ts: str = "", initial_text: str = ""
+    ) -> str:
         """No streaming affordance: returns "" so core skips live animation entirely.
 
         Sending a mail per token would be absurd, and core's mirror path treats "" as "this
@@ -494,7 +626,12 @@ class MailDeskDelivery:
         return ""
 
     async def append_stream_task(
-        self, channel: str, stream_ts: str, task_id: str, title: str, status: str,
+        self,
+        channel: str,
+        stream_ts: str,
+        task_id: str,
+        title: str,
+        status: str,
     ) -> None:
         """No-op: there is no in-flight message to append to (see :meth:`start_stream`)."""
         return None
@@ -506,8 +643,13 @@ class MailDeskDelivery:
     # ── approval via reply token (C3: SHOULD) ──
 
     async def request_approval(
-        self, event: Any, *, source: str, parent_session_key: str = "",
-        sessions: Any = None, on_prompted: Any = None,
+        self,
+        event: Any,
+        *,
+        source: str,
+        parent_session_key: str = "",
+        sessions: Any = None,
+        on_prompted: Any = None,
     ) -> bool | None:
         """Mail the owner an approve/deny prompt and wait for their reply.
 
@@ -516,8 +658,12 @@ class MailDeskDelivery:
         transport resolves this future when an inbound message from an ALLOWED sender
         contains ``APPROVE <token>`` or ``DENY <token>`` (:meth:`resolve_reply_token`).
         ``on_prompted(pending)`` lets core race a dashboard prompt against this one."""
+        from gideon.integrations.channel_delivery import (
+            ONE_CALL_ANSWERS,
+            offered_answers,
+        )
         from gideon.security.approval_brief import approval_brief_for
-        from gideon.integrations.channel_delivery import offered_answers, ONE_CALL_ANSWERS
+
         identity = self.approval_identity("")
         if identity is None:
             return None
@@ -530,12 +676,16 @@ class MailDeskDelivery:
             if sessions.get_channel_provider(history_key) == "mail-desk":
                 thread_ts, channel = sessions.get_channel_link(history_key)
         channel = channel or identity["owner"]
-        if not channel or "@" not in channel or channel.strip().lower() != identity["owner"]:
+        if (
+            not channel
+            or "@" not in channel
+            or channel.strip().lower() != identity["owner"]
+        ):
             return None
         identity = self.approval_identity(channel, thread=thread_ts or "")
         if identity is None:
             return None
-        brief = approval_brief_for(event)
+        brief = approval_brief_for(event) or {}
         answers = offered_answers(brief.get("answers")) or ONE_CALL_ANSWERS
         if not identity["private"]:
             answers = ONE_CALL_ANSWERS
@@ -545,9 +695,20 @@ class MailDeskDelivery:
         pending = _PendingApproval(request_id, token, channel)
         pending.answers, pending.delivery = answers, self
         pending.owner, pending.tenant = identity["owner"], identity["tenant"]
-        pending.minimum_uid, pending.uidvalidity = self._transport._cursor, self._transport._uidvalidity
+        transport = self._transport
+        if transport is None:
+            return None
+        pending.minimum_uid, pending.uidvalidity = (
+            transport._cursor,
+            transport._uidvalidity,
+        )
         lines = [f"Gideon needs your approval for a {source} action:", title]
-        for value in (getattr(event, "tool_purpose", ""), getattr(event, "tool_input", ""), brief.get("summary"), brief.get("blastRadiusLine")):
+        for value in (
+            getattr(event, "tool_purpose", ""),
+            getattr(event, "tool_input", ""),
+            brief.get("summary"),
+            brief.get("blastRadiusLine"),
+        ):
             if value:
                 lines.append(_safe(str(value)))
         lines.append("Reply to this message with exactly one offered answer:")
@@ -555,40 +716,68 @@ class MailDeskDelivery:
             lines.append(f"{answer.label}: {answer.word} {token}")
             if answer.promise:
                 lines.append(answer.promise)
-        sent = await self._deliver(channel, thread_ts or "", f"[Gideon] Approval needed: {title}"[:200], "\n\n".join(lines))
+        sent = await self._deliver(
+            channel,
+            thread_ts or "",
+            f"[Gideon] Approval needed: {title}"[:200],
+            "\n\n".join(lines),
+        )
         if not sent:
             return None
         pending.message_id, pending.thread = sent, thread_ts or sent
         self._pending[token] = pending
         shared = bool(on_prompted and on_prompted(pending))
         from gideon.security.approval_grants import approval_window_secs
+
         outcome = "cancelled"
         cancelled = False
         try:
-            outcome = await pending.future if shared else await asyncio.wait_for(pending.future, timeout=approval_window_secs(_APPROVAL_TIMEOUT))
+            outcome = (
+                await pending.future
+                if shared
+                else await asyncio.wait_for(
+                    pending.future, timeout=approval_window_secs(_APPROVAL_TIMEOUT)
+                )
+            )
         except asyncio.TimeoutError:
             outcome = "expired"
         except asyncio.CancelledError:
             cancelled = True
         finally:
             self._pending.pop(token, None)
-        status = {"approved": "Approved", "rejected": "Denied", "expired": "Expired", "cancelled": "Cancelled"}.get(outcome, "Could not confirm")
-        chosen = next((answer for answer in answers if answer.key == pending.chosen_answer), None)
+        status = {
+            "approved": "Approved",
+            "rejected": "Denied",
+            "expired": "Expired",
+            "cancelled": "Cancelled",
+        }.get(outcome, "Could not confirm")
+        chosen = next(
+            (answer for answer in answers if answer.key == pending.chosen_answer), None
+        )
         if chosen is not None and chosen.promise and outcome == "approved":
             status += " — " + chosen.promise
         # Email cannot edit an earlier prompt; a same-thread ending closes its capability.
         if self.approval_identity(channel, thread=pending.thread) is not None:
-            await self._deliver(channel, pending.thread, f"[Gideon] Approval {status.split(' — ')[0]}",
-                                f"{title}: {status}. This approval is closed; further replies cannot change it.")
+            await self._deliver(
+                channel,
+                pending.thread,
+                f"[Gideon] Approval {status.split(' — ')[0]}",
+                f"{title}: {status}. This approval is closed; further replies cannot change it.",
+            )
         if cancelled:
             raise asyncio.CancelledError
         return outcome == "approved"
 
-    def resolve_reply_token(self, text: str, *, mail: Any = None, account: Any = None) -> bool:
+    def resolve_reply_token(
+        self, text: str, *, mail: Any = None, account: Any = None
+    ) -> bool:
         """Resolve only one exact offered answer from the current owner's actual reply."""
-        if mail is None or account is not self._transport:
+        transport = self._transport
+        if transport is None or mail is None or account is not transport:
             return False
-        match = re.fullmatch(r"(APPROVE|TRUST|DENY)\s+([A-F0-9]{8})", (text or "").strip(), re.IGNORECASE)
+        match = re.fullmatch(
+            r"(APPROVE|TRUST|DENY)\s+([A-F0-9]{8})", (text or "").strip(), re.IGNORECASE
+        )
         if match is None:
             return False
         word, token = match.group(1).upper(), match.group(2).upper()
@@ -597,16 +786,27 @@ class MailDeskDelivery:
             return False
         identity = self.approval_identity(pending.channel, thread=pending.thread)
         sender = str(getattr(mail, "from_addr", "")).strip().lower()
-        if (identity is None or sender != pending.owner or sender != identity["owner"]
-            or identity["tenant"] != pending.tenant or mail.thread_root != pending.thread
-            or mail.in_reply_to != pending.message_id or not mail.message_id
-            or mail.uid <= pending.minimum_uid or account._uidvalidity != pending.uidvalidity
-            or {str(addr).strip().lower() for addr in mail.to_addrs} != {identity["mailbox"]}):
+        if (
+            identity is None
+            or sender != pending.owner
+            or sender != identity["owner"]
+            or identity["tenant"] != pending.tenant
+            or mail.thread_root != pending.thread
+            or mail.in_reply_to != pending.message_id
+            or not mail.message_id
+            or mail.uid <= pending.minimum_uid
+            or transport._uidvalidity != pending.uidvalidity
+            or {str(addr).strip().lower() for addr in mail.to_addrs}
+            != {identity["mailbox"]}
+        ):
             return False
-        chosen = next((answer for answer in pending.answers if answer.word == word), None)
+        chosen = next(
+            (answer for answer in pending.answers if answer.word == word), None
+        )
         if chosen is None:
             return False
-        from gideon.security.approval_answer import on_channel
+        from gideon.security.approval_answer import Principal, on_channel
+
         by = on_channel("mail-desk", sender, pending.tenant)
         if callable(pending.on_answer):
             if not pending.on_answer(chosen.key, by):

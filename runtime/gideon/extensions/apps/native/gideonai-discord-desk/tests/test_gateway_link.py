@@ -9,14 +9,12 @@ forms, dispatch routing and sequence tracking, and the non-1000 close that keeps
 session resumable. The fake WebSocket's own two disciplines — every frame acked, and
 recorded frames verbatim — are what keep the fake honest; both are pinned here too."""
 
-
 from __future__ import annotations
 
 import asyncio
 import json
 
 import pytest
-
 from discord_desk.gateway import (
     GATEWAY_VERSION,
     INTENT_DIRECT_MESSAGES,
@@ -45,8 +43,11 @@ def _dispatch(event: str, data: dict, seq: int) -> dict:
 
 READY = _dispatch(
     "READY",
-    {"session_id": "sess-1", "resume_gateway_url": "wss://resume.discord.gg",
-     "user": {"id": "bot-1", "username": "gidbot"}},
+    {
+        "session_id": "sess-1",
+        "resume_gateway_url": "wss://resume.discord.gg",
+        "user": {"id": "bot-1", "username": "gidbot"},
+    },
     1,
 )
 
@@ -68,7 +69,11 @@ class FakeWS:
     """
 
     def __init__(
-        self, frames: list[dict | None], *, hang_after: bool = False, auto_ack: bool = True
+        self,
+        frames: list[dict | None],
+        *,
+        hang_after: bool = False,
+        auto_ack: bool = True,
     ):
         self._queue: asyncio.Queue = asyncio.Queue()
         for frame in frames:
@@ -188,7 +193,9 @@ class TestConnectUrl:
         ws = FakeWS([HELLO, READY, None])
         h = Harness([ws])
         await h.run()
-        assert h.urls[0] == f"wss://gateway.discord.gg?v={GATEWAY_VERSION}&encoding=json"
+        assert (
+            h.urls[0] == f"wss://gateway.discord.gg?v={GATEWAY_VERSION}&encoding=json"
+        )
 
     @pytest.mark.asyncio
     async def test_resume_url_gets_the_params_too(self):
@@ -305,7 +312,9 @@ class TestHeartbeat:
         # auto_ack=False IS the zombie: beat 1 goes out, and beat 2's pre-send check
         # finds the previous ack still pending.
         first = FakeWS([HELLO, READY], hang_after=True, auto_ack=False)
-        second = FakeWS([HELLO, {"op": OP_DISPATCH, "t": "RESUMED", "s": 2, "d": {}}, None])
+        second = FakeWS(
+            [HELLO, {"op": OP_DISPATCH, "t": "RESUMED", "s": 2, "d": {}}, None]
+        )
         h = Harness([first, second])
         await h.run()
         assert h.gw.zombie_reconnects == 1
@@ -338,7 +347,9 @@ class TestReady:
 class TestResume:
     @pytest.mark.asyncio
     async def test_resume_after_drop_sends_op6_with_the_right_seq(self):
-        first = FakeWS([HELLO, READY, _dispatch("MESSAGE_CREATE", {"content": "a"}, 7), None])
+        first = FakeWS(
+            [HELLO, READY, _dispatch("MESSAGE_CREATE", {"content": "a"}, 7), None]
+        )
         second = FakeWS([HELLO, None])
         h = Harness([first, second])
         await h.run()
@@ -371,7 +382,9 @@ class TestResume:
 
     @pytest.mark.asyncio
     async def test_invalid_session_resumable_keeps_the_session(self):
-        first = FakeWS([HELLO, READY, {"op": OP_INVALID_SESSION, "d": True}], hang_after=True)
+        first = FakeWS(
+            [HELLO, READY, {"op": OP_INVALID_SESSION, "d": True}], hang_after=True
+        )
         second = FakeWS([HELLO, None])
         h = Harness([first, second])
         await h.run()
@@ -389,7 +402,14 @@ class TestResume:
 class TestDispatch:
     @pytest.mark.asyncio
     async def test_message_create_routes_to_on_message(self):
-        ws = FakeWS([HELLO, READY, _dispatch("MESSAGE_CREATE", {"content": "hi", "id": "9"}, 2), None])
+        ws = FakeWS(
+            [
+                HELLO,
+                READY,
+                _dispatch("MESSAGE_CREATE", {"content": "hi", "id": "9"}, 2),
+                None,
+            ]
+        )
         h = Harness([ws])
         await h.run()
         assert h.messages == [{"content": "hi", "id": "9"}]
@@ -397,7 +417,14 @@ class TestDispatch:
 
     @pytest.mark.asyncio
     async def test_interaction_create_routes_to_on_interaction(self):
-        ws = FakeWS([HELLO, READY, _dispatch("INTERACTION_CREATE", {"type": 3, "id": "i1"}, 2), None])
+        ws = FakeWS(
+            [
+                HELLO,
+                READY,
+                _dispatch("INTERACTION_CREATE", {"type": 3, "id": "i1"}, 2),
+                None,
+            ]
+        )
         h = Harness([ws])
         await h.run()
         assert h.interactions == [{"type": 3, "id": "i1"}]
@@ -405,19 +432,24 @@ class TestDispatch:
 
     @pytest.mark.asyncio
     async def test_sequence_tracked_from_every_dispatch(self):
-        ws = FakeWS([
-            HELLO, READY,
-            _dispatch("MESSAGE_CREATE", {"content": "a"}, 5),
-            _dispatch("MESSAGE_CREATE", {"content": "b"}, 6),
-            None,
-        ])
+        ws = FakeWS(
+            [
+                HELLO,
+                READY,
+                _dispatch("MESSAGE_CREATE", {"content": "a"}, 5),
+                _dispatch("MESSAGE_CREATE", {"content": "b"}, 6),
+                None,
+            ]
+        )
         h = Harness([ws])
         await h.run()
         assert h.gw.sequence == 6
 
     @pytest.mark.asyncio
     async def test_unknown_event_is_ignored(self):
-        ws = FakeWS([HELLO, READY, _dispatch("TYPING_START", {"user_id": "1"}, 2), None])
+        ws = FakeWS(
+            [HELLO, READY, _dispatch("TYPING_START", {"user_id": "1"}, 2), None]
+        )
         h = Harness([ws])
         await h.run()
         assert h.messages == [] and h.interactions == []
@@ -432,12 +464,15 @@ class TestDispatch:
             if len(seen) == 1:
                 raise RuntimeError("handler blew up")
 
-        ws = FakeWS([
-            HELLO, READY,
-            _dispatch("MESSAGE_CREATE", {"content": "first"}, 2),
-            _dispatch("MESSAGE_CREATE", {"content": "second"}, 3),
-            None,
-        ])
+        ws = FakeWS(
+            [
+                HELLO,
+                READY,
+                _dispatch("MESSAGE_CREATE", {"content": "first"}, 2),
+                _dispatch("MESSAGE_CREATE", {"content": "second"}, 3),
+                None,
+            ]
+        )
         h = Harness([ws])
         h.gw._on_message = boom
         await h.run()
@@ -446,7 +481,14 @@ class TestDispatch:
 
     @pytest.mark.asyncio
     async def test_non_dict_payload_is_dropped(self):
-        ws = FakeWS([HELLO, READY, {"op": OP_DISPATCH, "t": "MESSAGE_CREATE", "s": 2, "d": []}, None])
+        ws = FakeWS(
+            [
+                HELLO,
+                READY,
+                {"op": OP_DISPATCH, "t": "MESSAGE_CREATE", "s": 2, "d": []},
+                None,
+            ]
+        )
         h = Harness([ws])
         await h.run()
         assert h.messages == []
@@ -457,8 +499,8 @@ class TestDispatch:
 
         class BadWS(FakeWS):
             async def recv(self):
-                if self._frames:
-                    frame = self._frames.pop(0)
+                if not self._queue.empty():
+                    frame = self._queue.get_nowait()
                     return None if frame is None else json.dumps(frame)
                 return "{not json"
 

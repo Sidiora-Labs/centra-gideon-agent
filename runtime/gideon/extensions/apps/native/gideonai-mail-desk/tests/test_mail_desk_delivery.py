@@ -14,18 +14,18 @@ import asyncio
 import json
 
 import pytest
-
-from gideon.sdk.channel import ProviderSettings
-
+from mail_desk_fakes import FakeSmtpServer, build_message
 from mail_desk_runtime.delivery import (
     APPROVE_WORD,
     DENY_WORD,
     MAX_THREADS,
     MailDeskDelivery,
     ThreadStore,
+    _PendingApproval,
 )
 from mail_desk_runtime.mime import parse_inbound
-from mail_desk_fakes import FakeSmtpServer, build_message
+
+from gideon.sdk.channel import ProviderSettings
 
 AGENT = "agent@example.com"
 BOB = "bob@example.com"
@@ -48,12 +48,22 @@ def wired(tmp_path):
 
 
 def _inbound(
-    *, message_id: str, in_reply_to: str = "", references: str = "", subject: str = "Question",
-    from_addr: str = BOB, body: str = "hello",
+    *,
+    message_id: str,
+    in_reply_to: str = "",
+    references: str = "",
+    subject: str = "Question",
+    from_addr: str = BOB,
+    body: str = "hello",
 ):
     raw = build_message(
-        from_addr=from_addr, to_addr=AGENT, subject=subject, message_id=message_id,
-        in_reply_to=in_reply_to, references=references, plain=body,
+        from_addr=from_addr,
+        to_addr=AGENT,
+        subject=subject,
+        message_id=message_id,
+        in_reply_to=in_reply_to,
+        references=references,
+        plain=body,
     )
     mail = parse_inbound(raw, 1)
     assert mail is not None
@@ -75,7 +85,9 @@ class TestThreadingHeaders:
     @pytest.mark.asyncio
     async def test_subject_is_re_prefixed_from_the_thread(self, wired):
         delivery, smtp, _ = wired
-        delivery.note_inbound(_inbound(message_id="<m1@example.com>", subject="Deploy plan"))
+        delivery.note_inbound(
+            _inbound(message_id="<m1@example.com>", subject="Deploy plan")
+        )
         await delivery.deliver_text(BOB, "ok", "<m1@example.com>")
         assert smtp.header("Subject") == "Re: Deploy plan"
 
@@ -132,8 +144,10 @@ class TestThreeMessageContinuity:
 
         # 3. Bob replies to OUR message, quoting the chain the way a client does.
         second = _inbound(
-            message_id="<m2@example.com>", in_reply_to=reply1_id,
-            references=f"<m1@example.com> {reply1_id}", subject="Re: Plan",
+            message_id="<m2@example.com>",
+            in_reply_to=reply1_id,
+            references=f"<m1@example.com> {reply1_id}",
+            subject="Re: Plan",
         )
         assert second.thread_root == root  # same conversation
         delivery.note_inbound(second)
@@ -146,8 +160,10 @@ class TestThreeMessageContinuity:
         assert reply1_id in refs
         assert "<m2@example.com>" in refs
         # Order is the chain order: root first, then each successive parent.
-        assert refs.index("<m1@example.com>") < refs.index(reply1_id) < refs.index(
-            "<m2@example.com>"
+        assert (
+            refs.index("<m1@example.com>")
+            < refs.index(reply1_id)
+            < refs.index("<m2@example.com>")
         )
 
     @pytest.mark.asyncio
@@ -177,7 +193,9 @@ class TestThreadStorePersistence:
         otherwise start a NEW thread in the user's client."""
         path = tmp_path / "threads.json"
         first = ThreadStore(path_provider=lambda: path)
-        first.note_message("<root@x>", message_id="<m1@x>", subject="S", correspondent=BOB)
+        first.note_message(
+            "<root@x>", message_id="<m1@x>", subject="S", correspondent=BOB
+        )
 
         second = ThreadStore(path_provider=lambda: path)
         state = second.get("<root@x>")
@@ -197,7 +215,9 @@ class TestThreadStorePersistence:
         assert ThreadStore(path_provider=lambda: path).get("<root@x>") is None
 
     def test_missing_file_is_not_an_error(self, tmp_path):
-        assert ThreadStore(path_provider=lambda: tmp_path / "nope.json").get("<x>") is None
+        assert (
+            ThreadStore(path_provider=lambda: tmp_path / "nope.json").get("<x>") is None
+        )
 
     def test_store_is_trimmed_to_the_bound(self, tmp_path):
         path = tmp_path / "threads.json"
@@ -235,13 +255,18 @@ class TestStreamingIsAbsent:
     @pytest.mark.asyncio
     async def test_start_stream_returns_empty_and_sends_nothing(self, wired):
         delivery, smtp, _ = wired
-        assert await delivery.start_stream(BOB, "<m1@x>", initial_text="Thinking…") == ""
+        assert (
+            await delivery.start_stream(BOB, "<m1@x>", initial_text="Thinking…") == ""
+        )
         assert smtp.sent == []  # a mail per token would be absurd
 
     @pytest.mark.asyncio
     async def test_append_and_stop_are_no_ops(self, wired):
         delivery, smtp, _ = wired
-        assert await delivery.append_stream_task(BOB, "", "t1", "Reading", "in_progress") is None
+        assert (
+            await delivery.append_stream_task(BOB, "", "t1", "Reading", "in_progress")
+            is None
+        )
         assert await delivery.stop_stream(BOB, "") is None
         assert smtp.sent == []
 
@@ -268,7 +293,9 @@ class TestDeliveryMethods:
     @pytest.mark.asyncio
     async def test_deliver_rich_falls_back_to_plain_for_an_opaque_payload(self, wired):
         delivery, smtp, _ = wired
-        await delivery.deliver_rich(BOB, {"blocks": [{"type": "section"}]}, "plain fallback")
+        await delivery.deliver_rich(
+            BOB, {"blocks": [{"type": "section"}]}, "plain fallback"
+        )
         assert smtp.last.get_content_type() == "text/plain"
         assert "plain fallback" in smtp.body_text()
 
@@ -336,7 +363,10 @@ class TestDeliveryMethods:
     @pytest.mark.asyncio
     async def test_resolve_user_name_falls_back_to_the_address(self, wired):
         delivery, _, _ = wired
-        assert await delivery.resolve_user_name("nobody@example.com") == "nobody@example.com"
+        assert (
+            await delivery.resolve_user_name("nobody@example.com")
+            == "nobody@example.com"
+        )
 
     @pytest.mark.asyncio
     async def test_resolve_user_profile_shape(self, wired):
@@ -364,7 +394,9 @@ class TestDeliveryMethods:
 class TestBuildThreadLink:
     def test_mid_anchor_for_a_message_id(self, wired):
         delivery, _, _ = wired
-        assert delivery.build_thread_link(BOB, "<m1@example.com>") == "mid:m1@example.com"
+        assert (
+            delivery.build_thread_link(BOB, "<m1@example.com>") == "mid:m1@example.com"
+        )
 
     def test_percent_encodes_unsafe_characters(self, wired):
         delivery, _, _ = wired
@@ -387,7 +419,9 @@ class TestRecipientResolution:
     @pytest.mark.asyncio
     async def test_falls_back_to_the_threads_correspondent(self, wired):
         delivery, smtp, _ = wired
-        delivery.note_inbound(_inbound(message_id="<m1@x>", from_addr="dave@example.com"))
+        delivery.note_inbound(
+            _inbound(message_id="<m1@x>", from_addr="dave@example.com")
+        )
         await delivery.deliver_text("", "hi", "<m1@x>")
         assert smtp.header("To") == "dave@example.com"
 
@@ -450,7 +484,9 @@ class TestApprovalReplyToken:
     @pytest.mark.asyncio
     async def test_prompt_carries_both_verbs_and_a_token(self, wired):
         delivery, smtp, _ = wired
-        task = asyncio.ensure_future(delivery.request_approval(self._Event(), source="tool"))
+        task = asyncio.ensure_future(
+            delivery.request_approval(self._Event(), source="tool")
+        )
         await asyncio.sleep(0)
         body = smtp.body_text()
         assert APPROVE_WORD in body and DENY_WORD in body
@@ -462,10 +498,14 @@ class TestApprovalReplyToken:
     @pytest.mark.asyncio
     async def test_deny_resolves_rejected(self, wired):
         delivery, smtp, _ = wired
-        task = asyncio.ensure_future(delivery.request_approval(self._Event(), source="tool"))
+        task = asyncio.ensure_future(
+            delivery.request_approval(self._Event(), source="tool")
+        )
         await asyncio.sleep(0)
         token = next(iter(delivery._pending))
-        assert delivery.resolve_reply_token(f"please {DENY_WORD} {token} thanks") is True
+        assert (
+            delivery.resolve_reply_token(f"please {DENY_WORD} {token} thanks") is True
+        )
         assert await asyncio.wait_for(task, timeout=1.0) is False
 
     @pytest.mark.asyncio
@@ -473,7 +513,9 @@ class TestApprovalReplyToken:
         """An unrelated mail containing "approve" must not approve anything — the token
         has to be present alongside the verb."""
         delivery, smtp, _ = wired
-        task = asyncio.ensure_future(delivery.request_approval(self._Event(), source="tool"))
+        task = asyncio.ensure_future(
+            delivery.request_approval(self._Event(), source="tool")
+        )
         await asyncio.sleep(0)
         assert delivery.resolve_reply_token("sure, approve it") is False
         assert not task.done()
@@ -484,7 +526,9 @@ class TestApprovalReplyToken:
     @pytest.mark.asyncio
     async def test_the_token_alone_decides_nothing(self, wired):
         delivery, smtp, _ = wired
-        task = asyncio.ensure_future(delivery.request_approval(self._Event(), source="tool"))
+        task = asyncio.ensure_future(
+            delivery.request_approval(self._Event(), source="tool")
+        )
         await asyncio.sleep(0)
         token = next(iter(delivery._pending))
         assert delivery.resolve_reply_token(f"about request {token}") is False
@@ -496,7 +540,9 @@ class TestApprovalReplyToken:
     async def test_deny_wins_when_a_body_carries_both(self, wired):
         """A request to stop must never be read as consent."""
         delivery, smtp, _ = wired
-        task = asyncio.ensure_future(delivery.request_approval(self._Event(), source="tool"))
+        task = asyncio.ensure_future(
+            delivery.request_approval(self._Event(), source="tool")
+        )
         await asyncio.sleep(0)
         token = next(iter(delivery._pending))
         delivery.resolve_reply_token(f"{APPROVE_WORD} {token}\n> {DENY_WORD} {token}")
@@ -505,10 +551,15 @@ class TestApprovalReplyToken:
     @pytest.mark.asyncio
     async def test_case_insensitive_reply(self, wired):
         delivery, smtp, _ = wired
-        task = asyncio.ensure_future(delivery.request_approval(self._Event(), source="tool"))
+        task = asyncio.ensure_future(
+            delivery.request_approval(self._Event(), source="tool")
+        )
         await asyncio.sleep(0)
         token = next(iter(delivery._pending))
-        assert delivery.resolve_reply_token(f"{APPROVE_WORD.lower()} {token.lower()}") is True
+        assert (
+            delivery.resolve_reply_token(f"{APPROVE_WORD.lower()} {token.lower()}")
+            is True
+        )
         assert await asyncio.wait_for(task, timeout=1.0) is True
 
     @pytest.mark.asyncio
@@ -525,9 +576,11 @@ class TestApprovalReplyToken:
     @pytest.mark.asyncio
     async def test_on_prompted_hook_receives_the_pending_record(self, wired):
         delivery, smtp, _ = wired
-        seen = []
+        seen: list[_PendingApproval] = []
         task = asyncio.ensure_future(
-            delivery.request_approval(self._Event(), source="tool", on_prompted=seen.append)
+            delivery.request_approval(
+                self._Event(), source="tool", on_prompted=seen.append
+            )
         )
         # `on_prompted` fires only AFTER the send, and `_send` hops to a real worker
         # thread (`asyncio.to_thread`). One `sleep(0)` yields once, which cannot span
@@ -535,7 +588,9 @@ class TestApprovalReplyToken:
         # scheduling. Poll for the hook instead of guessing a tick count.
         deadline = asyncio.get_running_loop().time() + 1.0
         while not seen:
-            assert asyncio.get_running_loop().time() < deadline, "on_prompted never fired"
+            assert (
+                asyncio.get_running_loop().time() < deadline
+            ), "on_prompted never fired"
             await asyncio.sleep(0.001)
         assert seen[0].request_id == "req-1"
         delivery.resolve_reply_token(f"{DENY_WORD} {seen[0].token}")
@@ -545,7 +600,9 @@ class TestApprovalReplyToken:
     async def test_the_prompt_title_is_redacted(self, wired):
         delivery, smtp, _ = wired
         task = asyncio.ensure_future(
-            delivery.request_approval(self._Event(title=f"echo {FAKE_KEY}"), source="tool")
+            delivery.request_approval(
+                self._Event(title=f"echo {FAKE_KEY}"), source="tool"
+            )
         )
         await asyncio.sleep(0)
         assert FAKE_KEY_TAIL not in smtp.last.as_string()
@@ -566,10 +623,14 @@ class TestApprovalReplyToken:
             def get_channel_link(self, key):
                 return "<m1@x>", "carol@example.com"
 
-        delivery.note_inbound(_inbound(message_id="<m1@x>", from_addr="carol@example.com"))
+        delivery.note_inbound(
+            _inbound(message_id="<m1@x>", from_addr="carol@example.com")
+        )
         task = asyncio.ensure_future(
             delivery.request_approval(
-                self._Event(), source="tool", parent_session_key="dashboard:chat-1",
+                self._Event(),
+                source="tool",
+                parent_session_key="dashboard:chat-1",
                 sessions=Sessions(),
             )
         )

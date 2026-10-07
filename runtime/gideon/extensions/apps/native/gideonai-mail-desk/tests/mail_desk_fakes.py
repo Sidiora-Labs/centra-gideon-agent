@@ -94,7 +94,9 @@ class FakeSmtpServer:
         self.fail_after = fail_after
 
     def send(self, msg: EmailMessage) -> None:
-        if self.fail or (self.fail_after is not None and len(self.sent) >= self.fail_after):
+        if self.fail or (
+            self.fail_after is not None and len(self.sent) >= self.fail_after
+        ):
             from mail_desk_runtime.smtp_client import SmtpError
 
             raise SmtpError("fake: relay refused")
@@ -114,10 +116,12 @@ class FakeSmtpServer:
         if msg.is_multipart():
             for part in msg.walk():
                 if part.get_content_type() == "text/plain":
-                    payload = part.get_payload(decode=True) or b""
+                    payload = part.get_payload(decode=True)
+                    payload = payload if isinstance(payload, bytes) else b""
                     return payload.decode("utf-8", errors="replace")
             return ""
-        payload = msg.get_payload(decode=True) or b""
+        payload = msg.get_payload(decode=True)
+        payload = payload if isinstance(payload, bytes) else b""
         return payload.decode("utf-8", errors="replace")
 
 
@@ -162,7 +166,10 @@ def build_message(
     for filename, mimetype, payload in attachments or []:
         maintype, _, subtype = mimetype.partition("/")
         msg.add_attachment(
-            payload, maintype=maintype, subtype=subtype or "octet-stream", filename=filename
+            payload,
+            maintype=maintype,
+            subtype=subtype or "octet-stream",
+            filename=filename,
         )
     return msg.as_bytes()
 

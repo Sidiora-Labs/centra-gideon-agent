@@ -29,15 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
-
-from gideon.sdk.channel import (
-    is_allowed_sender,
-    is_tracked_channel,
-    redact_credentials,
-    redact_exfiltration_urls,
-)
-from gideon.security.approval_answer import on_channel
+from typing import TYPE_CHECKING, Any, Callable
 
 from discord_desk.api import (
     BUTTON_STYLE_DANGER,
@@ -47,6 +39,14 @@ from discord_desk.api import (
     DISCORD_DESK_MAX_TEXT,
     DiscordDeskApi,
 )
+
+from gideon.sdk.channel import (
+    is_allowed_sender,
+    is_tracked_channel,
+    redact_credentials,
+    redact_exfiltration_urls,
+)
+from gideon.security.approval_answer import Principal, on_channel
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +97,13 @@ class _StreamState:
     """Bookkeeping for one edit-streamed message."""
 
     __slots__ = (
-        "channel_id", "message_id", "last_edit", "last_text", "pending_text",
-        "base_text", "task_lines",
+        "channel_id",
+        "message_id",
+        "last_edit",
+        "last_text",
+        "pending_text",
+        "base_text",
+        "task_lines",
     )
 
     def __init__(self, channel_id: str, message_id: str, initial_text: str) -> None:
@@ -112,42 +117,74 @@ class _StreamState:
 
 
 class _PendingApproval:
-    __slots__ = ("future", "channel_id", "message_id", "request_id", "answerer", "answers", "delivery", "tenant", "owner", "guild", "application", "on_answer", "chosen_answer")
+    __slots__ = (
+        "future",
+        "channel_id",
+        "message_id",
+        "request_id",
+        "answerer",
+        "answers",
+        "delivery",
+        "tenant",
+        "owner",
+        "guild",
+        "application",
+        "on_answer",
+        "chosen_answer",
+    )
 
     def __init__(self, request_id: str, channel_id: str, message_id: str) -> None:
         self.future: asyncio.Future = asyncio.get_event_loop().create_future()
         self.channel_id = channel_id
         self.message_id = message_id
         self.request_id = request_id
-        self.answerer = self.on_answer = None
-        from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
-        self.answers = ONE_CALL_ANSWERS
-        self.delivery = None
-        self.tenant = self.owner = self.guild = self.application = self.chosen_answer = ""
+        self.answerer: Principal | None = None
+        self.on_answer: Callable[[str, Principal], bool] | None = None
+        from gideon.integrations.channel_delivery import (
+            ONE_CALL_ANSWERS,
+            ApprovalAnswer,
+        )
+
+        self.answers: tuple[ApprovalAnswer, ...] = ONE_CALL_ANSWERS
+        self.delivery: DiscordDeskDelivery | None = None
+        self.tenant = self.owner = self.guild = self.application = (
+            self.chosen_answer
+        ) = ""
 
 
-def _apply_verified_interaction(interaction: dict[str, Any], pending: _PendingApproval | None, owner_id: str) -> bool:
+def _apply_verified_interaction(
+    interaction: dict[str, Any], pending: _PendingApproval | None, owner_id: str
+) -> bool:
     """Apply only the live offered capability from its current authenticated bot."""
     if interaction.get("type") != INTERACTION_TYPE_COMPONENT:
         return False
     custom_id = str((interaction.get("data") or {}).get("custom_id", ""))
     action, _, request_id = custom_id.partition(":")
     answer = {"approve": "approved", "deny": "rejected"}.get(action, action)
-    actor = (interaction.get("member") or {}).get("user") or interaction.get("user") or {}
+    actor = (
+        (interaction.get("member") or {}).get("user") or interaction.get("user") or {}
+    )
     actor_id = str(actor.get("id", ""))
     message = interaction.get("message") or {}
     channel_id = str(interaction.get("channel_id", ""))
     if pending is None or pending.future.done() or pending.delivery is None:
         return False
     identity = pending.delivery.approval_identity(channel_id)
-    if (identity is None or actor.get("bot") or not owner_id or actor_id != owner_id
-        or actor_id != identity["owner"] or actor_id != pending.owner
+    if (
+        identity is None
+        or actor.get("bot")
+        or not owner_id
+        or actor_id != owner_id
+        or actor_id != identity["owner"]
+        or actor_id != pending.owner
         or identity["tenant"] != pending.tenant
         or str(interaction.get("application_id", "")) != pending.application
         or pending.application != identity["application"]
         or str(interaction.get("guild_id") or "") != pending.guild
-        or channel_id != pending.channel_id or str(message.get("id", "")) != pending.message_id
-        or request_id != pending.request_id):
+        or channel_id != pending.channel_id
+        or str(message.get("id", "")) != pending.message_id
+        or request_id != pending.request_id
+    ):
         return False
     chosen = next((item for item in pending.answers if item.key == answer), None)
     if chosen is None:
@@ -175,9 +212,7 @@ def _approval_ending(outcome: str) -> str:
     }.get(str(outcome), "🚫 Rejected")
 
 
-def _render_stream_tasks(
-    base_text: str, task_lines: dict[str, tuple[str, str]]
-) -> str:
+def _render_stream_tasks(base_text: str, task_lines: dict[str, tuple[str, str]]) -> str:
     marks = {
         "in_progress": "⏳",
         "complete": "✅",
@@ -187,8 +222,7 @@ def _render_stream_tasks(
         "cancelled": "↩️",
     }
     lines = [
-        f"{marks.get(status, '⏳')} {title}"
-        for title, status in task_lines.values()
+        f"{marks.get(status, '⏳')} {title}" for title, status in task_lines.values()
     ]
     return "\n".join([base_text, *lines]).strip()
 
@@ -196,7 +230,9 @@ def _render_stream_tasks(
 class DiscordDeskDelivery:
     """Renders + delivers gateway results to Discord. Implements ChannelDelivery."""
 
-    def __init__(self, api: DiscordDeskApi, owner_id: str, *, transport: Any = None) -> None:
+    def __init__(
+        self, api: DiscordDeskApi, owner_id: str, *, transport: Any = None
+    ) -> None:
         self._api = api
         self._owner_id = owner_id
         self._transport = transport
@@ -220,16 +256,28 @@ class DiscordDeskDelivery:
         from gideon.core.config.credentials import owner_id_for
         from gideon.integrations.channel_delivery import raw_delivery_for
         from gideon.integrations.channel_transports import get_transport
+
         owner = owner_id_for("discord")
         application = str(getattr(self._transport, "_own_application_id", "") or "")
-        if (not owner or not application or not is_allowed_sender("discord", owner)
-            or self._transport is None or not self._transport.connected
-            or get_transport("discord") is not self._transport or raw_delivery_for("discord") is not self):
+        if (
+            not owner
+            or not application
+            or not is_allowed_sender("discord", owner)
+            or self._transport is None
+            or not self._transport.connected
+            or get_transport("discord") is not self._transport
+            or raw_delivery_for("discord") is not self
+        ):
             return None
         current = self._approval_channels.get(channel, {})
-        return {"owner": owner, "tenant": f"discord:{application}", "transport": self._transport,
-                "application": application, "guild": current.get("guild", ""),
-                "private": current.get("private", False) and current.get("owner") == owner}
+        return {
+            "owner": owner,
+            "tenant": f"discord:{application}",
+            "transport": self._transport,
+            "application": application,
+            "guild": current.get("guild", ""),
+            "private": current.get("private", False) and current.get("owner") == owner,
+        }
 
     async def prepare_approval_channel(self, channel: str) -> bool:
         self._approval_channels.pop(channel, None)
@@ -243,10 +291,18 @@ class DiscordDeskDelivery:
         if str(actual.get("id", "")) != channel:
             return False
         recipients = actual.get("recipients") or []
-        private = (actual.get("type") == 1 and not actual.get("guild_id")
-                   and len(recipients) == 1 and str(recipients[0].get("id", "")) == identity["owner"]
-                   and not recipients[0].get("bot"))
-        self._approval_channels[channel] = {"private": bool(private), "guild": str(actual.get("guild_id") or ""), "owner": identity["owner"]}
+        private = (
+            actual.get("type") == 1
+            and not actual.get("guild_id")
+            and len(recipients) == 1
+            and str(recipients[0].get("id", "")) == identity["owner"]
+            and not recipients[0].get("bot")
+        )
+        self._approval_channels[channel] = {
+            "private": bool(private),
+            "guild": str(actual.get("guild_id") or ""),
+            "owner": identity["owner"],
+        }
         return bool(private)
 
     # ── DM resolution ──
@@ -274,8 +330,13 @@ class DiscordDeskDelivery:
 
     # ── text / rich ──
     async def deliver_text(
-        self, channel: str, text: str, thread_ts: str = "", *,
-        unfurl_links: bool | None = None, unfurl_media: bool | None = None,
+        self,
+        channel: str,
+        text: str,
+        thread_ts: str = "",
+        *,
+        unfurl_links: bool | None = None,
+        unfurl_media: bool | None = None,
         reply_broadcast: bool | None = None,
     ) -> str:
         last = ""
@@ -285,8 +346,14 @@ class DiscordDeskDelivery:
         return last
 
     async def deliver_rich(
-        self, channel: str, payload: Any, fallback_text: str, *,
-        thread_ts: str = "", unfurl_links: bool = True, unfurl_media: bool = True,
+        self,
+        channel: str,
+        payload: Any,
+        fallback_text: str,
+        *,
+        thread_ts: str = "",
+        unfurl_links: bool = True,
+        unfurl_media: bool = True,
         reply_broadcast: bool = False,
     ) -> str:
         """Deliver a rich payload. Discord's analogue of Block Kit is ``components``.
@@ -308,7 +375,9 @@ class DiscordDeskDelivery:
         parts = split_message(_safe(text), DISCORD_DESK_MAX_TEXT - len(header))
         last = ""
         for i, part in enumerate(parts or [""]):
-            msg = await self._api.create_message(channel, (header + part) if i == 0 else part)
+            msg = await self._api.create_message(
+                channel, (header + part) if i == 0 else part
+            )
             last = str(msg.get("id", "")) or last
         return last
 
@@ -322,7 +391,9 @@ class DiscordDeskDelivery:
             last = str(msg.get("id", "")) or last
         return last
 
-    async def deliver_chat_mirror(self, channel: str, text: str, thread_ts: str = "") -> None:
+    async def deliver_chat_mirror(
+        self, channel: str, text: str, thread_ts: str = ""
+    ) -> None:
         """Mirror a dashboard reply, rendering a trailing ``[OPTIONS: …]`` as buttons."""
         from gideon.sdk.channel import extract_options
 
@@ -421,14 +492,23 @@ class DiscordDeskDelivery:
 
     # ── attachments ──
     async def upload_attachment(
-        self, channel: str, file_path: str, *, filename: str = "", thread_ts: str = "",
-        title: str = "", initial_comment: str = "",
+        self,
+        channel: str,
+        file_path: str,
+        *,
+        filename: str = "",
+        thread_ts: str = "",
+        title: str = "",
+        initial_comment: str = "",
     ) -> str:
         """Upload a file. Discord renders images inline from the attachment itself,
         so there is no photo-vs-document split to make (unlike Telegram)."""
         caption = _safe(initial_comment or title or "")
         msg = await self._api.upload_file(
-            channel, file_path, filename=filename, content=caption[:DISCORD_DESK_MAX_TEXT]
+            channel,
+            file_path,
+            filename=filename,
+            content=caption[:DISCORD_DESK_MAX_TEXT],
         )
         return str(msg.get("id", ""))
 
@@ -452,7 +532,9 @@ class DiscordDeskDelivery:
             return False
 
     # ── edit-based streaming ──
-    async def start_stream(self, channel: str, thread_ts: str = "", initial_text: str = "") -> str:
+    async def start_stream(
+        self, channel: str, thread_ts: str = "", initial_text: str = ""
+    ) -> str:
         text = initial_text or "…"
         msg = await self._api.create_message(channel, text)
         mid = str(msg.get("id", ""))
@@ -465,7 +547,12 @@ class DiscordDeskDelivery:
         return mid
 
     async def append_stream_task(
-        self, channel: str, stream_ts: str, task_id: str, title: str, status: str,
+        self,
+        channel: str,
+        stream_ts: str,
+        task_id: str,
+        title: str,
+        status: str,
     ) -> None:
         """Append a progress line to the streamed message, throttled.
 
@@ -495,7 +582,9 @@ class DiscordDeskDelivery:
         if not force and (now - st.last_edit) < _EDIT_MIN_INTERVAL:
             return  # throttled — the pending text rides until the next edit/flush
         try:
-            await self._api.edit_message(st.channel_id, st.message_id, text[:DISCORD_DESK_MAX_TEXT])
+            await self._api.edit_message(
+                st.channel_id, st.message_id, text[:DISCORD_DESK_MAX_TEXT]
+            )
             st.last_edit = now
             st.last_text = text
             st.pending_text = ""
@@ -504,8 +593,13 @@ class DiscordDeskDelivery:
 
     # ── approval via message components ──
     async def request_approval(
-        self, event: Any, *, source: str, parent_session_key: str = "",
-        sessions: Any = None, on_prompted: Any = None,
+        self,
+        event: Any,
+        *,
+        source: str,
+        parent_session_key: str = "",
+        sessions: Any = None,
+        on_prompted: Any = None,
     ) -> bool | None:
         """Post an Approve/Deny button row and wait for the owner's press.
 
@@ -513,8 +607,12 @@ class DiscordDeskDelivery:
         the gateway falls back to the dashboard. ``on_prompted(pending)`` lets core
         race a dashboard prompt against this one — a dashboard click resolves the
         same future."""
+        from gideon.integrations.channel_delivery import (
+            ONE_CALL_ANSWERS,
+            offered_answers,
+        )
         from gideon.security.approval_brief import approval_brief_for
-        from gideon.integrations.channel_delivery import offered_answers, ONE_CALL_ANSWERS
+
         identity = self.approval_identity("")
         if identity is None:
             return None
@@ -539,22 +637,34 @@ class DiscordDeskDelivery:
         identity = self.approval_identity(channel_id)
         if identity is None:
             return None
-        brief = approval_brief_for(event)
+        brief = approval_brief_for(event) or {}
         answers = offered_answers(brief.get("answers")) or ONE_CALL_ANSWERS
         if not private:
             answers = ONE_CALL_ANSWERS
         request_id = str(getattr(event, "request_id", ""))
         title = _safe(str(getattr(event, "title", "")))
         lines = [f"🔐 [{source}] {title}"]
-        for value in (getattr(event, "tool_purpose", ""), getattr(event, "tool_input", ""), brief.get("summary"), brief.get("blastRadiusLine")):
+        for value in (
+            getattr(event, "tool_purpose", ""),
+            getattr(event, "tool_input", ""),
+            brief.get("summary"),
+            brief.get("blastRadiusLine"),
+        ):
             if value:
                 lines.append(_safe(str(value)))
         lines.extend(answer.promise for answer in answers if answer.promise)
         parts = split_message("\n\n".join(lines))
         msg = {}
         for index, part in enumerate(parts):
-            msg = await self._api.create_message(channel_id, part,
-                components=_approval_components(request_id, answers) if index == len(parts)-1 else None)
+            msg = await self._api.create_message(
+                channel_id,
+                part,
+                components=(
+                    _approval_components(request_id, answers)
+                    if index == len(parts) - 1
+                    else None
+                ),
+            )
         message_id = str(msg.get("id", ""))
         if not message_id:
             return None
@@ -601,7 +711,10 @@ class DiscordDeskDelivery:
             # components=[] strips the buttons: a decided request must not leave a
             # clickable Approve behind.
             await self._api.edit_message(
-                channel_id, message_id, f"🔐 {title} — {status}"[:DISCORD_DESK_MAX_TEXT], components=[]
+                channel_id,
+                message_id,
+                f"🔐 {title} — {status}"[:DISCORD_DESK_MAX_TEXT],
+                components=[],
             )
         except Exception:
             logger.debug("discord: approval finalize edit failed", exc_info=True)
@@ -629,19 +742,40 @@ class DiscordDeskDelivery:
         action, _, request_id = custom_id.partition(":")
         if request_id:
             pending = self._pending.get(f"req:{request_id}")
-            if action == "trust" and not await self.prepare_approval_channel(str(interaction.get("channel_id", ""))):
+            if action == "trust" and not await self.prepare_approval_channel(
+                str(interaction.get("channel_id", ""))
+            ):
                 pending = None
             identity = self.approval_identity(str(interaction.get("channel_id", "")))
-            _apply_verified_interaction(interaction, pending, identity["owner"] if identity else "")
+            _apply_verified_interaction(
+                interaction, pending, identity["owner"] if identity else ""
+            )
 
 
-def _approval_components(request_id: str, answers: tuple | None = None) -> list[dict[str, Any]]:
+def _approval_components(
+    request_id: str, answers: tuple | None = None
+) -> list[dict[str, Any]]:
     """Render exactly the answer capability offered by the native approval owner."""
-    from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS
-    return [{"type": COMPONENT_ACTION_ROW, "components": [
-        {"type": COMPONENT_BUTTON, "style": BUTTON_STYLE_DANGER if answer.key == "rejected" else BUTTON_STYLE_SUCCESS,
-         "label": answer.label, "custom_id": f"{answer.key}:{request_id}"}
-        for answer in (answers or ONE_CALL_ANSWERS)]}]
+    from gideon.integrations.channel_delivery import ONE_CALL_ANSWERS, ApprovalAnswer
+
+    return [
+        {
+            "type": COMPONENT_ACTION_ROW,
+            "components": [
+                {
+                    "type": COMPONENT_BUTTON,
+                    "style": (
+                        BUTTON_STYLE_DANGER
+                        if answer.key == "rejected"
+                        else BUTTON_STYLE_SUCCESS
+                    ),
+                    "label": answer.label,
+                    "custom_id": f"{answer.key}:{request_id}",
+                }
+                for answer in (answers or ONE_CALL_ANSWERS)
+            ],
+        }
+    ]
 
 
 def _chunk(items: list[Any], size: int) -> list[list[Any]]:

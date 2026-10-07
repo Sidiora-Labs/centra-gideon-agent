@@ -125,4 +125,8 @@ def test_the_bundle_does_not_shadow_stdlib_email():
     assert not (_APP_DIR / "email").is_dir()
     # The resolved stdlib package must come from the Python stdlib, not this bundle.
     assert str(_APP_DIR) not in str(Path(stdlib_email.__file__).resolve())
-    assert email.message.EmailMessage and email.parser.BytesParser and email.utils.parseaddr
+    assert (
+        callable(email.message.EmailMessage)
+        and callable(email.parser.BytesParser)
+        and callable(email.utils.parseaddr)
+    )

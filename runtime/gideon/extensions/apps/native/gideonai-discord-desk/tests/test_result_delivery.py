@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-
 from discord_desk.api import (
     BUTTON_STYLE_DANGER,
     BUTTON_STYLE_SUCCESS,
@@ -25,6 +24,7 @@ from discord_desk.delivery import (
     _EDIT_MIN_INTERVAL,
     INTERACTION_TYPE_COMPONENT,
     DiscordDeskDelivery,
+    _PendingApproval,
     split_message,
 )
 
@@ -52,19 +52,36 @@ class FakeAPI(DiscordDeskApi):
             raise RuntimeError(f"{name} failed")
 
     async def get_gateway_bot(self):
-        return {"url": "wss://gateway.discord.gg", "session_start_limit": {"remaining": 1000}}
+        return {
+            "url": "wss://gateway.discord.gg",
+            "session_start_limit": {"remaining": 1000},
+        }
 
-    async def create_message(self, channel_id, content, *, components=None, message_reference=None):
+    async def create_message(
+        self, channel_id, content, *, components=None, message_reference=None
+    ):
         self._boom("create_message")
         mid = self._next()
-        self.sent.append({"channel_id": channel_id, "content": content,
-                          "components": components, "id": mid})
+        self.sent.append(
+            {
+                "channel_id": channel_id,
+                "content": content,
+                "components": components,
+                "id": mid,
+            }
+        )
         return {"id": mid}
 
     async def edit_message(self, channel_id, message_id, content, *, components=None):
         self._boom("edit_message")
-        self.edits.append({"channel_id": channel_id, "message_id": message_id,
-                           "content": content, "components": components})
+        self.edits.append(
+            {
+                "channel_id": channel_id,
+                "message_id": message_id,
+                "content": content,
+                "components": components,
+            }
+        )
         return {"id": message_id}
 
     async def create_dm(self, user_id):
@@ -74,28 +91,39 @@ class FakeAPI(DiscordDeskApi):
 
     async def upload_file(self, channel_id, file_path, *, filename="", content=""):
         mid = self._next()
-        self.uploads.append({"channel_id": channel_id, "path": file_path,
-                             "filename": filename, "content": content})
+        self.uploads.append(
+            {
+                "channel_id": channel_id,
+                "path": file_path,
+                "filename": filename,
+                "content": content,
+            }
+        )
         return {"id": mid}
 
     async def get_channel(self, channel_id):
         self._boom("get_channel")
-        return self.channels.get(str(channel_id), {"id": str(channel_id), "name": "general"})
+        return self.channels.get(
+            str(channel_id), {"id": str(channel_id), "name": "general"}
+        )
 
     async def get_user(self, user_id):
         self._boom("get_user")
         return self.users.get(str(user_id), {"id": str(user_id), "username": "someone"})
 
-    async def create_interaction_response(self, interaction_id, interaction_token, *,
-                                          callback_type=6):
+    async def create_interaction_response(
+        self, interaction_id, interaction_token, *, callback_type=6
+    ):
         self._boom("create_interaction_response")
-        self.acks.append({"id": interaction_id, "token": interaction_token,
-                          "type": callback_type})
+        self.acks.append(
+            {"id": interaction_id, "token": interaction_token, "type": callback_type}
+        )
 
     async def add_reaction(self, channel_id, message_id, emoji):
         self._boom("add_reaction")
-        self.reactions.append({"channel_id": channel_id, "message_id": message_id,
-                               "emoji": emoji})
+        self.reactions.append(
+            {"channel_id": channel_id, "message_id": message_id, "emoji": emoji}
+        )
 
     async def trigger_typing(self, channel_id):
         self._boom("trigger_typing")
@@ -154,7 +182,9 @@ class TestTextDelivery:
     @pytest.mark.asyncio
     async def test_deliver_notification_titles_and_redacts(self):
         d = _delivery()
-        await d.deliver_notification("500", "Heartbeat", "all good sk-ABC123DEF456GHI789JKL012MNO")
+        await d.deliver_notification(
+            "500", "Heartbeat", "all good sk-ABC123DEF456GHI789JKL012MNO"
+        )
         body = d._api.sent[0]["content"]
         assert "**Heartbeat**" in body
         assert "sk-ABC123DEF456GHI789JKL012MNO" not in body
@@ -181,7 +211,9 @@ class TestTextDelivery:
         assert len(d._api.sent) == 1
 
     @pytest.mark.asyncio
-    async def test_deliver_rich_attaches_components_when_the_payload_carries_components(self):
+    async def test_deliver_rich_attaches_components_when_the_payload_carries_components(
+        self,
+    ):
         d = _delivery()
         rows = [{"type": COMPONENT_ACTION_ROW, "components": []}]
         await d.deliver_rich("500", {"components": rows}, "fallback")
@@ -252,12 +284,17 @@ class TestBuildThreadLink:
     def test_dm_shape_uses_at_me(self):
         """A DM has no guild, and Discord's own link form for that is literally @me."""
         d = _delivery()
-        assert d.build_thread_link("dm-42", "99") == "https://discord.com/channels/@me/dm-42/99"
+        assert (
+            d.build_thread_link("dm-42", "99")
+            == "https://discord.com/channels/@me/dm-42/99"
+        )
 
     def test_guild_shape_uses_the_guild_id(self):
         d = _delivery()
         d.note_channel_guild("700", "g1")
-        assert d.build_thread_link("700", "99") == "https://discord.com/channels/g1/700/99"
+        assert (
+            d.build_thread_link("700", "99") == "https://discord.com/channels/g1/700/99"
+        )
 
     def test_without_message_id_links_the_channel(self):
         d = _delivery()
@@ -272,7 +309,9 @@ class TestBuildThreadLink:
         """Two transports must not share a channel→guild map."""
         a, b = _delivery(), _delivery()
         a.note_channel_guild("700", "g1")
-        assert b.build_thread_link("700", "9") == "https://discord.com/channels/@me/700/9"
+        assert (
+            b.build_thread_link("700", "9") == "https://discord.com/channels/@me/700/9"
+        )
 
 
 class TestIdentityResolution:
@@ -308,7 +347,12 @@ class TestIdentityResolution:
     @pytest.mark.asyncio
     async def test_channel_info_reports_guild_channel(self):
         d = _delivery()
-        d._api.channels["700"] = {"id": "700", "type": 0, "name": "general", "guild_id": "g1"}
+        d._api.channels["700"] = {
+            "id": "700",
+            "type": 0,
+            "name": "general",
+            "guild_id": "g1",
+        }
         info = await d.channel_info("700")
         assert info == {"name": "general", "is_im": False, "guild_id": "g1"}
 
@@ -318,7 +362,9 @@ class TestIdentityResolution:
         assert await d.channel_info("700") == {"name": "700", "is_im": False}
 
     def test_list_reply_channels_is_minimal(self):
-        assert _delivery().list_reply_channels() == [{"id": "dm", "name": "Direct Message"}]
+        assert _delivery().list_reply_channels() == [
+            {"id": "dm", "name": "Direct Message"}
+        ]
 
     def test_is_tracked_channel_delegates_to_core_seam(self):
         # No tracked channels in the isolated home → False, no crash.
@@ -332,7 +378,9 @@ class TestReactionsAndTyping:
     async def test_add_reaction_hits_the_api(self):
         d = _delivery()
         assert await d.add_reaction("500", "9", "✅") is True
-        assert d._api.reactions == [{"channel_id": "500", "message_id": "9", "emoji": "✅"}]
+        assert d._api.reactions == [
+            {"channel_id": "500", "message_id": "9", "emoji": "✅"}
+        ]
 
     @pytest.mark.asyncio
     async def test_add_reaction_failure_is_reported_not_raised(self):
@@ -366,7 +414,9 @@ class TestUploadAttachment:
         f = tmp_path / "data.csv"
         f.write_text("a,b")
         d = _delivery()
-        await d.upload_attachment("500", str(f), title="key sk-ABC123DEF456GHI789JKL012MNO345")
+        await d.upload_attachment(
+            "500", str(f), title="key sk-ABC123DEF456GHI789JKL012MNO345"
+        )
         assert "sk-ABC123DEF456GHI789JKL012MNO345" not in d._api.uploads[0]["content"]
 
 
@@ -399,7 +449,9 @@ class TestStreamThrottle:
 
         # stop_stream force-flushes even inside the interval — the exact final text.
         clock["t"] += 0.001  # basically no time passed
-        await d.append_stream_task("500", sts, "t4", "Final step", "complete")  # throttled away
+        await d.append_stream_task(
+            "500", sts, "t4", "Final step", "complete"
+        )  # throttled away
         assert len(d._api.edits) == 1  # confirm it was throttled
         await d.stop_stream("500", sts)
         assert len(d._api.edits) == 2  # forced flush
@@ -450,7 +502,9 @@ class TestApprovalRoundTrip:
         """post prompt → INTERACTION_CREATE → future resolves → acked → buttons gone."""
         d = _delivery(owner="42")
 
-        task = asyncio.ensure_future(d.request_approval(_Event("reqX", "rm -rf"), source="tool"))
+        task = asyncio.ensure_future(
+            d.request_approval(_Event("reqX", "rm -rf"), source="tool")
+        )
         await asyncio.sleep(0)  # let it open the DM
         await asyncio.sleep(0)  # …and post the prompt
         await asyncio.sleep(0)
@@ -460,13 +514,20 @@ class TestApprovalRoundTrip:
         assert prompt["channel_id"] == "dm-42"
         buttons = prompt["components"][0]["components"]
         assert {b["custom_id"] for b in buttons} == {"approve:reqX", "deny:reqX"}
-        assert [b["style"] for b in buttons] == [BUTTON_STYLE_SUCCESS, BUTTON_STYLE_DANGER]
+        assert [b["style"] for b in buttons] == [
+            BUTTON_STYLE_SUCCESS,
+            BUTTON_STYLE_DANGER,
+        ]
 
         # The press arrives as an INTERACTION_CREATE and resolves the same future.
-        await d.resolve_interaction({
-            "id": "i1", "token": "itok", "type": INTERACTION_TYPE_COMPONENT,
-            "data": {"custom_id": "approve:reqX"},
-        })
+        await d.resolve_interaction(
+            {
+                "id": "i1",
+                "token": "itok",
+                "type": INTERACTION_TYPE_COMPONENT,
+                "data": {"custom_id": "approve:reqX"},
+            }
+        )
         assert await asyncio.wait_for(task, timeout=1.0) is True
 
         # The interaction was acknowledged (Discord's 3-second window).
@@ -485,10 +546,14 @@ class TestApprovalRoundTrip:
         task = asyncio.ensure_future(d.request_approval(_Event("reqY"), source="tool"))
         for _ in range(4):
             await asyncio.sleep(0)
-        await d.resolve_interaction({
-            "id": "i2", "token": "t2", "type": INTERACTION_TYPE_COMPONENT,
-            "data": {"custom_id": "deny:reqY"},
-        })
+        await d.resolve_interaction(
+            {
+                "id": "i2",
+                "token": "t2",
+                "type": INTERACTION_TYPE_COMPONENT,
+                "data": {"custom_id": "deny:reqY"},
+            }
+        )
         assert await asyncio.wait_for(task, timeout=1.0) is False
         assert "Rejected" in d._api.edits[-1]["content"]
         assert d._api.edits[-1]["components"] == []
@@ -512,10 +577,14 @@ class TestApprovalRoundTrip:
         for _ in range(4):
             await asyncio.sleep(0)
         assert "sk-ABC123DEF456GHI789JKL012MNO345" not in d._api.sent[-1]["content"]
-        await d.resolve_interaction({
-            "id": "i", "token": "t", "type": INTERACTION_TYPE_COMPONENT,
-            "data": {"custom_id": "deny:reqR"},
-        })
+        await d.resolve_interaction(
+            {
+                "id": "i",
+                "token": "t",
+                "type": INTERACTION_TYPE_COMPONENT,
+                "data": {"custom_id": "deny:reqR"},
+            }
+        )
         await asyncio.wait_for(task, timeout=1.0)
 
     @pytest.mark.asyncio
@@ -526,17 +595,25 @@ class TestApprovalRoundTrip:
 
         d = _delivery(owner="42")
         task = asyncio.ensure_future(
-            d.request_approval(_Event("reqL"), source="tool",
-                               parent_session_key="s1", sessions=Sessions())
+            d.request_approval(
+                _Event("reqL"),
+                source="tool",
+                parent_session_key="s1",
+                sessions=Sessions(),
+            )
         )
         for _ in range(4):
             await asyncio.sleep(0)
         assert d._api.sent[-1]["channel_id"] == "700"
         assert d._api.dms == []  # no DM needed
-        await d.resolve_interaction({
-            "id": "i", "token": "t", "type": INTERACTION_TYPE_COMPONENT,
-            "data": {"custom_id": "deny:reqL"},
-        })
+        await d.resolve_interaction(
+            {
+                "id": "i",
+                "token": "t",
+                "type": INTERACTION_TYPE_COMPONENT,
+                "data": {"custom_id": "deny:reqL"},
+            }
+        )
         await asyncio.wait_for(task, timeout=1.0)
 
     @pytest.mark.asyncio
@@ -547,11 +624,14 @@ class TestApprovalRoundTrip:
 
     @pytest.mark.asyncio
     async def test_on_prompted_hook_receives_the_pending(self):
-        seen = {}
+        seen: dict[str, _PendingApproval] = {}
         d = _delivery(owner="42")
         task = asyncio.ensure_future(
-            d.request_approval(_Event("reqH"), source="tool",
-                               on_prompted=lambda p: seen.setdefault("p", p))
+            d.request_approval(
+                _Event("reqH"),
+                source="tool",
+                on_prompted=lambda p: seen.setdefault("p", p),
+            )
         )
         for _ in range(4):
             await asyncio.sleep(0)
@@ -572,10 +652,14 @@ class TestApprovalRoundTrip:
         )
         for _ in range(4):
             await asyncio.sleep(0)
-        await d.resolve_interaction({
-            "id": "i", "token": "t", "type": INTERACTION_TYPE_COMPONENT,
-            "data": {"custom_id": "approve:reqB"},
-        })
+        await d.resolve_interaction(
+            {
+                "id": "i",
+                "token": "t",
+                "type": INTERACTION_TYPE_COMPONENT,
+                "data": {"custom_id": "approve:reqB"},
+            }
+        )
         assert await asyncio.wait_for(task, timeout=1.0) is True
 
 
@@ -585,36 +669,49 @@ class TestResolveInteraction:
         """Discord shows 'interaction failed' if nothing answers within 3s — ack
         regardless of whether the press was ours."""
         d = _delivery()
-        await d.resolve_interaction({
-            "id": "i9", "token": "t9", "type": INTERACTION_TYPE_COMPONENT,
-            "data": {"custom_id": "approve:ghost"},
-        })
+        await d.resolve_interaction(
+            {
+                "id": "i9",
+                "token": "t9",
+                "type": INTERACTION_TYPE_COMPONENT,
+                "data": {"custom_id": "approve:ghost"},
+            }
+        )
         assert d._api.acks[-1]["id"] == "i9"
 
     @pytest.mark.asyncio
     async def test_non_component_interaction_is_ignored(self):
         """A slash command (type 2) is not ours and must not be answered here."""
         d = _delivery()
-        await d.resolve_interaction({"id": "i1", "token": "t", "type": 2,
-                                     "data": {"name": "ping"}})
+        await d.resolve_interaction(
+            {"id": "i1", "token": "t", "type": 2, "data": {"name": "ping"}}
+        )
         assert d._api.acks == []
 
     @pytest.mark.asyncio
     async def test_option_button_press_is_acked_but_resolves_nothing(self):
         d = _delivery()
-        await d.resolve_interaction({
-            "id": "i3", "token": "t3", "type": INTERACTION_TYPE_COMPONENT,
-            "data": {"custom_id": "opt:1"},
-        })
+        await d.resolve_interaction(
+            {
+                "id": "i3",
+                "token": "t3",
+                "type": INTERACTION_TYPE_COMPONENT,
+                "data": {"custom_id": "opt:1"},
+            }
+        )
         assert d._api.acks[-1]["id"] == "i3"
 
     @pytest.mark.asyncio
     async def test_failed_ack_does_not_raise_out(self):
         d = _delivery(fail={"create_interaction_response"})
-        await d.resolve_interaction({
-            "id": "i4", "token": "t4", "type": INTERACTION_TYPE_COMPONENT,
-            "data": {"custom_id": "approve:x"},
-        })  # no raise
+        await d.resolve_interaction(
+            {
+                "id": "i4",
+                "token": "t4",
+                "type": INTERACTION_TYPE_COMPONENT,
+                "data": {"custom_id": "approve:x"},
+            }
+        )  # no raise
 
     @pytest.mark.asyncio
     async def test_second_press_on_a_resolved_request_is_harmless(self):
@@ -622,8 +719,12 @@ class TestResolveInteraction:
         task = asyncio.ensure_future(d.request_approval(_Event("reqD"), source="tool"))
         for _ in range(4):
             await asyncio.sleep(0)
-        payload = {"id": "i", "token": "t", "type": INTERACTION_TYPE_COMPONENT,
-                   "data": {"custom_id": "approve:reqD"}}
+        payload = {
+            "id": "i",
+            "token": "t",
+            "type": INTERACTION_TYPE_COMPONENT,
+            "data": {"custom_id": "approve:reqD"},
+        }
         await d.resolve_interaction(payload)
         assert await asyncio.wait_for(task, timeout=1.0) is True
         await d.resolve_interaction(payload)  # double press — no InvalidStateError

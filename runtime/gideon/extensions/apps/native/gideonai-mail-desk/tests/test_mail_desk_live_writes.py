@@ -24,9 +24,7 @@ with the guard off, the same call must really reach the fake relay. Without it,
 from __future__ import annotations
 
 import pytest
-
-from gideon.sdk.channel import OutboundMessage, ProviderSettings, save_credential
-
+from mail_desk_fakes import FakeSmtpServer
 from mail_desk_runtime.delivery import MailDeskDelivery, ThreadStore
 from mail_desk_runtime.settings import CRED_IMAP_PASS, reload_settings
 from mail_desk_runtime.transport import MailDeskTransport
@@ -37,7 +35,7 @@ from mail_desk_runtime.writes import (
     live_writes_disabled,
 )
 
-from mail_desk_fakes import FakeSmtpServer
+from gideon.sdk.channel import OutboundMessage, ProviderSettings, save_credential
 
 _APP = "gideonai-mail-desk"
 AGENT = "agent@example.com"
@@ -56,9 +54,15 @@ def _configure() -> None:
     ProviderSettings.update(
         _APP,
         {
-            "imap_host": "imap.test", "imap_port": 993, "imap_user": AGENT,
-            "smtp_host": "smtp.test", "smtp_port": 587, "smtp_user": AGENT,
-            "address": AGENT, "folder": "INBOX", "poll_secs": 60,
+            "imap_host": "imap.test",
+            "imap_port": 993,
+            "imap_user": AGENT,
+            "smtp_host": "smtp.test",
+            "smtp_port": 587,
+            "smtp_user": AGENT,
+            "address": AGENT,
+            "folder": "INBOX",
+            "poll_secs": 60,
             "dm_activation": "always",
         },
     )
@@ -68,16 +72,20 @@ def _configure() -> None:
     reload_settings()
 
 
-def _wired(tmp_path, *, sender: object | None = None) -> tuple[MailDeskTransport, FakeSmtpServer]:
+def _wired(
+    tmp_path, *, sender: FakeSmtpServer | None = None
+) -> tuple[MailDeskTransport, FakeSmtpServer]:
     _configure()
     smtp = sender if sender is not None else FakeSmtpServer()
     transport = MailDeskTransport()
     transport._sender_factory = lambda settings, password: smtp
     transport._delivery = MailDeskDelivery(
-        smtp, AGENT, owner_id=AGENT,
+        smtp,
+        AGENT,
+        owner_id=AGENT,
         threads=ThreadStore(path_provider=lambda: tmp_path / "threads.json"),
     )
-    return transport, smtp  # type: ignore[return-value]
+    return transport, smtp
 
 
 # ── the vacuity floor ────────────────────────────────────────────────────────
@@ -143,6 +151,7 @@ async def test_the_refusal_is_attributable(monkeypatch, tmp_path):
 
     result = await transport.send(_MSG)
 
+    assert isinstance(result, SendRefused)
     assert result.channel == "mail-desk"
     assert result.target == BOB
     assert ENV_DISABLE_LIVE_WRITES in result.reason
@@ -207,7 +216,14 @@ def test_any_other_present_value_turns_the_guard_on(monkeypatch, raw):
 
 @pytest.mark.parametrize(
     ("value", "enabled"),
-    [(None, True), (True, True), (False, False), (0, False), (1, True), (object(), True)],
+    [
+        (None, True),
+        (True, True),
+        (False, False),
+        (0, False),
+        (1, True),
+        (object(), True),
+    ],
 )
 def test_guard_flag_matches_cores_parse_for_non_string_shapes(value, enabled):
     assert guard_flag(value) is enabled

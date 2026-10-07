@@ -18,9 +18,9 @@ hosts are offered as presets so the four hostname/port pairs a user would otherw
 are already filled in.
 """
 
-from gideon.sdk.cli import SetupContext
-
 from mail_desk_runtime.settings import (
+    _VALID_ACTIVATIONS,
+    _VALID_SMTP_SECURITY,
     CRED_IMAP_PASS,
     CRED_SMTP_PASS,
     DEFAULT_IMAP_PORT,
@@ -28,9 +28,9 @@ from mail_desk_runtime.settings import (
     DEFAULT_SMTP_PORT,
     SMTP_SSL,
     SMTP_STARTTLS,
-    _VALID_ACTIVATIONS,
-    _VALID_SMTP_SECURITY,
 )
+
+from gideon.sdk.cli import SetupContext
 
 _APP = "gideonai-mail-desk"
 
@@ -39,17 +39,29 @@ _APP = "gideonai-mail-desk"
 #: app-password flow — never an account password.
 PRESETS: dict[str, tuple[str, int, str, int, str, str]] = {
     "gmail": (
-        "imap.gmail.com", 993, "smtp.gmail.com", 587, SMTP_STARTTLS,
+        "imap.gmail.com",
+        993,
+        "smtp.gmail.com",
+        587,
+        SMTP_STARTTLS,
         "Google Account → Security → 2-Step Verification → App passwords. "
         "Create one for 'Mail'; it is 16 characters with no spaces.",
     ),
     "fastmail": (
-        "imap.fastmail.com", 993, "smtp.fastmail.com", 465, SMTP_SSL,
+        "imap.fastmail.com",
+        993,
+        "smtp.fastmail.com",
+        465,
+        SMTP_SSL,
         "Fastmail → Settings → Privacy & Security → App Passwords → New App Password, "
         "scoped to 'Mail (IMAP/SMTP)'.",
     ),
     "icloud": (
-        "imap.mail.me.com", 993, "smtp.mail.me.com", 587, SMTP_STARTTLS,
+        "imap.mail.me.com",
+        993,
+        "smtp.mail.me.com",
+        587,
+        SMTP_STARTTLS,
         "appleid.apple.com → Sign-In and Security → App-Specific Passwords.",
     ),
 }
@@ -85,7 +97,9 @@ def run(ctx: SetupContext) -> None:
 
 
 def _choose_preset(ctx: SetupContext) -> tuple[str, int, str, int, str, str] | None:
-    ctx.print(f"── Provider ──\n  Known: {', '.join(sorted(PRESETS))} (or blank for custom)\n")
+    ctx.print(
+        f"── Provider ──\n  Known: {', '.join(sorted(PRESETS))} (or blank for custom)\n"
+    )
     raw = ctx.input("  Provider [custom]: ").strip().lower()
     if not raw:
         return None
@@ -106,10 +120,9 @@ def _setup_connection(ctx: SetupContext, preset: tuple | None) -> None:
     d_security = preset[4] if preset else str(cur.get("smtp_security", SMTP_STARTTLS))
 
     ctx.print("── Mailbox ──\n")
-    address = (
-        ctx.input(f"  Mailbox address [{cur.get('address', '')}]: ").strip()
-        or str(cur.get("address", ""))
-    )
+    address = ctx.input(
+        f"  Mailbox address [{cur.get('address', '')}]: "
+    ).strip() or str(cur.get("address", ""))
     imap_user = (
         ctx.input(f"  IMAP username [{cur.get('imap_user', '') or address}]: ").strip()
         or str(cur.get("imap_user", ""))
@@ -121,20 +134,25 @@ def _setup_connection(ctx: SetupContext, preset: tuple | None) -> None:
     # non-standard TLS port would otherwise be silently misconfigured, and without this
     # prompt a plain-IMAP setup is unreachable from the CLI at all.
     ssl_default = "y" if imap_port == DEFAULT_IMAP_PORT else "n"
-    ssl_raw = ctx.input(f"  IMAP implicit SSL? [{ssl_default.upper()}/n]: ").strip().lower()
-    imap_use_ssl = (ssl_raw or ssl_default) not in ("n", "no")
-    folder = (
-        ctx.input(f"  Folder to poll [{cur.get('folder', 'INBOX')}]: ").strip()
-        or str(cur.get("folder", "INBOX"))
+    ssl_raw = (
+        ctx.input(f"  IMAP implicit SSL? [{ssl_default.upper()}/n]: ").strip().lower()
     )
+    imap_use_ssl = (ssl_raw or ssl_default) not in ("n", "no")
+    folder = ctx.input(
+        f"  Folder to poll [{cur.get('folder', 'INBOX')}]: "
+    ).strip() or str(cur.get("folder", "INBOX"))
     smtp_user = (
-        ctx.input(f"  SMTP username [{cur.get('smtp_user', '') or imap_user}]: ").strip()
+        ctx.input(
+            f"  SMTP username [{cur.get('smtp_user', '') or imap_user}]: "
+        ).strip()
         or str(cur.get("smtp_user", ""))
         or imap_user
     )
     smtp_host = ctx.input(f"  SMTP host [{d_smtp_host}]: ").strip() or d_smtp_host
     smtp_port = _int_or(ctx, f"  SMTP port [{d_smtp_port}]: ", d_smtp_port)
-    security = ctx.input(f"  SMTP security {sorted(_VALID_SMTP_SECURITY)} [{d_security}]: ")
+    security = ctx.input(
+        f"  SMTP security {sorted(_VALID_SMTP_SECURITY)} [{d_security}]: "
+    )
     security = security.strip().lower() or d_security
     if security not in _VALID_SMTP_SECURITY:
         ctx.print(f"  ⚠️  Unknown mode — keeping '{d_security}'.")
@@ -143,9 +161,15 @@ def _setup_connection(ctx: SetupContext, preset: tuple | None) -> None:
     ctx.settings.update(
         _APP,
         {
-            "address": address, "imap_user": imap_user, "imap_host": imap_host,
-            "imap_port": imap_port, "imap_use_ssl": imap_use_ssl, "folder": folder,
-            "smtp_user": smtp_user, "smtp_host": smtp_host, "smtp_port": smtp_port,
+            "address": address,
+            "imap_user": imap_user,
+            "imap_host": imap_host,
+            "imap_port": imap_port,
+            "imap_use_ssl": imap_use_ssl,
+            "folder": folder,
+            "smtp_user": smtp_user,
+            "smtp_host": smtp_host,
+            "smtp_port": smtp_port,
             "smtp_security": security,
         },
     )
@@ -156,7 +180,11 @@ def _int_or(ctx: SetupContext, prompt: str, default: object) -> int:
     raw = ctx.input(prompt).strip()
     if not raw:
         try:
-            return int(default)  # type: ignore[arg-type]
+            return (
+                int(default)
+                if isinstance(default, (str, bytes, bytearray, int, float))
+                else DEFAULT_IMAP_PORT
+            )
         except (TypeError, ValueError):
             return DEFAULT_IMAP_PORT
     try:
@@ -164,7 +192,11 @@ def _int_or(ctx: SetupContext, prompt: str, default: object) -> int:
     except ValueError:
         ctx.print(f"  ⚠️  Not a number — keeping {default}.")
         try:
-            return int(default)  # type: ignore[arg-type]
+            return (
+                int(default)
+                if isinstance(default, (str, bytes, bytearray, int, float))
+                else DEFAULT_IMAP_PORT
+            )
         except (TypeError, ValueError):
             return DEFAULT_IMAP_PORT
 
@@ -172,12 +204,16 @@ def _int_or(ctx: SetupContext, prompt: str, default: object) -> int:
 def _setup_passwords(ctx: SetupContext) -> None:
     ctx.print("── App passwords (credential store, never app config) ──\n")
     cur_imap = ctx.get_credential(CRED_IMAP_PASS)
-    imap_pass = ctx.input(f"  IMAP app password{' [set]' if cur_imap else ''}: ").strip()
+    imap_pass = ctx.input(
+        f"  IMAP app password{' [set]' if cur_imap else ''}: "
+    ).strip()
     if imap_pass:
         ctx.save_credential(CRED_IMAP_PASS, imap_pass)
         ctx.print("  ✅ IMAP password saved.\n")
     elif not cur_imap:
-        ctx.print("  ⚠️  No IMAP password — inbound will stay offline until one is set.\n")
+        ctx.print(
+            "  ⚠️  No IMAP password — inbound will stay offline until one is set.\n"
+        )
 
     cur_smtp = ctx.get_credential(CRED_SMTP_PASS)
     hint = " [set]" if cur_smtp else " [reuse IMAP]"
@@ -186,20 +222,27 @@ def _setup_passwords(ctx: SetupContext) -> None:
         ctx.save_credential(CRED_SMTP_PASS, smtp_pass)
         ctx.print("  ✅ SMTP password saved.\n")
     else:
-        ctx.print("  ℹ️  Reusing the IMAP password for SMTP (usual for one app password).\n")
+        ctx.print(
+            "  ℹ️  Reusing the IMAP password for SMTP (usual for one app password).\n"
+        )
 
 
 def _setup_behavior(ctx: SetupContext) -> None:
     cur = ctx.settings.load(_APP)
     ctx.print("── Behavior ──\n")
     poll = _int_or(
-        ctx, f"  Poll interval seconds [{cur.get('poll_secs', DEFAULT_POLL_SECS)}]: ",
+        ctx,
+        f"  Poll interval seconds [{cur.get('poll_secs', DEFAULT_POLL_SECS)}]: ",
         cur.get("poll_secs", DEFAULT_POLL_SECS),
     )
     current_act = str(cur.get("dm_activation", "always"))
-    raw = ctx.input(
-        f"  Inbound activation {sorted(_VALID_ACTIVATIONS)} [{current_act}]: "
-    ).strip().lower()
+    raw = (
+        ctx.input(
+            f"  Inbound activation {sorted(_VALID_ACTIVATIONS)} [{current_act}]: "
+        )
+        .strip()
+        .lower()
+    )
     activation = raw or current_act
     if activation not in _VALID_ACTIVATIONS:
         ctx.print(f"  ⚠️  Unknown mode — keeping '{current_act}'.")

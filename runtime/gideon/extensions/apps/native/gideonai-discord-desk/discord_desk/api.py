@@ -91,7 +91,9 @@ class DiscordDeskApiError(Exception):
         self.status = status
         self.code = code
         self.route = route
-        super().__init__(f"{route or 'discord'}: {message} (status={status} code={code})")
+        super().__init__(
+            f"{route or 'discord'}: {message} (status={status} code={code})"
+        )
 
 
 class DiscordDeskApi(ABC):
@@ -107,7 +109,10 @@ class DiscordDeskApi(ABC):
 
     @abstractmethod
     async def create_message(
-        self, channel_id: str, content: str, *,
+        self,
+        channel_id: str,
+        content: str,
+        *,
         components: list[dict[str, Any]] | None = None,
         message_reference: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -115,7 +120,11 @@ class DiscordDeskApi(ABC):
 
     @abstractmethod
     async def edit_message(
-        self, channel_id: str, message_id: str, content: str, *,
+        self,
+        channel_id: str,
+        message_id: str,
+        content: str,
+        *,
         components: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """``PATCH /channels/{id}/messages/{id}`` — edit a sent message.
@@ -132,7 +141,12 @@ class DiscordDeskApi(ABC):
 
     @abstractmethod
     async def upload_file(
-        self, channel_id: str, file_path: str, *, filename: str = "", content: str = "",
+        self,
+        channel_id: str,
+        file_path: str,
+        *,
+        filename: str = "",
+        content: str = "",
     ) -> dict[str, Any]:
         """Multipart ``POST /channels/{id}/messages`` — attach a file to a message."""
 
@@ -146,7 +160,10 @@ class DiscordDeskApi(ABC):
 
     @abstractmethod
     async def create_interaction_response(
-        self, interaction_id: str, interaction_token: str, *,
+        self,
+        interaction_id: str,
+        interaction_token: str,
+        *,
         callback_type: int = INTERACTION_CALLBACK_DEFERRED_UPDATE,
     ) -> None:
         """``POST /interactions/{id}/{token}/callback`` — answer an interaction.
@@ -258,7 +275,11 @@ class DiscordDeskHttpApi(DiscordDeskApi):
             return
         delay = st.reset_at - self._now()
         if delay > 0:
-            logger.debug("discord: bucket %s exhausted — waiting %.2fs", self._bucket_id(route), delay)
+            logger.debug(
+                "discord: bucket %s exhausted — waiting %.2fs",
+                self._bucket_id(route),
+                delay,
+            )
             await self._sleep(min(delay, MAX_RETRY_AFTER))
         # Waited the window out: presume one slot, and let the next response's
         # headers restate the truth.
@@ -292,7 +313,7 @@ class DiscordDeskHttpApi(DiscordDeskApi):
                 body = parsed
         except ValueError:
             pass
-        retry_after = MAX_RETRY_AFTER
+        retry_after: float = MAX_RETRY_AFTER
         for source in (body.get("retry_after"), resp.headers.get("Retry-After")):
             if source is None:
                 continue
@@ -306,13 +327,17 @@ class DiscordDeskHttpApi(DiscordDeskApi):
         )
         if is_global:
             self._global_reset_at = self._now() + retry_after
-            logger.warning("discord: GLOBAL rate limit — every route gated for %ss", retry_after)
+            logger.warning(
+                "discord: GLOBAL rate limit — every route gated for %ss", retry_after
+            )
         else:
             self._record_limits(route, resp)
             st = self._buckets.setdefault(self._bucket_id(route), _BucketState())
             st.remaining = 0
             st.reset_at = self._now() + retry_after
-            logger.warning("discord: %s rate limited — bucket gated for %ss", route, retry_after)
+            logger.warning(
+                "discord: %s rate limited — bucket gated for %ss", route, retry_after
+            )
         return retry_after
 
     # ── the one request path ──
@@ -340,7 +365,8 @@ class DiscordDeskHttpApi(DiscordDeskApi):
             await self._await_budget(route)
             try:
                 resp = await self._client.request(
-                    method, path,
+                    method,
+                    path,
                     json=json if files is None else None,
                     data=data if files is not None else None,
                     files=files,
@@ -348,7 +374,8 @@ class DiscordDeskHttpApi(DiscordDeskApi):
             except (httpx.TransportError, httpx.TimeoutException) as exc:
                 if attempt > self._max_retries:
                     raise DiscordDeskApiError(
-                        f"network error after {self._max_retries} retries: {exc}", route=route
+                        f"network error after {self._max_retries} retries: {exc}",
+                        route=route,
                     ) from exc
                 await self._sleep(min(2 ** (attempt - 1), MAX_RETRY_AFTER))
                 continue
@@ -358,7 +385,8 @@ class DiscordDeskHttpApi(DiscordDeskApi):
                 if attempt > self._max_retries:
                     raise DiscordDeskApiError(
                         f"rate limited (429): retries exhausted (retry_after={retry_after})",
-                        status=429, route=route,
+                        status=429,
+                        route=route,
                     )
                 continue  # _await_budget on the next pass performs the wait
 
@@ -368,7 +396,8 @@ class DiscordDeskHttpApi(DiscordDeskApi):
                 if attempt > self._max_retries:
                     raise DiscordDeskApiError(
                         f"server error {resp.status_code}: retries exhausted",
-                        status=resp.status_code, route=route,
+                        status=resp.status_code,
+                        route=route,
                     )
                 await self._sleep(min(2 ** (attempt - 1), MAX_RETRY_AFTER))
                 continue
@@ -380,7 +409,9 @@ class DiscordDeskHttpApi(DiscordDeskApi):
             if resp.status_code >= 400:
                 raise DiscordDeskApiError(
                     str(body.get("message", f"HTTP {resp.status_code}")),
-                    status=resp.status_code, code=int(body.get("code", 0) or 0), route=route,
+                    status=resp.status_code,
+                    code=int(body.get("code", 0) or 0),
+                    route=route,
                 )
             return body
 
@@ -391,7 +422,8 @@ class DiscordDeskHttpApi(DiscordDeskApi):
         except ValueError as exc:
             raise DiscordDeskApiError(
                 f"non-JSON response (status {resp.status_code})",
-                status=resp.status_code, route=route,
+                status=resp.status_code,
+                route=route,
             ) from exc
 
     @staticmethod
@@ -404,7 +436,10 @@ class DiscordDeskHttpApi(DiscordDeskApi):
         return self._as_dict(await self._call("GET", "/gateway/bot"))
 
     async def create_message(
-        self, channel_id: str, content: str, *,
+        self,
+        channel_id: str,
+        content: str,
+        *,
         components: list[dict[str, Any]] | None = None,
         message_reference: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -418,7 +453,11 @@ class DiscordDeskHttpApi(DiscordDeskApi):
         )
 
     async def edit_message(
-        self, channel_id: str, message_id: str, content: str, *,
+        self,
+        channel_id: str,
+        message_id: str,
+        content: str,
+        *,
         components: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"content": content}
@@ -432,11 +471,18 @@ class DiscordDeskHttpApi(DiscordDeskApi):
 
     async def create_dm(self, user_id: str) -> dict[str, Any]:
         return self._as_dict(
-            await self._call("POST", "/users/@me/channels", json={"recipient_id": str(user_id)})
+            await self._call(
+                "POST", "/users/@me/channels", json={"recipient_id": str(user_id)}
+            )
         )
 
     async def upload_file(
-        self, channel_id: str, file_path: str, *, filename: str = "", content: str = "",
+        self,
+        channel_id: str,
+        file_path: str,
+        *,
+        filename: str = "",
+        content: str = "",
     ) -> dict[str, Any]:
         """Attach a file with the multipart form Discord requires.
 
@@ -449,7 +495,8 @@ class DiscordDeskHttpApi(DiscordDeskApi):
         payload = {"content": content, "attachments": [{"id": 0, "filename": name}]}
         return self._as_dict(
             await self._call(
-                "POST", f"/channels/{channel_id}/messages",
+                "POST",
+                f"/channels/{channel_id}/messages",
                 files={"files[0]": (name, blob)},
                 data={"payload_json": _json.dumps(payload)},
             )
@@ -462,11 +509,15 @@ class DiscordDeskHttpApi(DiscordDeskApi):
         return self._as_dict(await self._call("GET", f"/users/{user_id}"))
 
     async def create_interaction_response(
-        self, interaction_id: str, interaction_token: str, *,
+        self,
+        interaction_id: str,
+        interaction_token: str,
+        *,
         callback_type: int = INTERACTION_CALLBACK_DEFERRED_UPDATE,
     ) -> None:
         await self._call(
-            "POST", f"/interactions/{interaction_id}/{interaction_token}/callback",
+            "POST",
+            f"/interactions/{interaction_id}/{interaction_token}/callback",
             json={"type": callback_type},
         )
 

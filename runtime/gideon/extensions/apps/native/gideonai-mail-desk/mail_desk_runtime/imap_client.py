@@ -71,7 +71,13 @@ class Imap4Client:
     Every public method is BLOCKING and must be called from a thread executor."""
 
     def __init__(
-        self, host: str, port: int, username: str, password: str, *, use_ssl: bool = True
+        self,
+        host: str,
+        port: int,
+        username: str,
+        password: str,
+        *,
+        use_ssl: bool = True,
     ) -> None:
         self._host = host
         self._port = port
@@ -142,7 +148,7 @@ class Imap4Client:
         self.select_folder(folder)
         start = max(0, last_uid) + 1
         try:
-            typ, data = self._conn.uid("SEARCH", None, f"UID {start}:*")
+            typ, data = self._conn.uid("SEARCH", f"UID {start}:*")
         except (imaplib.IMAP4.error, OSError) as exc:
             raise ImapError(f"IMAP UID SEARCH failed: {exc}") from exc
         if typ != "OK" or not data:
@@ -150,7 +156,11 @@ class Imap4Client:
         raw = data[0]
         if not raw:
             return []
-        text = raw.decode("ascii", errors="replace") if isinstance(raw, bytes) else str(raw)
+        text = (
+            raw.decode("ascii", errors="replace")
+            if isinstance(raw, bytes)
+            else str(raw)
+        )
         uids: list[int] = []
         for tok in text.split():
             try:
@@ -198,12 +208,19 @@ class Imap4Client:
 
 
 def probe_login(
-    host: str, port: int, username: str, password: str, folder: str, *, use_ssl: bool = True
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    folder: str,
+    *,
+    use_ssl: bool = True,
 ) -> tuple[bool, str]:
     """The doctor/Test probe: connect + login + SELECT the folder. BLOCKING.
 
     A login alone proves the credential but not that the folder we poll exists, and a
-    wrong folder name is the second most common misconfiguration after a wrong password."""
+    wrong folder name is the second most common misconfiguration after a wrong password.
+    """
     client = Imap4Client(host, port, username, password, use_ssl=use_ssl)
     try:
         client.connect()

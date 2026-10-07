@@ -79,8 +79,10 @@ def _validate_smtp_security(value: str) -> str:
 
 
 def _coerce_port(value: object, default: int) -> int:
+    if not isinstance(value, (str, bytes, bytearray, int, float)):
+        return default
     try:
-        port = int(value)  # type: ignore[arg-type]
+        port = int(value)
     except (TypeError, ValueError):
         return default
     return port if 1 <= port <= 65535 else default
@@ -92,8 +94,10 @@ def _coerce_poll_secs(value: object) -> int:
     Under 10s a poll loop pesters the provider (many hosts throttle or ban for it);
     past an hour the channel stops feeling conversational. Anything unparseable falls
     back to the 60s default rather than disabling the loop."""
+    if not isinstance(value, (str, bytes, bytearray, int, float)):
+        return DEFAULT_POLL_SECS
     try:
-        secs = int(value)  # type: ignore[arg-type]
+        secs = int(value)
     except (TypeError, ValueError):
         return DEFAULT_POLL_SECS
     return max(10, min(secs, 3600))
@@ -145,17 +149,25 @@ class MailDeskSettings:
         on the other."""
         return cls(
             imap_host=str(d.get(KEY_IMAP_HOST, "")).strip(),
-            imap_port=_coerce_port(d.get(KEY_IMAP_PORT, DEFAULT_IMAP_PORT), DEFAULT_IMAP_PORT),
+            imap_port=_coerce_port(
+                d.get(KEY_IMAP_PORT, DEFAULT_IMAP_PORT), DEFAULT_IMAP_PORT
+            ),
             imap_user=str(d.get(KEY_IMAP_USER, "")).strip(),
             imap_use_ssl=bool(d.get("imap_use_ssl", True)),
             folder=str(d.get("folder", DEFAULT_FOLDER)).strip() or DEFAULT_FOLDER,
             smtp_host=str(d.get(KEY_SMTP_HOST, "")).strip(),
-            smtp_port=_coerce_port(d.get(KEY_SMTP_PORT, DEFAULT_SMTP_PORT), DEFAULT_SMTP_PORT),
+            smtp_port=_coerce_port(
+                d.get(KEY_SMTP_PORT, DEFAULT_SMTP_PORT), DEFAULT_SMTP_PORT
+            ),
             smtp_user=str(d.get(KEY_SMTP_USER, "")).strip(),
-            smtp_security=_validate_smtp_security(str(d.get("smtp_security", SMTP_STARTTLS))),
+            smtp_security=_validate_smtp_security(
+                str(d.get("smtp_security", SMTP_STARTTLS))
+            ),
             address=str(d.get("address", "")).strip(),
             poll_secs=_coerce_poll_secs(d.get("poll_secs", DEFAULT_POLL_SECS)),
-            dm_activation=_validate_activation(str(d.get("dm_activation", ACTIVATION_ALWAYS))),
+            dm_activation=_validate_activation(
+                str(d.get("dm_activation", ACTIVATION_ALWAYS))
+            ),
         )
 
     @classmethod

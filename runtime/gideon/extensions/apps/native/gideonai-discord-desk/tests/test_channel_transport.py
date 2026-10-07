@@ -17,9 +17,9 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from discord_desk.transport import DiscordDeskTransport, create_provider
 
 from gideon.sdk.channel import allow_sender, track
-from discord_desk.transport import DiscordDeskTransport, create_provider
 
 
 class FakeDelivery:
@@ -94,11 +94,14 @@ class FakeServices:
             self._captured["session"] = session
             self._captured["text"] = text
 
-        return await deliver_inbound(self, provider, msg, is_dm=is_dm, turn_runner=turn_runner)
+        return await deliver_inbound(
+            self, provider, msg, is_dm=is_dm, turn_runner=turn_runner
+        )
 
 
-def _msg(text="hi", channel_id="500", guild_id=None, author_id="42",
-         name="Ada", bot=False):
+def _msg(
+    text="hi", channel_id="500", guild_id=None, author_id="42", name="Ada", bot=False
+):
     """A MESSAGE_CREATE payload. No ``guild_id`` key at all == a DM."""
     payload = {
         "id": "9",
@@ -112,7 +115,7 @@ def _msg(text="hi", channel_id="500", guild_id=None, author_id="42",
 
 
 @pytest.fixture
-def transport_with_capture():
+def transport_with_capture(monkeypatch):
     """A transport wired to a fake state + delivery, with the turn captured at the
     door. The admission cache is module-global and `_msg()` reuses one message id,
     so it is reset per test — otherwise one test's verdict answers the next's."""
@@ -123,7 +126,7 @@ def transport_with_capture():
     t = DiscordDeskTransport({"bot_token": "TEST"})
     state = FakeState()
     t._services = FakeServices(state, captured)
-    t._delivery = FakeDelivery()
+    monkeypatch.setattr(t, "_delivery", FakeDelivery())
     return t, state, captured
 
 
@@ -168,7 +171,9 @@ class TestCapabilities:
 
     @pytest.mark.asyncio
     async def test_health_reflects_token(self):
-        assert (await DiscordDeskTransport({"bot_token": "x"}).health())["state"] == "ready"
+        assert (await DiscordDeskTransport({"bot_token": "x"}).health())[
+            "state"
+        ] == "ready"
         assert (await DiscordDeskTransport({}).health())["state"] == "offline"
 
 
@@ -235,7 +240,9 @@ class TestSelfMessageFilter:
     @pytest.mark.asyncio
     async def test_ready_captures_own_user_id(self):
         t = DiscordDeskTransport({"bot_token": "TEST"})
-        await t._on_ready({"session_id": "s", "user": {"id": "bot-9", "username": "gid"}})
+        await t._on_ready(
+            {"session_id": "s", "user": {"id": "bot-9", "username": "gid"}}
+        )
         assert t._own_user_id == "bot-9"
 
 
@@ -265,7 +272,9 @@ class TestIsDmDerivation:
     async def test_guild_is_noted_for_link_building(self, transport_with_capture):
         t, state, captured = transport_with_capture
         track("discord", "700", "Team Room")
-        await t._on_message_create(_msg(text="hi", channel_id="700", guild_id="g1", author_id="55"))
+        await t._on_message_create(
+            _msg(text="hi", channel_id="700", guild_id="g1", author_id="55")
+        )
         await asyncio.sleep(0)
         assert t._delivery.guilds == {"700": "g1"}
 
@@ -275,13 +284,17 @@ class TestTrustHooks:
     async def test_allowed_dm_routes_to_session(self, transport_with_capture):
         t, state, captured = transport_with_capture
         allow_sender("discord", "42")  # owner/paired sender
-        await t._on_message_create(_msg(text="hello", channel_id="dm-42", author_id="42"))
+        await t._on_message_create(
+            _msg(text="hello", channel_id="dm-42", author_id="42")
+        )
         await asyncio.sleep(0)
         assert captured.get("text") == "hello"
         assert state.linked_app == "discord"
 
     @pytest.mark.asyncio
-    async def test_unknown_dm_sender_gets_canned_reply_not_routed(self, transport_with_capture):
+    async def test_unknown_dm_sender_gets_canned_reply_not_routed(
+        self, transport_with_capture
+    ):
         t, state, captured = transport_with_capture
         # Default DM policy is "pairing"; an unknown sender is denied with the reply.
         await t._on_message_create(_msg(text="hi", author_id="99"))
@@ -291,9 +304,9 @@ class TestTrustHooks:
 
     @pytest.mark.asyncio
     async def test_dm_activation_off_short_circuits(self, transport_with_capture):
-        from gideon.sdk.channel import ProviderSettings
-
         from discord_desk.settings import reload_settings
+
+        from gideon.sdk.channel import ProviderSettings
 
         t, state, captured = transport_with_capture
         allow_sender("discord", "42")
@@ -305,11 +318,13 @@ class TestTrustHooks:
         assert t._delivery.texts == []  # and no reply
 
     @pytest.mark.asyncio
-    async def test_dm_activation_off_does_not_gag_guild_channels(self, transport_with_capture):
-        """"off" is a DM posture; a tracked guild channel keeps working."""
-        from gideon.sdk.channel import ProviderSettings
-
+    async def test_dm_activation_off_does_not_gag_guild_channels(
+        self, transport_with_capture
+    ):
+        """ "off" is a DM posture; a tracked guild channel keeps working."""
         from discord_desk.settings import reload_settings
+
+        from gideon.sdk.channel import ProviderSettings
 
         t, state, captured = transport_with_capture
         ProviderSettings.save("gideonai-discord-desk", {"dm_activation": "off"})
@@ -322,7 +337,9 @@ class TestTrustHooks:
         assert "deploy now" in captured.get("text", "")
 
     @pytest.mark.asyncio
-    async def test_tracked_guild_channel_routes_fenced_text(self, transport_with_capture):
+    async def test_tracked_guild_channel_routes_fenced_text(
+        self, transport_with_capture
+    ):
         t, state, captured = transport_with_capture
         track("discord", "700", "Team Room")
         await t._on_message_create(
@@ -335,7 +352,9 @@ class TestTrustHooks:
         assert "<untrusted_content" in routed
 
     @pytest.mark.asyncio
-    async def test_untracked_guild_channel_is_dropped_silently(self, transport_with_capture):
+    async def test_untracked_guild_channel_is_dropped_silently(
+        self, transport_with_capture
+    ):
         t, state, captured = transport_with_capture
         await t._on_message_create(
             _msg(text="spam", channel_id="999", guild_id="g1", author_id="66")
@@ -352,7 +371,9 @@ class TestTrustHooks:
         assert "text" not in captured
 
     @pytest.mark.asyncio
-    async def test_canned_reply_failure_does_not_raise_out(self, transport_with_capture):
+    async def test_canned_reply_failure_does_not_raise_out(
+        self, transport_with_capture
+    ):
         t, state, captured = transport_with_capture
 
         async def boom(*a, **k):
@@ -365,19 +386,23 @@ class TestTrustHooks:
     async def test_no_dashboard_state_does_not_crash(self, monkeypatch):
         t = DiscordDeskTransport({"bot_token": "TEST"})
         t._services = FakeServices(None)
-        t._delivery = FakeDelivery()
+        monkeypatch.setattr(t, "_delivery", FakeDelivery())
         allow_sender("discord", "42")
         await t._on_message_create(_msg(text="hi", author_id="42"))  # logs, no raise
 
 
 class TestSessionRouting:
     @pytest.mark.asyncio
-    async def test_running_session_queues_instead_of_racing(self, transport_with_capture):
+    async def test_running_session_queues_instead_of_racing(
+        self, transport_with_capture
+    ):
         t, state, captured = transport_with_capture
         allow_sender("discord", "42")
         state.session.running = True
         state.linked["dm-42"] = state.session
-        await t._on_message_create(_msg(text="second", channel_id="dm-42", author_id="42"))
+        await t._on_message_create(
+            _msg(text="second", channel_id="dm-42", author_id="42")
+        )
         await asyncio.sleep(0)
         assert state.session.queued == ["second"]
         assert "text" not in captured  # not a second concurrent turn
@@ -387,7 +412,11 @@ class TestSessionRouting:
         t, state, captured = transport_with_capture
         allow_sender("discord", "42")
         await t._on_message_create(
-            _msg(text="key sk-ABC123DEF456GHI789JKL012MNO345", channel_id="dm-42", author_id="42")
+            _msg(
+                text="key sk-ABC123DEF456GHI789JKL012MNO345",
+                channel_id="dm-42",
+                author_id="42",
+            )
         )
         await asyncio.sleep(0)
         appended = state.session.appended[-1][1]
@@ -425,7 +454,7 @@ class TestOutbound:
         assert await t.send(OutboundMessage(channel_id="500", text="hi")) is False
 
     @pytest.mark.asyncio
-    async def test_send_splits_long_text(self):
+    async def test_send_splits_long_text(self, monkeypatch):
         from gideon.sdk.channel import OutboundMessage
 
         sent: list[str] = []
@@ -439,12 +468,12 @@ class TestOutbound:
                 return None
 
         t = DiscordDeskTransport({"bot_token": "TEST"})
-        t._api = API()
+        monkeypatch.setattr(t, "_api", API())
         assert await t.send(OutboundMessage(channel_id="500", text="x" * 5000)) is True
         assert len(sent) == 3
 
     @pytest.mark.asyncio
-    async def test_send_failure_is_reported_not_raised(self):
+    async def test_send_failure_is_reported_not_raised(self, monkeypatch):
         from gideon.sdk.channel import OutboundMessage
 
         class API:
@@ -455,7 +484,7 @@ class TestOutbound:
                 return None
 
         t = DiscordDeskTransport({"bot_token": "TEST"})
-        t._api = API()
+        monkeypatch.setattr(t, "_api", API())
         assert await t.send(OutboundMessage(channel_id="500", text="hi")) is False
 
 
@@ -475,8 +504,10 @@ class TestGatewayHelloProbe:
                 pass
 
             async def get_gateway_bot(self):
-                return {"url": "wss://gateway.discord.gg",
-                        "session_start_limit": {"remaining": 998}}
+                return {
+                    "url": "wss://gateway.discord.gg",
+                    "session_start_limit": {"remaining": 998},
+                }
 
             async def close(self):
                 return None
@@ -505,7 +536,9 @@ class TestGatewayHelloProbe:
         assert "401" in result["detail"]
 
     @pytest.mark.asyncio
-    async def test_gateway_link_url_discovery_degrades_to_the_default(self):
+    async def test_gateway_link_url_discovery_degrades_to_the_default(
+        self, monkeypatch
+    ):
         from discord_desk.gateway import DEFAULT_GATEWAY_URL
 
         class API:
@@ -513,5 +546,5 @@ class TestGatewayHelloProbe:
                 raise RuntimeError("network down")
 
         t = DiscordDeskTransport({"bot_token": "TEST"})
-        t._api = API()
+        monkeypatch.setattr(t, "_api", API())
         assert await t._discover_gateway_url() == DEFAULT_GATEWAY_URL

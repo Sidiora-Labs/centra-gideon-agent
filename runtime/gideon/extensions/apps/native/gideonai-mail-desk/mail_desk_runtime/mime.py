@@ -46,7 +46,21 @@ logger = logging.getLogger(__name__)
 _DROP_CONTENT_TAGS = frozenset({"script", "style", "head", "title"})
 # Block-level tags that should force a line break so stripped text stays readable.
 _BLOCK_TAGS = frozenset(
-    {"p", "div", "br", "li", "tr", "table", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote"}
+    {
+        "p",
+        "div",
+        "br",
+        "li",
+        "tr",
+        "table",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "blockquote",
+    }
 )
 #: Cap extracted body text so one pathological mail can't blow up a session turn.
 MAX_BODY_CHARS = 100_000
@@ -107,7 +121,9 @@ def html_to_text(html: str) -> str:
         parser.feed(html)
         parser.close()
     except Exception:  # a malformed fragment must not break the poll loop
-        logger.debug("mail-desk: HTML parse failed; returning best-effort text", exc_info=True)
+        logger.debug(
+            "mail-desk: HTML parse failed; returning best-effort text", exc_info=True
+        )
     return parser.text()
 
 
@@ -127,7 +143,9 @@ def decode_header_value(raw: object) -> str:
     try:
         return str(email.header.make_header(email.header.decode_header(text)))
     except (LookupError, UnicodeDecodeError, ValueError):
-        logger.debug("mail-desk: header decode failed; using the raw value", exc_info=True)
+        logger.debug(
+            "mail-desk: header decode failed; using the raw value", exc_info=True
+        )
         return text
 
 
@@ -162,7 +180,7 @@ def sender_display_name(from_header: object) -> str:
 def _decode_part(part: Message) -> str:
     """Decode one part's payload to str, honoring its declared charset (utf-8 fallback)."""
     payload = part.get_payload(decode=True)
-    if payload is None:
+    if not isinstance(payload, bytes):
         return ""
     charset = part.get_content_charset() or "utf-8"
     try:
@@ -255,14 +273,33 @@ class InboundMail:
     on the poll path and never serialized."""
 
     __slots__ = (
-        "uid", "message_id", "from_addr", "from_name", "subject", "body",
-        "in_reply_to", "references", "to_addrs", "attachments", "ts",
+        "uid",
+        "message_id",
+        "from_addr",
+        "from_name",
+        "subject",
+        "body",
+        "in_reply_to",
+        "references",
+        "to_addrs",
+        "attachments",
+        "ts",
     )
 
     def __init__(
-        self, *, uid: int = 0, message_id: str = "", from_addr: str = "", from_name: str = "",
-        subject: str = "", body: str = "", in_reply_to: str = "", references: str = "",
-        to_addrs: list[str] | None = None, attachments: list[str] | None = None, ts: float = 0.0,
+        self,
+        *,
+        uid: int = 0,
+        message_id: str = "",
+        from_addr: str = "",
+        from_name: str = "",
+        subject: str = "",
+        body: str = "",
+        in_reply_to: str = "",
+        references: str = "",
+        to_addrs: list[str] | None = None,
+        attachments: list[str] | None = None,
+        ts: float = 0.0,
     ) -> None:
         self.uid = uid
         self.message_id = message_id
@@ -385,7 +422,9 @@ def build_outbound(
     msg["From"] = from_addr
     msg["To"] = to_addr
     msg["Subject"] = subject
-    msg["Message-ID"] = message_id or email.utils.make_msgid(domain=_domain_of(from_addr))
+    msg["Message-ID"] = message_id or email.utils.make_msgid(
+        domain=_domain_of(from_addr)
+    )
     msg["Date"] = email.utils.formatdate(localtime=True)
     if in_reply_to:
         msg["In-Reply-To"] = in_reply_to
@@ -402,8 +441,10 @@ def build_outbound(
     for filename, mimetype, payload in attachments or []:
         maintype, _, subtype = mimetype.partition("/")
         msg.add_attachment(
-            payload, maintype=maintype or "application",
-            subtype=subtype or "octet-stream", filename=filename,
+            payload,
+            maintype=maintype or "application",
+            subtype=subtype or "octet-stream",
+            filename=filename,
         )
     return msg
 

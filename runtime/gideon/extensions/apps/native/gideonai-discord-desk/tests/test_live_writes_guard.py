@@ -20,9 +20,6 @@ with the guard off, the same call must really reach the fake API. Without it,
 from __future__ import annotations
 
 import pytest
-
-from gideon.sdk.channel import OutboundMessage
-
 from discord_desk.transport import DiscordDeskTransport
 from discord_desk.writes import (
     ENV_DISABLE_LIVE_WRITES,
@@ -30,8 +27,9 @@ from discord_desk.writes import (
     guard_flag,
     live_writes_disabled,
 )
-
 from test_result_delivery import FakeAPI
+
+from gideon.sdk.channel import OutboundMessage
 
 _MSG = OutboundMessage(channel_id="500", text="ping")
 
@@ -113,6 +111,7 @@ async def test_the_refusal_is_attributable(monkeypatch):
 
     result = await transport.send(_MSG)
 
+    assert isinstance(result, SendRefused)
     assert result.channel == "discord"
     assert result.target == "500"
     assert ENV_DISABLE_LIVE_WRITES in result.reason
@@ -124,6 +123,7 @@ async def test_a_refusal_is_distinguishable_from_a_failure(monkeypatch):
     """The whole point of the type. A send that was ATTEMPTED and failed returns a
     plain ``False``; a send the platform suppressed returns ``SendRefused``. Both are
     falsy, and conflating them is what a bare ``False`` would do."""
+
     class Boom:
         async def create_message(self, *a, **k):
             raise RuntimeError("boom")
@@ -132,7 +132,7 @@ async def test_a_refusal_is_distinguishable_from_a_failure(monkeypatch):
             return None
 
     failing = DiscordDeskTransport({"bot_token": "TEST"})
-    failing._api = Boom()
+    monkeypatch.setattr(failing, "_api", Boom())
     failure = await failing.send(_MSG)
     assert failure is False
     assert not isinstance(failure, SendRefused)
@@ -181,7 +181,14 @@ def test_any_other_present_value_turns_the_guard_on(monkeypatch, raw):
 
 @pytest.mark.parametrize(
     ("value", "enabled"),
-    [(None, True), (True, True), (False, False), (0, False), (1, True), (object(), True)],
+    [
+        (None, True),
+        (True, True),
+        (False, False),
+        (0, False),
+        (1, True),
+        (object(), True),
+    ],
 )
 def test_guard_flag_matches_cores_parse_for_non_string_shapes(value, enabled):
     assert guard_flag(value) is enabled

@@ -13,7 +13,6 @@ from __future__ import annotations
 import imaplib
 
 import pytest
-
 from mail_desk_runtime.imap_client import (
     IMAP_TIMEOUT_SECS,
     Imap4Client,
@@ -26,9 +25,14 @@ class FakeConn:
     """A fake ``imaplib.IMAP4`` connection recording precisely which commands ran."""
 
     def __init__(
-        self, *, search=("OK", [b""]), fetch=("OK", []),
+        self,
+        *,
+        search=("OK", [b""]),
+        fetch=("OK", []),
         status=("OK", [b'"INBOX" (UIDVALIDITY 7)']),
-        login_ok=True, select_ok=True, raise_on=None,
+        login_ok=True,
+        select_ok=True,
+        raise_on=None,
     ):
         self._search = search
         self._fetch = fetch
@@ -115,7 +119,9 @@ class TestResumeContract:
         newer — filtering to strictly-greater is what makes "no new mail" empty."""
         conn = FakeConn(search=("OK", [b"3 5 8"]))
         assert _client(conn).fetch_uids_since("INBOX", 8) == []
-        assert _client(FakeConn(search=("OK", [b"3 5 8"]))).fetch_uids_since("INBOX", 5) == [8]
+        assert _client(FakeConn(search=("OK", [b"3 5 8"]))).fetch_uids_since(
+            "INBOX", 5
+        ) == [8]
 
     def test_cursor_zero_returns_everything(self):
         conn = FakeConn(search=("OK", [b"1 2 3"]))
@@ -132,10 +138,16 @@ class TestResumeContract:
         assert _client(conn).fetch_uids_since("INBOX", 0) == [3, 5]
 
     def test_empty_and_none_payloads(self):
-        assert _client(FakeConn(search=("OK", [b""]))).fetch_uids_since("INBOX", 0) == []
-        assert _client(FakeConn(search=("OK", [None]))).fetch_uids_since("INBOX", 0) == []
+        assert (
+            _client(FakeConn(search=("OK", [b""]))).fetch_uids_since("INBOX", 0) == []
+        )
+        assert (
+            _client(FakeConn(search=("OK", [None]))).fetch_uids_since("INBOX", 0) == []
+        )
         assert _client(FakeConn(search=("OK", []))).fetch_uids_since("INBOX", 0) == []
-        assert _client(FakeConn(search=("NO", [b"3"]))).fetch_uids_since("INBOX", 0) == []
+        assert (
+            _client(FakeConn(search=("NO", [b"3"]))).fetch_uids_since("INBOX", 0) == []
+        )
 
     def test_negative_cursor_is_clamped(self):
         conn = FakeConn(search=("OK", [b"1"]))
@@ -171,7 +183,10 @@ class TestUidValidity:
     def test_unreported_uidvalidity_is_zero_not_an_error(self):
         """0 means "unknown" to the transport, which treats it as unchanged — a missing
         value must not look like a renumbering and wipe a good cursor."""
-        assert _client(FakeConn(status=("OK", [b'"INBOX" ()']))).select_folder("INBOX") == 0
+        assert (
+            _client(FakeConn(status=("OK", [b'"INBOX" ()']))).select_folder("INBOX")
+            == 0
+        )
         assert _client(FakeConn(status=("NO", []))).select_folder("INBOX") == 0
 
     def test_status_failure_degrades_to_zero(self):
@@ -244,7 +259,7 @@ class TestErrorContainment:
     def test_maxline_is_raised_at_import(self):
         """imaplib's default line cap truncates big UID sets / literals and raises
         "got more than N bytes"."""
-        assert imaplib._MAXLINE >= 10_000_000
+        assert getattr(imaplib, "_MAXLINE") >= 10_000_000
 
 
 class TestConnectUsesTlsAndTimeout:
@@ -291,7 +306,9 @@ class TestProbeLogin:
 
     def test_fails_when_the_folder_is_not_selectable(self, monkeypatch):
         monkeypatch.setattr(
-            imaplib, "IMAP4_SSL", lambda host, port, timeout=None: FakeConn(select_ok=False)
+            imaplib,
+            "IMAP4_SSL",
+            lambda host, port, timeout=None: FakeConn(select_ok=False),
         )
         ok, detail = probe_login("h", 993, "u", "p", "Missing")
         assert ok is False
@@ -299,7 +316,9 @@ class TestProbeLogin:
 
     def test_fails_when_the_login_is_rejected(self, monkeypatch):
         monkeypatch.setattr(
-            imaplib, "IMAP4_SSL", lambda host, port, timeout=None: FakeConn(login_ok=False)
+            imaplib,
+            "IMAP4_SSL",
+            lambda host, port, timeout=None: FakeConn(login_ok=False),
         )
         ok, detail = probe_login("h", 993, "u", "p", "INBOX")
         assert ok is False
