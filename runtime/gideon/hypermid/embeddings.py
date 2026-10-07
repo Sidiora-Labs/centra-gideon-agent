@@ -7,7 +7,6 @@ import hashlib
 import math
 import threading
 from dataclasses import dataclass, replace
-from enum import Enum
 from typing import Literal, Protocol
 
 from .models import Error, Scope, Trace
@@ -209,17 +208,6 @@ class GuardedEmbeddingPublisher(Protocol):
         actor_scope: Scope,
         trace: Trace,
     ) -> bool: ...
-
-
-class EmbeddingFailureClass(str, Enum):
-    TRANSPORT = "transport"
-    REFUSAL = "refusal"
-    MISSING_CREDENTIALS = "missing_credentials"
-    RATE_LIMITED = "rate_limited"
-    INVALID_VECTOR = "invalid_vector"
-    CONTENT_CHANGED = "content_changed"
-    REGISTRATION_RETIRED = "registration_retired"
-    BUDGET = "budget"
 
 
 @dataclass(frozen=True, slots=True)

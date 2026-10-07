@@ -12,12 +12,60 @@ from gideon.hypermid.foundation_service import (
     FoundationService,
     RoleOutcome,
 )
-from gideon.hypermid.observability import DailySegmentWriter, RedactionPolicy
+from gideon.hypermid.observability import (
+    DailySegmentWriter,
+    LogFilter,
+    LogLevel,
+    LogParseError,
+    RedactionPolicy,
+    parse_line,
+)
 from gideon.hypermid.transforms import TransformProvider
+import pytest
 
 
 def _trace(name: str) -> Trace:
     return Trace(Id("integration-trace"), Id(name))
+
+
+def test_authored_trace_level_survives_durable_foundation_logging(tmp_path: Path) -> None:
+    scope = Scope(Id("owner-1"), Id("project-1"), Id("workspace-1"))
+    policy = LogFilter.parse("hypermid=trace,*=info")
+    level = LogLevel.parse("trace")
+    assert not policy.malformed
+    assert policy.enabled("hypermid.foundation", level)
+    assert not policy.enabled("other.component", level)
+    bus = FoundationLocalBus.open(tmp_path / "bus", scope)
+    service = FoundationService.open(
+        tmp_path / "service",
+        scope,
+        bus=bus,
+        compaction=CompactionProvider(tmp_path / "compaction"),
+        transform=TransformProvider(tmp_path / "transform"),
+        log_writer=DailySegmentWriter(tmp_path / "logs", maximum_bytes=1_048_576),
+    )
+    try:
+        result = service.emit_trace(
+            scope,
+            _trace("trace-level-request"),
+            {"detail": "trace detail"},
+            timestamp="2026-10-07T00:00:00.000Z",
+            utc_date="2026-10-07",
+            level=level,
+        )
+        assert isinstance(result, Cursor)
+    finally:
+        service.close()
+        bus.close()
+    line = (tmp_path / "logs/hypermid-2026-10-07.log").read_bytes()
+    encoded = json.loads(line)
+    assert encoded["level"] == "trace"
+    record = parse_line(line)
+    assert record.level == level
+    assert record.fields["detail"] == "trace detail"
+    encoded["level"] = "unsupported-level"
+    with pytest.raises(LogParseError):
+        parse_line(json.dumps(encoded).encode() + b"\n")
 
 
 def _step(session_handle: str) -> dict[str, object]:
