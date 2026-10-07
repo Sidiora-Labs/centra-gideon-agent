@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useSetupImport, writableImportItem } from './importSetupState'
 import { motion } from 'framer-motion'
 import { AlertTriangle, ArrowRight, Check, Loader2, ShieldCheck } from 'lucide-react'
@@ -150,17 +150,20 @@ function PickGroup({ items, picked, onPick, label }: {
   items: OnboardingImportItem[]; picked: Record<string, boolean>
   onPick: (items: OnboardingImportItem[], value: boolean) => void; label: string
 }) {
+  const reasonId = useId()
   const eligible = items.filter(item => writableImportItem(item) && item.scan?.verdict !== "warning")
   const chosen = eligible.filter(item => picked[item.fingerprint]).length
-  return <input type="checkbox" aria-label={label} checked={!!eligible.length && chosen === eligible.length}
-    disabled={!eligible.length} ref={element => { if (element) element.indeterminate = chosen > 0 && chosen < eligible.length }}
-    onChange={event => onPick(eligible, event.target.checked)} />
+  return <><input type="checkbox" aria-label={label} checked={!!eligible.length && chosen === eligible.length}
+    aria-disabled={!eligible.length || undefined} aria-describedby={!eligible.length ? reasonId : undefined} ref={element => { if (element) element.indeterminate = chosen > 0 && chosen < eligible.length }}
+    onChange={event => { if (eligible.length) onPick(eligible, event.target.checked) }} />
+    {!eligible.length && <span id={reasonId} className="text-[0.8125rem] text-on-surface-low">No writable items without warnings are available for group selection.</span>}</>
 }
 
 function ImportGroup({ category, items, picked, onPick }: {
   category: string; items: OnboardingImportItem[]; picked: Record<string, boolean>
   onPick: (items: OnboardingImportItem[], value: boolean) => void
 }) {
+  const reasonPrefix = useId()
   const [filter, setFilter] = useState('')
   const [page, setPage] = useState(0)
   const matching = items.filter(item => `${item.title} ${item.key} ${item.detail ?? ''}`.toLowerCase().includes(filter.toLowerCase()))
@@ -173,16 +176,16 @@ function ImportGroup({ category, items, picked, onPick }: {
         <div className="grid gap-s py-s">
           <label>Filter {labelOfCategory(category)}<input type="search" className="w-full rounded-lg border border-outline-variant bg-surface p-s"
             value={filter} onChange={event => { setFilter(event.target.value); setPage(0) }} /></label>
-          {matching.slice(shownPage * 40, (shownPage + 1) * 40).map(item => <label key={item.fingerprint} className="flex items-start gap-s text-[0.8125rem]">
+          {matching.slice(shownPage * 40, (shownPage + 1) * 40).map((item, index) => <label key={item.fingerprint} className="flex items-start gap-s text-[0.8125rem]">
             <input type="checkbox" aria-label={item.scan?.verdict === "warning" ? `Accept these warnings and import ${item.title}` : `Import ${item.title}`} checked={!!picked[item.fingerprint] && writableImportItem(item)}
-              disabled={!writableImportItem(item)} onChange={event => onPick([item], event.target.checked)} />
-            <span className="min-w-0 break-words">{item.title}{item.scan?.findings.map((finding, index) => <span key={`${finding.rule}:${index}`} className="block text-warn">
+              aria-disabled={!writableImportItem(item) || undefined} aria-describedby={!writableImportItem(item) ? `${reasonPrefix}-${index}` : undefined} onChange={event => { if (writableImportItem(item)) onPick([item], event.target.checked) }} />
+            <span className="min-w-0 break-words">{item.title}{!writableImportItem(item) && <span id={`${reasonPrefix}-${index}`} className="block text-on-surface-low">{item.detail || (item.state === 'existing' || item.existing ? 'This item already exists and cannot be selected for import.' : `This item cannot be imported in its current state: ${item.state || 'unavailable'}.`)}</span>}{item.scan?.findings.map((finding, index) => <span key={`${finding.rule}:${index}`} className="block text-warn">
                 {finding.severity}: {finding.rule}{finding.gloss ? ` · ${finding.gloss}` : ''} · {finding.path}{finding.line ? `:${finding.line}` : ''}<span className="block">{finding.evidence}</span>
               </span>)}{item.scan?.verdict === 'warning' && <span className="block">Accept these warnings to bring this skill over.</span>}<span className="block text-on-surface-low">{item.state ?? (item.existing ? 'existing' : 'new')}{item.destination ? ` → ${item.destination}` : ''}{item.detail ? ` · ${item.detail}` : ''}</span>
               {!!((item.secrets_skipped ?? 0) + item.redactions) && <span className="block">{(item.secrets_skipped ?? 0) + item.redactions} credential values withheld</span>}</span>
           </label>)}
           {!matching.length && <p>No matching items</p>}
-          {pages > 1 && <div className="flex items-center gap-s"><Button size="sm" variant="secondary" disabled={!shownPage} onClick={() => setPage(shownPage - 1)}>Previous</Button><span>Page {shownPage + 1} of {pages}</span><Button size="sm" variant="secondary" disabled={shownPage + 1 >= pages} onClick={() => setPage(shownPage + 1)}>Next</Button></div>}
+          {pages > 1 && <div className="flex items-center gap-s"><Button size="sm" variant="secondary" disabled={!shownPage} onClick={() => setPage(shownPage - 1)} disabledReason={!shownPage ? 'This is the first page' : undefined}>Previous</Button><span>Page {shownPage + 1} of {pages}</span><Button size="sm" variant="secondary" disabled={shownPage + 1 >= pages} onClick={() => setPage(shownPage + 1)} disabledReason={shownPage + 1 >= pages ? 'This is the last page' : undefined}>Next</Button></div>}
         </div>
       </details>
     </div>

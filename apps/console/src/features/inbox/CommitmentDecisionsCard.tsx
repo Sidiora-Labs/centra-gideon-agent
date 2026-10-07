@@ -62,8 +62,8 @@ export function CommitmentDecisionsCard({ decisions, onRefresh }: {
         </p>
         {row.run_id ? <a className="text-primary" href={`#/workflows/runs/${encodeURIComponent(row.run_id)}`}>Open background run</a>
           : !row.dismissed_until && <div className="mt-s flex gap-s">
-            <Button size="xs" variant="secondary" loading={busy === row.topic} onClick={() => void approve(row).catch((error) => notify(error instanceof Error ? error.message : 'Could not review background work', 'error'))}>Approve background work</Button>
-            <Button size="xs" variant="secondary" loading={busy === row.topic} onClick={() => void dismiss(row)}>Dismiss for seven days</Button>
+            <Button ariaLabel={`Approve background work: ${row.text.slice(0, 120)}`} size="xs" variant="secondary" loading={busy === row.topic} onClick={() => void approve(row).catch((error) => notify(error instanceof Error ? error.message : 'Could not review background work', 'error'))}>Approve background work</Button>
+            <Button ariaLabel={`Dismiss for seven days: ${row.text.slice(0, 120)}`} size="xs" variant="secondary" loading={busy === row.topic} onClick={() => void dismiss(row)}>Dismiss for seven days</Button>
           </div>}
       </li>)}
     </ul>

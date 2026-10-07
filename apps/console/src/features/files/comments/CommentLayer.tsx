@@ -259,7 +259,7 @@ function SubmitModal({ count, instructions, setInstructions, busy, error, onCanc
         </div>
         {error && <p role="alert" className="text-danger text-[0.8125rem]">Couldn't submit the comments: {error}</p>}
         <div className="flex justify-end gap-s">
-          <Button variant="ghost" size="sm" onClick={onCancel} disabled={busy}>Cancel</Button>
+          <Button variant="ghost" size="sm" onClick={onCancel} disabled={busy} disabledReason={busy ? 'Wait for the comment to finish saving' : undefined}>Cancel</Button>
           <Button size="sm" onClick={onConfirm} disabled={busy} loading={busy} loadingLabel="Submitting…" disabledReason={busy ? 'Submitting comments' : undefined}>
             <Send size={14} /> Submit to AI
           </Button>

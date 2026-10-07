@@ -31,7 +31,7 @@ export function ReadOnlyTrustControls({ server }: { server: McpServer }) {
   const changes = [...(trust.added ?? []).map(name => `${name} added`), ...(trust.changed ?? []).map(item => `${item.name}: ${item.parts.join(', ')} changed`), ...(trust.removed ?? []).map(name => `${name} removed`)]
   return <div className="mb-m rounded-md border border-outline-variant/25 bg-surface-container/30 p-m grid gap-s">
     <div className="flex flex-wrap items-center gap-s"><span className="text-on-surface text-[0.8125rem]">Read-only labels: {trust.trusted ? 'reviewed definitions trusted' : 'not trusted'}</span>
-      <Button size="sm" variant="secondary" disabled={busy || !trust.listed || server.allowed === false} onClick={() => { setError(''); setReview(server) }}>{trust.trusted ? 'Review tool definitions' : 'Review read-only labels'}</Button>
+      <Button size="sm" variant="secondary" disabled={busy || !trust.listed || server.allowed === false} onClick={() => { setError(''); setReview(server) }} disabledReason={busy ? 'Wait for the current trust operation to finish' : !trust.listed ? 'The MCP server must be listed before reviewing labels' : server.allowed === false ? 'Allow this MCP server before reviewing labels' : undefined}>{trust.trusted ? 'Review tool definitions' : 'Review read-only labels'}</Button>
       {trust.trusted && <Button size="sm" variant="ghost" loading={busy} onClick={stop}>Stop trusting labels</Button>}
     </div>
     <p className="text-on-surface-low text-[0.8125rem]">New or changed definitions ask for approval until you review them. Server connection permission remains separate.</p>
@@ -49,7 +49,7 @@ export function ReadOnlyTrustControls({ server }: { server: McpServer }) {
           <details><summary className="cursor-pointer text-on-surface-low text-[0.8125rem]">Review input schema and labels</summary><pre className="mt-s overflow-x-auto whitespace-pre-wrap break-all text-[0.75rem] text-on-surface-low">{JSON.stringify({ inputs: tool.inputSchema, labels: tool.annotations }, null, 2)}</pre></details>
         </section>)}</div>
         {error && <FieldError>{error}</FieldError>}
-        <div className="flex justify-end gap-s"><Button variant="ghost" onClick={() => setReview(null)} disabled={busy}>Cancel</Button><Button loading={busy} onClick={allow}>Allow reviewed read-only definitions</Button></div>
+        <div className="flex justify-end gap-s"><Button variant="ghost" onClick={() => setReview(null)} disabled={busy} disabledReason={busy ? 'Wait for the trust review to finish saving' : undefined}>Cancel</Button><Button loading={busy} onClick={allow}>Allow reviewed read-only definitions</Button></div>
       </div>
     </Modal>}
   </div>

@@ -79,10 +79,10 @@ export function NotificationsPage({ query, setQuery, navigate }: Pick<RouteProps
               <div className="grid gap-s rounded-lg border border-outline/40 bg-surface-container p-m">
                 <p className="text-on-surface-var text-[0.875rem]">Allow this sender to start conversations with your agent, or deny access. The held message stays out of the agent conversation.</p>
                 <div className="flex flex-wrap gap-s">
-                  {open.actions?.includes('allow') && <Button size="sm" disabled={trustBusy} onClick={() => void answerSender('allow')}>
+                  {open.actions?.includes('allow') && <Button size="sm" disabled={trustBusy} onClick={() => void answerSender('allow')} disabledReason={trustBusy ? 'Wait for the sender trust decision to finish' : undefined}>
                     <UserPlus size={14} /> Allow sender
                   </Button>}
-                  {open.actions?.includes('deny') && <Button size="sm" variant="secondary" disabled={trustBusy} onClick={() => void answerSender('deny')}>
+                  {open.actions?.includes('deny') && <Button size="sm" variant="secondary" disabled={trustBusy} onClick={() => void answerSender('deny')} disabledReason={trustBusy ? 'Wait for the sender trust decision to finish' : undefined}>
                     <XCircle size={14} /> Deny sender
                   </Button>}
                 </div>

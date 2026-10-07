@@ -268,7 +268,7 @@ export function StoreTriggerDetail({ trigger, providers = [], editing, onEditing
           <ActionConfig providers={providers} provider={provider} config={config}
             onProvider={(name) => { setProvider(name); setConfig(seedActionConfig(providers.find((item) => item.name === name))) }} onConfig={setConfig} vars={[]} />
           <div className="flex gap-s"><Button size="sm" onClick={saveEvent} loading={busy}>Save changes</Button>
-            <Button size="sm" variant="ghost" onClick={() => changeEditing(false)} disabled={busy}>Cancel</Button></div>
+            <Button size="sm" variant="ghost" onClick={() => changeEditing(false)} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>Cancel</Button></div>
         </div>}
       </Section>}
 

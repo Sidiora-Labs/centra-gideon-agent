@@ -370,10 +370,10 @@ export function EventTriggerSummary({ t, providers, editing, onEditingChange, on
       {runResult && <p role="status" className="text-on-surface-low text-[0.8125rem]">{runResult}</p>}
       {!t.readOnly && (
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <Button variant="secondary" size="sm" onClick={toggle} disabled={busy}>{t.enabled ? 'Pause' : 'Resume'}</Button>
-          <Button variant="ghost" size="sm" onClick={() => changeEditing(!activeEditing)} disabled={busy}><Pencil size={14} /> Edit</Button>
-          <Button variant="ghost" size="sm" onClick={() => run(true)} disabled={busy}><FlaskConical size={14} /> Dry run</Button>
-          <Button variant="ghost" size="sm" onClick={() => run(false)} disabled={busy}><Play size={14} /> Run now</Button>
+          <Button variant="secondary" size="sm" onClick={toggle} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}>{t.enabled ? 'Pause' : 'Resume'}</Button>
+          <Button variant="ghost" size="sm" onClick={() => changeEditing(!activeEditing)} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}><Pencil size={14} /> Edit</Button>
+          <Button variant="ghost" size="sm" onClick={() => run(true)} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}><FlaskConical size={14} /> Dry run</Button>
+          <Button variant="ghost" size="sm" onClick={() => run(false)} disabled={busy} disabledReason={busy ? BUSY_REASON : undefined}><Play size={14} /> Run now</Button>
           <div className="flex-1" />
           <Button variant="ghost" size="sm" onClick={remove} disabled={busy} disabledReason={BUSY_REASON} className="text-danger">
             <Trash2 size={14} /> Delete

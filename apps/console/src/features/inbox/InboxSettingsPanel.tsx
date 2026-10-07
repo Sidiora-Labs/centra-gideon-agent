@@ -91,12 +91,12 @@ export function InboxSettingsPanel() {
             const value = channelId.trim()
             if (!value || /\s|[\u0000-\u001f\u007f]/.test(value) || value.length > 256) { setWatchError('Enter one channel ID, without spaces, up to 256 characters.'); return }
             if (await changeChannel(value, true)) setChannelId('')
-          }} loading={watchBusy} disabled={watchBusy || !channelId.trim()}>Add channel</Button>
+          }} loading={watchBusy} disabled={watchBusy || !channelId.trim()} disabledReason={watchBusy ? 'Wait for the channel update to finish' : !channelId.trim() ? 'Enter a channel ID' : undefined}>Add channel</Button>
         </div>
         <div className="grid gap-xs">
-          {(watchedDocument?.value ?? []).map(id => <div key={id} className="flex items-center justify-between gap-s rounded-md bg-surface-container px-m py-s">
+          {(watchedDocument?.value ?? []).map((id, index) => <div key={id} className="flex items-center justify-between gap-s rounded-md bg-surface-container px-m py-s">
             <span data-type="body-s" className="text-on-surface-var">{id}</span>
-            <Button size="xs" variant="ghost" onClick={() => void changeChannel(id, false)} loading={watchBusy} disabled={watchBusy}>Remove</Button>
+            <Button ariaLabel={`Remove watched channel ${index + 1} of ${watchedDocument?.value.length ?? 0}`} disabledReason={watchBusy ? 'Wait for the channel update to finish' : undefined} size="xs" variant="ghost" onClick={() => void changeChannel(id, false)} loading={watchBusy} disabled={watchBusy}>Remove</Button>
           </div>)}
         </div>
         {watchError && <p role="alert" data-type="caption" className="text-danger">{watchError}</p>}

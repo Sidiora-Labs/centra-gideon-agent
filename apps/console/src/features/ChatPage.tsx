@@ -2580,7 +2580,7 @@ function ChatSession({ sessionId, navigate, query, setQuery, projectId: initialP
           ) : handoffChannels.map((channel: ChannelRuntime) => (
             <Button key={channel.name} size="sm" variant="secondary" disabled={handoffBusy !== null}
               loading={handoffBusy === channel.name}
-              onClick={() => void handoffTo(channel.name, channel.display_name || channel.name)}>
+              onClick={() => void handoffTo(channel.name, channel.display_name || channel.name)} disabledReason={handoffBusy !== null ? 'Wait for the current channel handoff to finish' : undefined}>
               <Send size={14} /> Continue on {channel.display_name || channel.name}
             </Button>
           ))}

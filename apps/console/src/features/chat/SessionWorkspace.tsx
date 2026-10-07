@@ -246,10 +246,10 @@ function DelegatedAgents({ sessionKey }: { sessionKey: string }) {
     {error && <p role="alert" className="text-xs text-danger">{error}</p>}
     {!agents.length && !error && <p className="py-xl text-center text-sm text-on-surface-low">No delegated agents in this conversation.</p>}
     {!!agents.length && <BackgroundAgentRuns agents={agents} onOpen={(id) => setSelected(selected === id ? '' : id)} />}
-    {agents.filter((agent) => !agent.done).map((agent) => <article key={agent.id} className="rounded-lg border border-outline-variant/50 p-s">
+    {agents.filter((agent) => !agent.done).map((agent, index) => <article key={agent.id} className="rounded-lg border border-outline-variant/50 p-s">
       <div className="flex items-start gap-s"><div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-on-surface">{agent.agent || agent.id}</p>
-      </div><Button variant="ghost" size="xs" onClick={() => setSelected(selected === agent.id ? '' : agent.id)}>{selected === agent.id ? 'Close' : 'Inspect'}</Button>{!agent.done && <Button variant="danger" size="xs" disabled={busy === agent.id} onClick={() => void cancel(agent)}>Interrupt</Button>}</div>
+      </div><Button variant="ghost" size="xs" onClick={() => setSelected(selected === agent.id ? '' : agent.id)}>{selected === agent.id ? 'Close' : 'Inspect'}</Button>{!agent.done && <Button ariaLabel={`Interrupt: ${agent.agent || 'Delegated agent'} — run ${index + 1}`} variant="danger" size="xs" disabled={busy === agent.id} onClick={() => void cancel(agent)} disabledReason={busy === agent.id ? 'Wait for this agent interrupt request to finish' : undefined}>Interrupt</Button>}</div>
       {selected === agent.id && <div className="mt-s border-t border-outline-variant/40 pt-s text-xs text-on-surface-var">
         {!detail ? <p role="status">Loading this agent…</p> : <>
           <p>Instance {detail.id}</p>

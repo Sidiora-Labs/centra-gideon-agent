@@ -92,7 +92,7 @@ export function ExportAgentsDialog({ agents, defaultAgent, initialNames, onClose
       <footer className="flex flex-wrap justify-end gap-s border-t border-outline-variant/25 pt-m">
         <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
         {eligible.length > 0 && !written && <>
-          <Button variant="secondary" size="sm" loading={busy && !preview} disabled={selected.length === 0 || busy} onClick={() => void makePreview()}>{preview ? 'Refresh preview' : 'Preview export'}</Button>
+          <Button variant="secondary" size="sm" loading={busy && !preview} disabled={selected.length === 0 || busy} onClick={() => void makePreview()} disabledReason={busy ? 'Wait for the current export operation' : selected.length === 0 ? 'Select at least one agent' : undefined}>{preview ? 'Refresh preview' : 'Preview export'}</Button>
           {preview?.preview_token && <Button size="sm" loading={busy && !!preview} disabled={busy} onClick={() => void writeExport()}><Download size={14} /> Export files</Button>}
         </>}
       </footer>

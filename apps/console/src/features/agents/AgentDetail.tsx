@@ -59,7 +59,7 @@ export function NativeAgentDetail({ agent, isDefault, onSaved, onDeleted, onSetD
       {reserved ? <span data-type="body-s" className="inline-flex items-center gap-1.5 text-on-surface-low"><Lock size={13} /> Reserved built-in — model only</span> : <>
         <Button size="sm" variant="secondary" onClick={() => { setDraft(toDraft(agent)); onEditingChange(true) }}><Pencil size={14} /> Edit</Button>
         {!isDefault && <Button size="sm" variant="ghost" onClick={onSetDefault}><Star size={14} /> Set default</Button>}
-        <Button size="sm" variant="ghost" onClick={remove} disabled={operation.busy}><Trash2 size={14} /> Delete</Button>
+        <Button size="sm" variant="ghost" onClick={remove} disabled={operation.busy} disabledReason={operation.busy ? 'Wait for the current agent operation to finish' : undefined}><Trash2 size={14} /> Delete</Button>
         {!isDefault && ['local', 'gideon'].includes(agent.source ?? '') && onExport && <Button size="sm" variant="ghost" onClick={onExport}><Download size={14} /> Export</Button>}
       </>}
       {isDefault && <span data-type="caption" className="ml-auto inline-flex items-center gap-1 text-primary"><Star size={12} fill="currentColor" /> Default</span>}

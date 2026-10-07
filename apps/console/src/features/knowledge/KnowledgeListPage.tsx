@@ -839,10 +839,10 @@ function IntentDetail({ intent, onChanged, onClose, onOpenItem }: {
         {
 }
         <Button size="sm" variant="secondary" onClick={run} loading={running} loadingLabel="Running…"><Play size={14} /> Run on existing items</Button>
-        <Button size="sm" variant="secondary" onClick={() => update({ enabled: !intent.enabled })} disabled={updating}>
+        <Button size="sm" variant="secondary" onClick={() => update({ enabled: !intent.enabled })} disabled={updating} disabledReason={updating ? 'Wait for the current intent update to finish' : undefined}>
           {intent.enabled ? <Pause size={14} /> : <Play size={14} />} {intent.enabled ? 'Pause' : 'Resume'}
         </Button>
-        <Button size="sm" variant="secondary" onClick={() => update({ propose_skill: !intent.propose_skill })} disabled={updating}>
+        <Button size="sm" variant="secondary" onClick={() => update({ propose_skill: !intent.propose_skill })} disabled={updating} disabledReason={updating ? 'Wait for the current intent update to finish' : undefined}>
           <Sparkles size={14} /> {intent.propose_skill ? 'Stop proposing skill' : 'Propose skill'}
         </Button>
         {intent.propose_skill && (

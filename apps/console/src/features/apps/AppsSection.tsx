@@ -997,7 +997,7 @@ export function AppCard({ item, index, busy, onInstall, onOpen, onAction }: {
               <span onClick={stop}><Button variant="primary" size="sm" onClick={() => onAction(app, 'toggle')}><Power size={14} /> Activate</Button></span>
             )
           ) : (
-            <span onClick={stop}><Button variant="secondary" size="sm" loading={busy} disabled={item.installable === false} onClick={onInstall}><Download size={14} /> Install
+            <span onClick={stop}><Button variant="secondary" size="sm" loading={busy} disabled={item.installable === false} onClick={onInstall} disabledReason={item.installable === false ? item.refused || 'This app is not available to install.' : undefined}><Download size={14} /> Install
             </Button></span>
           )}
         </div>
@@ -1256,9 +1256,9 @@ export function AppDetailPanel({ app, onClose, onChanged, onOpen }: { app: AppSu
                 {engineStatus?.job.state === 'running' || engineStatus?.job.state === 'queued' ? (
                   <div className="mt-2 flex items-center gap-2">
                     <span data-type="label-s" className="text-on-surface-low">Installing · {Math.round((engineStatus.job.progress ?? 0) * 100)}%</span>
-                    <Button variant="ghost" size="sm" disabled={engineBusy} onClick={() => void cancelEngineInstall()}>Cancel</Button>
+                    <Button variant="ghost" size="sm" disabled={engineBusy} onClick={() => void cancelEngineInstall()} disabledReason={engineBusy ? 'Wait for the current engine operation to finish' : undefined}>Cancel</Button>
                   </div>
-                ) : !engineStatus?.installed && <Button className="mt-2" variant="primary" size="sm" disabled={engineBusy} onClick={() => void installEngine()}>
+                ) : !engineStatus?.installed && <Button className="mt-2" variant="primary" size="sm" disabled={engineBusy} onClick={() => void installEngine()} disabledReason={engineBusy ? 'Wait for the current engine operation to finish' : undefined}>
                   {engineBusy ? 'Starting…' : 'Install engine'}
                 </Button>}
                 {!!engineStatus?.job.log_tail?.length && <pre className="mt-2 max-h-28 overflow-auto rounded bg-surface px-2 py-1 text-[0.6875rem] text-on-surface-low">{engineStatus.job.log_tail.join('\n')}</pre>}
@@ -1440,7 +1440,7 @@ export function StoreDetailPanel({ item, onInstalled }: { item: StoreItem; onIns
       {item.installable === false && <p role="status" data-type="body-s" className="text-danger">{item.refused || "This app is not available to install."}</p>}
       <GuardedFailure guarded={guarded} />
       <div>
-        <Button variant="primary" size="sm" loading={guarded.busy} disabled={item.installable === false} onClick={() => install(false)}><Download size={15} /> Install
+        <Button variant="primary" size="sm" loading={guarded.busy} disabled={item.installable === false} onClick={() => install(false)} disabledReason={item.installable === false ? item.refused || 'This app is not available to install.' : undefined}><Download size={15} /> Install
         </Button>
       </div>
 

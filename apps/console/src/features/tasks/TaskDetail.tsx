@@ -106,7 +106,7 @@ export function TaskDetail({ task, onSaved, onDeleted, editing: editingProp, onE
     <div className="flex flex-wrap items-center gap-s border-b border-outline-variant/30 pb-m">
       {readOnly ? <span data-type="body-s" className="inline-flex items-center gap-1.5 text-on-surface-low"><Lock size={13} /> Managed by project — read-only</span> : <>
         <Button size="sm" variant="secondary" onClick={() => { const next = toDraft(task); setDraft(next); setBase({ value: next, revision: task.revision ?? task.updated_at ?? '' }); onEditingChange(true) }}><Pencil size={14} /> Edit</Button>
-        <Button size="sm" variant="ghost" onClick={remove} disabled={busy}><Trash2 size={14} /> Delete</Button>
+        <Button size="sm" variant="ghost" onClick={remove} disabled={busy} disabledReason={busy ? 'Wait for task deletion to finish' : undefined}><Trash2 size={14} /> Delete</Button>
       </>}
       {task.url && <TextLink href={task.url} external icon={ExternalLink} size="sm" className="ml-auto">Open</TextLink>}
       <span className={task.url ? '' : 'ml-auto'}><InvestigateButton kind="task" id={task.id} backLink="#/tasks" /></span>

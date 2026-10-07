@@ -170,17 +170,17 @@ export function DeniedCallRerun({ item, onChanged, navigate }: Props) {
           <p data-type="body-s" className="mt-1 text-on-surface-var">Re-entry uses the recorded origin. The server verifies the live owner, trigger, run, and step before acting.</p>
         </div>
       </div>
-      {unresolved && chatAvailable && <Button size="sm" variant="secondary" disabled={busy} onClick={retryChat}>
+      {unresolved && chatAvailable && <Button size="sm" variant="secondary" disabled={busy} onClick={retryChat} disabledReason={busy ? 'Wait for the denied call retry to finish dispatching' : undefined}>
         <RotateCcw size={14} /> Retry the exact call in this chat
       </Button>}
       {unresolved && chat && !chatAvailable && <p data-type="body-s" className="text-on-surface-low">The exact chat session is unavailable; this note cannot be retried in another session.</p>}
       {unresolved && triggerRef && (trigger ? (
-        <Button size="sm" variant="secondary" disabled={busy} onClick={runTrigger}>
+        <Button size="sm" variant="secondary" disabled={busy} onClick={runTrigger} disabledReason={busy ? 'Wait for the denied call retry to finish dispatching' : undefined}>
           <Play size={14} /> Run this trigger now
         </Button>
       ) : <p data-type="body-s" className="text-on-surface-low">The recorded trigger is unavailable or no longer has a Run now action.</p>)}
       {unresolved && runId && nodeId && (retryableStep ? (
-        <Button size="sm" variant="secondary" disabled={busy} onClick={rerunWorkflowStep}>
+        <Button size="sm" variant="secondary" disabled={busy} onClick={rerunWorkflowStep} disabledReason={busy ? 'Wait for the denied call retry to finish dispatching' : undefined}>
           <RotateCcw size={14} /> Run this workflow step again
         </Button>
       ) : <p data-type="body-s" className="text-on-surface-low">This exact workflow step is no longer live. Open the recorded run to review its current state.</p>)}

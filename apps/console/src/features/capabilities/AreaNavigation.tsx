@@ -55,7 +55,7 @@ export function AreaNavigation({ label, items, active, onChange, children }: {
       <Button variant="ghost" className="capability-area-menu" ariaLabel={(expanded ? 'Close sections' : 'All sections')} title={(expanded ? 'Close sections' : 'All sections')} ariaExpanded={expanded} onClick={() => setExpanded(value => !value)}>
         {expanded ? <X size={18} aria-hidden="true" /> : <List size={18} aria-hidden="true" />}
       </Button>
-      {!expanded && (edges.before || edges.after) && <Button disabled={!edges.before} variant="ghost" className="capability-area-scroll" ariaLabel={'Previous sections'} onClick={() => scroll(-1)}><ChevronLeft size={18} aria-hidden="true" /></Button>}
+      {!expanded && (edges.before || edges.after) && <Button disabled={!edges.before} variant="ghost" className="capability-area-scroll" ariaLabel={'Previous sections'} onClick={() => scroll(-1)} disabledReason={!edges.before ? 'There are no earlier sections' : undefined}><ChevronLeft size={18} aria-hidden="true" /></Button>}
     <nav ref={navigation} className="capability-area-navigation" aria-label={label} onScroll={measure}
       onFocusCapture={event => {
         const strip = navigation.current
@@ -79,7 +79,7 @@ export function AreaNavigation({ label, items, active, onChange, children }: {
         </div>
       })}
     </nav>
-      {!expanded && (edges.before || edges.after) && <Button disabled={!edges.after} variant="ghost" className="capability-area-scroll" ariaLabel={'More sections'} onClick={() => scroll(1)}><ChevronRight size={18} aria-hidden="true" /></Button>}
+      {!expanded && (edges.before || edges.after) && <Button disabled={!edges.after} variant="ghost" className="capability-area-scroll" ariaLabel={'More sections'} onClick={() => scroll(1)} disabledReason={!edges.after ? 'There are no further sections' : undefined}><ChevronRight size={18} aria-hidden="true" /></Button>}
     </div>
     <div className="capability-area-page">{children}</div>
   </div>

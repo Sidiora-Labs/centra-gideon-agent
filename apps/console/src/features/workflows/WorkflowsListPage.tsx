@@ -235,7 +235,7 @@ export function WorkflowsListPage({ navigate, query: routeQuery, setQuery }: Rou
                       <div data-type="caption" className="text-on-surface-low">{detail?.description || choice.description || 'Saved workflow'}</div>
                       <div data-type="caption" className="text-on-surface-low">{required.length ? `Needs: ${required.join(', ')}` : 'No required inputs'}</div>
                     </div>
-                    <Button variant="secondary" size="sm" onClick={() => { void start(choice.name) }}>Review and start</Button>
+                    <Button ariaLabel={`Review and start: ${choice.name} — version ${choice.version}`} variant="secondary" size="sm" onClick={() => { void start(choice.name) }}>Review and start</Button>
                   </div>
                 })}
               </div>

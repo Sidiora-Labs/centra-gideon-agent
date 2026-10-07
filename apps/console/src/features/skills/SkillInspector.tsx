@@ -98,7 +98,7 @@ function RefinementsSection({ skill, editable }: { skill: SkillItem; editable: b
   return <Section label="Accepted refinements">
     <p className="text-on-surface-low text-[0.8125rem]">These additions are applied when the skill loads. They are separate from your source text.</p>
     {document.data.refinements.map(refinement => <div key={refinement.id} className="rounded-md border border-outline-variant/25 bg-surface-container/30 p-m grid gap-s">
-      <div className="flex items-center gap-s"><span className="text-on-surface text-[0.8125rem]">Refinement {refinement.version}</span>{editable && <Button size="sm" variant="ghost" className="ml-auto" loading={request.busy} onClick={() => revert(refinement.id)}>Revert this refinement</Button>}</div>
+      <div className="flex items-center gap-s"><span className="text-on-surface text-[0.8125rem]">Refinement {refinement.version}</span>{editable && <Button ariaLabel={`Revert refinement ${refinement.version}: ${skill.name}`} size="sm" variant="ghost" className="ml-auto" loading={request.busy} onClick={() => revert(refinement.id)}>Revert this refinement</Button>}</div>
       <Markdown>{refinement.text}</Markdown>
     </div>)}
     {request.err && <FieldError>{request.err}</FieldError>}
