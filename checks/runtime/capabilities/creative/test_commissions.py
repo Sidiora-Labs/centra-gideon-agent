@@ -116,7 +116,42 @@ def output_ref(run):
     }
 
 
-def test_create_persists_typed_brief_and_real_trigger(tmp_path):
+async def owner_allow_trigger(triggers, trigger):
+    from gideon.automation.triggers import grants
+    from gideon.interfaces.dashboard.handlers.triggers import api_trigger_grant
+    from gideon.interfaces.dashboard.token_auth import (
+        generate_token,
+        token_auth_middleware,
+    )
+
+    question = grants.question(trigger)
+    assert question is not None and grants.missing(trigger) == ["creative-commission"]
+    app = web.Application(middlewares=[token_auth_middleware()])
+    app.router.add_post("/api/triggers/{id}/grant", api_trigger_grant)
+    body = {"approved": True, "expected_revision": question.revision}
+    path = f"/api/triggers/store:{trigger.id}/grant"
+    async with TestClient(TestServer(app)) as client:
+        refused = await client.post(path, json=body)
+        assert refused.status == 403
+        headers = {"Authorization": "Bearer " + generate_token("commission-test-owner")}
+        stale = await client.post(
+            path, json={**body, "expected_revision": "stale"}, headers=headers
+        )
+        assert stale.status == 409
+        allowed = await client.post(path, json=body, headers=headers)
+        result = await allowed.json()
+        assert allowed.status == 200, result
+        assert result["trigger"]["grant_satisfied"] is True
+    current = triggers.get(trigger.id).trigger
+    assert grants.is_granted(current)
+    return current
+
+
+async def test_create_persists_typed_brief_and_real_trigger(tmp_path, monkeypatch):
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.handlers.triggers.config_dir", lambda: tmp_path
+    )
     works, work, _ = source(tmp_path)
     store, _, triggers = make_store(tmp_path)
     commission = store.create(payload(work))
@@ -135,7 +170,9 @@ def test_create_persists_typed_brief_and_real_trigger(tmp_path):
     action = loaded.workflow["inline"]
     assert loaded.kind == "clock"
     assert loaded.overlap == "skip"
-    assert loaded.capabilities == {"providers": ["creative-commission"]}
+    assert loaded.capabilities == {}
+    loaded = await owner_allow_trigger(triggers, loaded)
+    assert loaded.capabilities["providers"] == ["creative-commission"]
     assert action["provider"] == "creative-commission"
     assert action["config"]["commission_id"] == commission["id"]
     assert action["config"]["schedule_revision"] == 1
@@ -479,11 +516,18 @@ def test_invalid_or_unbounded_cadences_are_rejected(cadence, tmp_path):
     assert store.list() == {"items": []}
 
 
-async def test_real_scheduler_due_fire_executes_exactly_one_linked_project(tmp_path):
+async def test_real_scheduler_due_fire_executes_exactly_one_linked_project(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.handlers.triggers.config_dir", lambda: tmp_path
+    )
     _, work, _ = source(tmp_path)
     store, direction, triggers = make_store(tmp_path)
     commission = store.create(payload(work))
     trigger = triggers.get(TRIGGER_PREFIX + commission["id"]).trigger
+    trigger = await owner_allow_trigger(triggers, trigger)
     trigger.next_fire_at = to_iso(1000)
     triggers.upsert(trigger)
     due = await tick(triggers, now=1001, persist=True, base_dir=tmp_path)
@@ -1405,7 +1449,13 @@ def test_invalid_recurrence_rules_fail_before_record_or_trigger(cadence, tmp_pat
     assert triggers.list_triggers() == []
 
 
-async def test_real_recurrence_due_fire_rearms_next_occurrence_after_dispatch(tmp_path):
+async def test_real_recurrence_due_fire_rearms_next_occurrence_after_dispatch(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("GIDEON_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "gideon.interfaces.dashboard.handlers.triggers.config_dir", lambda: tmp_path
+    )
     _, work, _ = source(tmp_path)
     store, direction, triggers = make_store(tmp_path)
     commission = store.create(
@@ -1416,6 +1466,7 @@ async def test_real_recurrence_due_fire_rearms_next_occurrence_after_dispatch(tm
     trigger = store._trigger(record, at=before)
     first = datetime.fromisoformat(trigger.next_fire_at).timestamp()
     triggers.upsert(trigger)
+    trigger = await owner_allow_trigger(triggers, trigger)
     due = await tick(triggers, now=first + 1, persist=True, base_dir=tmp_path)
     assert len(due.fires) == 1
     result = await CommissionActionProvider(store).execute(

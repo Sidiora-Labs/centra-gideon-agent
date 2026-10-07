@@ -1,4 +1,6 @@
 import json
+import shutil
+import sqlite3
 
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
@@ -106,6 +108,37 @@ async def fixture(home):
         key: run["outputs"][0][key]
         for key in ("artifact_id", "artifact_version", "content_hash")
     }
+    remote = home / "remote"
+    remote.mkdir()
+    # Share canonical creative content, not independently generated UUIDs or authority.
+    # SQLite backups preserve the exact source/project/output lineage under review.
+    for database in (works.path, direction.path, store.path):
+        destination = remote / database.relative_to(home)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with (
+            sqlite3.connect(database) as original,
+            sqlite3.connect(destination) as copied,
+        ):
+            original.backup(copied)
+    shutil.copytree(home / "artifacts", remote / "artifacts")
+    remote_works = WorkStore(remote)
+    assert remote_works.get(work["id"]) == works.get(work["id"])
+    remote_direction = DirectionStore(remote)
+    remote_store = CommissionStore(
+        remote, direction=remote_direction, triggers=TriggerStore(base_dir=remote)
+    )
+    remote_commission = remote_store.get(commission["id"])
+    remote_run = remote_store.runs(remote_commission["id"])["items"][0]
+    assert remote_direction.get(run["project_id"]) == direction.get(run["project_id"])
+    assert (remote_commission["id"], remote_run["id"], remote_run["project_id"]) == (
+        commission["id"],
+        run["id"],
+        run["project_id"],
+    )
+    assert [
+        {key: row[key] for key in ("artifact_id", "artifact_version", "content_hash")}
+        for row in remote_run["outputs"]
+    ] == [output]
     reaction = store.react(
         commission["id"],
         {
@@ -117,58 +150,15 @@ async def fixture(home):
             "tags": ["review"],
         },
     )
-    remote = home / "remote"
-    remote.mkdir()
-    remote_works = WorkStore(remote)
-    remote_work = remote_works.create(
-        {
-            "request_id": "consumer-work",
-            "title": "Consumer source",
-            "kind": "work",
-            "prompt": "A source.",
-            "author_ref": None,
-            "universe_ref": None,
-            "active_draft_id": None,
-        }
-    )
-    remote_work = remote_works.draft(
-        remote_work["id"],
-        {
-            "request_id": "consumer-draft",
-            "revision": 1,
-            "text": "A canonical source for a feedback consumer.",
-            "note": "fixture",
-        },
-    )["work"]
-    remote_direction = DirectionStore(remote)
-    remote_store = CommissionStore(
-        remote, direction=remote_direction, triggers=TriggerStore(base_dir=remote)
-    )
-    remote_commission = remote_store.create(
-        {
-            **commission_payload,
-            "sources": [
-                {
-                    "kind": "work",
-                    "id": remote_work["id"],
-                    "revision": remote_work["revision"],
-                }
-            ],
-        }
-    )
-    remote_run = await remote_store.execute(
-        remote_commission["id"], "manual:consumer", trigger="manual"
-    )
-    assert (remote_commission["id"], remote_run["id"], remote_run["project_id"]) == (
-        commission["id"],
-        run["id"],
-        run["project_id"],
-    )
-    assert [
-        {key: row[key] for key in ("artifact_id", "artifact_version", "content_hash")}
-        for row in remote_run["outputs"]
-    ] == [output]
     owner_peers, remote_peers = PeerStore(home), PeerStore(remote)
+    assert (
+        owner_peers.snapshot()["self"]["peer_id"]
+        != remote_peers.snapshot()["self"]["peer_id"]
+    )
+    assert (
+        owner_peers.snapshot()["self"]["public_key"]
+        != remote_peers.snapshot()["self"]["public_key"]
+    )
     receiver_app = web.Application()
     calls = []
 

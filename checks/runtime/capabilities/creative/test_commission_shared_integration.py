@@ -23,6 +23,7 @@ from gideon.interfaces.dashboard.token_auth import (
     use_persistent_secret,
 )
 from gideon.workspace.capabilities.creative.commissions import TRIGGER_PREFIX
+from gideon.workspace.capabilities.creative.direction import DirectionStore
 from gideon.workspace.capabilities.creative.store import IngredientStore
 from gideon.workspace.capabilities.creative.works import WorkStore
 
@@ -36,6 +37,7 @@ def request(work):
     return {
         "request_id": "shared-commission",
         "name": "Scheduled treatment",
+        "mode": "planning",
         "target_ability": "series",
         "brief": {
             "intent": "Prepare the next exact treatment.",
@@ -105,7 +107,12 @@ async def test_parent_http_and_native_registry_dispatch_the_real_due_trigger(
         assert all(
             definitions[name].requires_approval
             for name in definitions
-            if name not in ("creative_commission_list", "creative_commission_get")
+            if name
+            not in (
+                "creative_commission_list",
+                "creative_commission_get",
+                "creative_commission_peer_feedback_peers",
+            )
         )
         created = await tools.invoke(
             "creative_commission_create", {"payload": request(work)}
@@ -123,8 +130,9 @@ async def test_parent_http_and_native_registry_dispatch_the_real_due_trigger(
         )
         assert due.success is True
         run = json.loads(due.stdout)
-        assert run["status"] == "completed" and run["trigger"] == "schedule"
+        assert run["status"] == "planned" and run["trigger"] == "schedule"
         assert run["outputs"][0]["content_hash"]
+        assert DirectionStore(tmp_path).get(run["project_id"])["status"] == "completed"
 
         use_ephemeral_secret()
         try:
