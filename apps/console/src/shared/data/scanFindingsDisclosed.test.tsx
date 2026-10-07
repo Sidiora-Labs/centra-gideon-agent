@@ -86,7 +86,7 @@ describe('what the consent screen actually reads', () => {
   it('a 14-finding scan says 14, lists 8, and admits the other 6', () => {
     render(<ScanReport scan={scanOf(14) as never} />)
     expect(screen.getByText(/Security scan: warning/)).toBeTruthy()
-    expect(screen.getByText(/14 findings/), 'the total').toBeTruthy()
+    expect(screen.getByText(/^Security scan: warning · 14 findings$/), 'the total').toBeTruthy()
     expect(screen.getAllByText(/^rule_/).length, 'eight listed').toBe(SCAN_FINDINGS_SHOWN)
     expect(screen.getByText('Showing 8 of 14 findings'), 'and the truncated count').toBeTruthy()
   })

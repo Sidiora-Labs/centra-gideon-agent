@@ -68,6 +68,6 @@ describe('Claude Code agent export', () => {
     expect(screen.queryByText(/Export complete/)).not.toBeInTheDocument()
     expect(writeAgentExport).toHaveBeenCalledWith('short-lived-preview-token')
     confirmWrite?.({ ok: true, files: ['research-notes.md', 'release-helper.md'], unchanged: [] })
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Export complete'))
+    await waitFor(() => expect(within(dialog).getByText(/^Export complete\./)).toHaveAttribute('role', 'status'))
   })
 })

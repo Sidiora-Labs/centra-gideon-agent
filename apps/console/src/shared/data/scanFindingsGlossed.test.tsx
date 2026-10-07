@@ -23,7 +23,7 @@ describe('the derived population of finding renderers', () => {
       expect(src, `${rel} must render a finding's rule`).toMatch(/\{\s*f\.rule\s*\}/)
       expect(src, `${rel} must gloss it`).toMatch(/\bruleGloss\(/)
       expect(src, `${rel} must take the gloss from the shared module`).toMatch(
-        /import \{[^}]*\bruleGloss\b[^}]*\} from '(\.\.\/)+lib\/scanFindings'/,
+        /import \{[^}]*\bruleGloss\b[^}]*\} from '(\.\.\/)+shared\/data\/scanFindings'/,
       )
     }
   })

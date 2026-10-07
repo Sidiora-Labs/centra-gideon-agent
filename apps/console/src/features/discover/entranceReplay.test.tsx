@@ -84,7 +84,8 @@ describe('restoring Discover tips', () => {
     discover.mockResolvedValue({ enabled: true, visible_count: 0, areas: [], restorable_count: 1 })
     render(<DiscoverPage navigate={() => {}} />)
 
-    screen.getByRole('button', { name: 'Restore dismissed tips' }).click()
+    const restore = await screen.findByRole('button', { name: 'Restore dismissed tips' })
+    restore.click()
 
     await waitFor(() => expect(clearDismissedDiscoverTips).toHaveBeenCalledOnce())
   })

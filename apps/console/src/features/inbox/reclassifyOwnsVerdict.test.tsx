@@ -61,7 +61,10 @@ describe('reclassify owns the verdict (issue 623)', () => {
   })
 
   it('a machine verdict still renders its thumbs (the gate must not over-hide)', () => {
-    render(<InboxDetail item={makeItem()} onChanged={() => {}} navigate={() => {}} />)
+    render(<InboxDetail item={makeItem({
+      classified_by: 'inbox-classifier',
+      feedback_producers: { classification: { producer_kind: 'prompt', producer_id: 'inbox-classifier' }, draft: undefined, digest: undefined },
+    })} onChanged={() => {}} navigate={() => {}} />)
     expect(screen.getByTestId('thumbs-inbox_classification')).toBeInTheDocument()
     expect(screen.getByText('High confidence')).toBeInTheDocument()
   })
