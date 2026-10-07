@@ -1,6 +1,6 @@
 # Windows native compatibility
 
-Gideon documents Windows operation through WSL2. Native Windows execution and desktop packaging require separate qualification; see [supported platforms](../guides/PLATFORMS.md) and [desktop packaging](../guides/DESKTOP.md).
+The desktop package has a Windows build path for connecting to an HTTPS-hosted Gideon instance. It does not bundle a native Windows Python gateway. Running the gateway through WSL2 uses the Linux runtime; running it directly on Windows requires separate qualification. See [supported platforms](../guides/PLATFORMS.md) and [desktop packaging](../guides/DESKTOP.md).
 
 ## Runtime requirements
 
