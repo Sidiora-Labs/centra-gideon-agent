@@ -1,157 +1,110 @@
-# Loops: the autonomous work engine
+# Loops
 
-A **loop** is a long-running autonomous work unit. A worker agent iterates in
-cycles toward a goal while a supervisor judges progress against ground truth.
-The engine lives in `Gideon/src/gideon/loop/`, and this doc covers the five
-kinds, stage progression, directory resolution, deliverable gates, and how the UI
-dispatches to per-kind cockpits.
+A loop is an iterative work unit with a worker, progress history, and supervisor checks.
+Its strategy determines planning and deliverables; the shared runtime determines
+admission, lifecycle, grants, and convergence. A running loop is not evidence that its
+goal has been achieved.
 
-## Engine layout
+The engine lives under `runtime/gideon/automation/loop/`.
 
-`loop/` holds `manager.py` (lifecycle and orchestration), `tick.py` (the cycle
-engine), `judge.py` (supervisor judgment), `gates.py` (verify-command and verdict
-helpers), `lifecycle.py`, `watchdog.py` (stall detection), `worktree.py`
-(parallel task isolation), `store.py` (persistence), `classify.py` (goal
-classification), and the per-kind planning-brief modules `code_plan_briefs.py`,
-`goal_plan_briefs.py`, `research_plan_briefs.py` and `design_plan_briefs.py`.
+## Kinds and strategies
 
-## The five kinds
+`loop.py` defines five current kinds:
 
-`loop/loop.py` defines `LoopKind`:
-
-| Kind | What it is |
+| Kind | Purpose |
 |---|---|
-| `general` | generic iterative goal in a chat session (nudge + watchdog) |
-| `goal` | open-ended / verifiable / monitor research + action |
-| `code` | SDLC stage-gated work in a workspace (mini-IDE cockpit) |
-| `design` | design-system creation (live canvas, tokens, components) |
-| `research` | deep iterative web research → synthesized report |
+| `general` | Generic iterative work with nudges and watchdog supervision. |
+| `goal` | Goal-oriented action, verification, open-ended work, or monitoring. |
+| `code` | Workspace-bound, stage-oriented software work. |
+| `design` | Design steps and canvas-oriented deliverables. |
+| `research` | Iterative research and synthesis. |
 
-Kind behavior is pluggable. `loop/kinds/__init__.py` defines the
-`LoopKindStrategy` protocol and a registry, so **a new kind is a new strategy
-module plus one `register()` call, with no engine edits**. A strategy declares
-its kind id, whether it needs a bound workspace, its default worker agent,
-whether it provisions per-phase TaskLists at launch, its classifier, phase keys,
-the deliverable document it maintains, and its readiness prerequisites. For
-example, an open-ended goal keeps `REPORT.md` and a monitor keeps
-`MONITOR_LOG.md`, while code has no document because the code itself is the
-deliverable. Prerequisites are real gates: a brownfield code loop with no bound
-workspace cannot start.
+`kinds/` supplies strategies for classification, phases, readiness, worker selection,
+and deliverable behavior. A strategy is a contribution to the existing engine contract,
+not permission to bypass the engine. New kinds may also require validation, UI, and
+capability support; registration alone does not qualify a complete product journey.
 
-**The supervisor is not part of that plugin seam** (`PP-16` seam 3). How a loop
-converges is *declared*, not coded. `workflows/supervisor_policy.py` holds the
-`ConvergenceSpec` type, the closed `DONE_SIGNALS` vocabulary
-(`orchestrated` | `never` | `verify_command` | `judge_assessment`) and the
-`KIND_CONVERGENCE` table with one row per kind, or per `kind:goal_type` variant,
-because goal-type is the axis convergence actually varies on.
-`policy_for_kind(kind, kind_config)` resolves a kind to the one
-`SupervisorPolicy` that carries it, and `loop/supervisor.py` is the single
-kind-agnostic evaluator that reads it (`done_signal`, `has_done_check`,
-`budget_stop_is_genuine`, `stagnation_enabled`). The watchdog calls only those. A
-kind may not supply a convergence mechanism in Python: adding a fifth mechanism
-means extending the closed vocabulary and the one evaluator, in one place, for
-every kind at once.
+`manager.py`, `tick.py`, `lifecycle.py`, `store.py`, and `watchdog.py` own orchestration
+and persistence. Planning briefs are specialized by kind. `gates.py`, `judge.py`, and
+`supervisor.py` handle verification and supervision.
 
-| Kind (variant) | Declared done-signal |
-|---|---|
-| `code`, `design` | `orchestrated`: the per-cycle `on_new_cycle` hook owns done-ness |
-| `general` | `verify_command` (optional: no command ⇒ defers to budget by design) |
-| `goal:verifiable`, `research:verifiable` | `verify_command`, plus a sub-goal judge when >1 sub-goal is declared |
-| `goal:open_ended`, `research:open_ended` | `judge_assessment` (ground truth: `REPORT.md` / `RESEARCH.md`) |
-| `goal:monitor`, `research:monitor` | `never`: only a user Stop (or the budget, counted as a clean stop) ends it |
+## Stages and convergence
 
-## Stage progression
+Code work follows the SDLC metadata in `sdlc_meta.py`, including ideation, requirements,
+design, decomposition, implementation, verification, and review. Different entry types
+can start later in that sequence. Design, goal, research, and general strategies have
+their own phase and deliverable rules.
 
-- **Code loops** walk the canonical SDLC ladder (`loop/sdlc_meta.py`):
-  `ideation → requirements → design → decomposition → implementation →
-  verification → review`. Lateral entries (`bugfix`, `cr_comments`, `refactor`,
-  `investigation`) start mid-ladder with a tailored shorter plan. The code
-  strategy (`loop/kinds/sdlc.py`, kind id `"code"`) advances stages and
-  provisions tasks each cycle.
-- **Design loops** advance design steps (token system → components → …) on a
-  live canvas.
-- **Goal and general loops** are done when their `is_done_signal` says so, with
-  no stage machinery.
-- Classification (`loop/classify.py` plus the per-kind classifiers) picks the
-  kind, the stop logic and the entry stage up front. Classifiers never raise:
-  they return safe defaults flagged `classified=False`.
+Convergence is declared in
+`runtime/gideon/automation/workflows/supervisor_policy.py`, including the closed signals
+`orchestrated`, `never`, `verify_command`, and `judge_assessment`. The shared evaluator
+uses the policy instead of accepting an arbitrary strategy's completion claim.
+Monitoring can continue until explicitly stopped or limited by its budget; an exhausted
+budget and verified goal completion are different outcomes.
 
-## `effective_dir`: where a loop's work actually lives
+Verify commands and artifact checks use real work evidence. A model assessment is still
+an assessment, not a substitute for a command result, required deliverable, or independent
+check. Missing verification must remain distinguishable from failure and success.
 
-`loop/loop.py::effective_dir` is the **single resolver** every ground-truth check
-uses, so the supervisor reads exactly where the worker writes. Its precedence:
+## Working directory and worktrees
 
-1. `workspace_dir`: an explicitly bound codebase;
-2. a **greenfield code loop's own `loop_dir`**, because a code loop with no bound
-   workspace operates *from* its files dir (code-kind only; goal and general
-   loops keep only engine files there and write deliverables to the
-   project/workspace). This tier exists because its absence hard-failed the
-   deliverable gate forever: the supervisor looked in the workspace root while
-   the worker wrote to the loop dir, so a genuinely complete stage was "held"
-   across cycles;
-3. the containing project's shared context dir;
-4. `workspace_root()`: the default session workspace.
+`loop.py::effective_dir` resolves the directory used for worker and ground-truth checks:
 
-## Deliverable gates and the independent judge
+1. An explicitly bound `workspace_dir`.
+2. A greenfield code loop's own files directory when present.
+3. The containing project's shared context directory.
+4. The default session workspace.
 
-The supervisor does not take the worker's word for it:
+This ordering prevents the supervisor from looking somewhere other than where the worker
+was directed to write. Project state lives under the active Gideon home; an external
+workspace is a separate binding.
 
-- **`loop/gates.py`**: `run_verify_command` re-runs a stage's verify command
-  itself (with a cwd from `effective_dir`); `judge_verdict` renders an LLM
-  verdict; `verdict_is_pass` parses it strictly.
-- The **SDLC gate** reads the deliverable *content*, not just its existence, and
-  the **goal judge** re-runs commands or reads artifacts. Ground truth beats the
-  worker's self-report.
-- **`loop/watchdog.py`** detects stalls, and its own first poll re-arms loops
-  left RUNNING or PLANNING by a gateway restart, so an interrupted loop resumes
-  rather than zombifying (`LoopWatchdog._boot_sweep`). That sweep runs through
-  `concurrency.boot_sweep`, the one boot-adoption path it shares with
-  `workflows/watchdog.py` (`PP-16`). There is deliberately **no gateway boot
-  hook**: a hook cannot be retried when it raises, and awaiting it delays
-  startup by however long N stranded planner passes take.
+`worktree.py` supports isolated Git worktrees for parallel tasks, using project-owned or
+workspace-derived storage beneath the Gideon home. Git availability and repository
+state determine whether parallel execution is possible. Unsupported or failed worktree
+operations can fall back to sequential execution. Worktree creation and merge handling
+do not establish that the resulting code is correct or ready for release.
 
-## Planning walkthrough and grill
+## Grants and worker sessions
 
-- **`planning/`** (`session.py` data model plus `runner.py` state machine) is the
-  shared stepwise **gated planning walkthrough** used before launching Code and
-  Goal loops: the plan is presented step by step with approve/comment gates, and
-  a comment triggers a redraft of that step.
-- **`grill.py`** is the memory-checked goal-scoping pipeline:
-  `assess_goal → check_memory → decompose(shape) → save_decisions`. It pulls
-  prior decisions and lessons so a decomposition does not re-litigate settled
-  choices, and it persists new decisions as lessons. Goal loops, Projects and the
-  chat skill all reuse it.
+A loop selects a configured agent and binds its actual worker session. Current tool and
+skill grants are resolved from the profile; owner-selected widening requires the exact
+reviewed offer. Existing sessions refresh current grants rather than retaining a stale
+broader catalogue indefinitely.
 
-## Projects and worktrees
+`runtime/gideon/engine/agents/loop_skills.py` permits selected intrinsic skills only from
+an actual stored live loop, its registered strategy, and the host-bound worker session
+with the matching agent. Arbitrary request fields and wildcard skill strings cannot
+create that exception. The helper does not apply this exception to app-bound work;
+outer app and task constraints remain authoritative.
 
-- **`projects.py`** is the small service layer that resolves which project a work
-  unit binds to (`resolve_project_id` auto-creates one when none is chosen;
-  `ensure_task_list` finds or creates the unit's TaskList under that project).
-  The entity itself is the Tasks `hierarchy.Project` (`tasks/hierarchy.py`): each
-  project owns `~/.gideon/projects/<id>/` with `project.json` plus `context/`,
-  which is the cross-feature consolidation dir and the working area when no
-  external workspace is bound.
-- **`loop/worktree.py`**: parallel task execution. Workers run several tasks of
-  a phase at once, each in its own git worktree under
-  `projects/<project_id>/worktrees/<task_id>`, never in the user's workspace, and
-  the worktrees merge back when the phase's tasks finish. A non-git workspace
-  falls back to sequential execution.
+Approval posture, effective risk, and unattended ceilings still apply to calls made by
+a loop. A loop goal or selected agent name cannot grant standing permission by itself.
+The host-owned `run_grants.py` carries the reviewed run grant surface.
 
-## Cockpit dispatch (frontend)
+## Planning and recovery
 
-`apps/console/src/pages/loops/LoopsSection.tsx` dispatches on the loop's kind:
+The shared planning walkthrough presents steps for review and comments before launch.
+Goal-scoping and memory lookup are subject to the caller's current memory reach; planning
+cannot use a guessed session or app label to gain broader context.
 
-- `kind === 'design'` → `DesignCockpitPage.tsx` (live canvas, token views, and an
-  "agentic build" path that seeds a project-bound chat with the loop id, so react
-  artifacts tagged `loop:<id>` render on the canvas);
-- everything else → `LoopCockpitPage.tsx`, the generic loop cockpit, with the
-  cycle trail, findings, sub-goal prompt bar and artifact/task/project links;
-- code loops additionally get the mini-IDE at
-  `apps/console/src/pages/code/CodeCockpitPage.tsx`: Monaco-based edit and save,
-  PTY-backed build and test commands, and the SDLC stage trail.
+The watchdog handles stalls and restart adoption according to stored state and actual
+execution prerequisites. Recovery is a runtime decision, not a guarantee that every
+interrupted operation can be resumed safely. Surface unavailable models, workspaces,
+grants, or private scope proofs rather than silently changing execution authority.
 
-## Related docs
+## Console surfaces
 
-- Tasks that loops provision: [TASKS_TRIGGERS.md](TASKS_TRIGGERS.md)
-- The memory the grill consults: [KNOWLEDGE_MEMORY.md](KNOWLEDGE_MEMORY.md)
-- Trust and YOLO state a loop worker runs under: [SECURITY.md](SECURITY.md)
+The actual loop section is
+`apps/console/src/features/loops/LoopsSection.tsx`. Design work uses
+`apps/console/src/features/loops/DesignCockpitPage.tsx`; the general loop cockpit is
+`apps/console/src/features/loops/LoopCockpitPage.tsx`. Code work also uses
+`apps/console/src/features/code/CodeCockpitPage.tsx` for workspace editing, terminal
+operations, and stage context.
+
+These surfaces project runtime state, findings, and available controls. A displayed
+cycle, generated report, or disabled recovery control must be interpreted according to
+its actual state and reason, not as proof of a successful end-to-end run.
+
+See [workflows](WORKFLOWS.md), [tasks and triggers](TASKS_TRIGGERS.md),
+[memory](KNOWLEDGE_MEMORY.md), and [security](SECURITY.md).
