@@ -107,7 +107,7 @@ export function KnowledgeDetailPage({ id, onBack, onOpenItem, query, setQuery }:
 }
               {!header?.editing && (
                 <div className="flex items-center gap-s min-w-0 overflow-hidden">
-                  <button type="button" onClick={onBack} data-type="body-m" className="text-on-surface-low hover:text-on-surface transition-colors whitespace-nowrap shrink-0">Knowledge</button>
+                  <Button variant="ghost" size="sm" type="button" onClick={onBack} data-type="body-m" className="text-on-surface-low hover:text-on-surface transition-colors whitespace-nowrap shrink-0">Knowledge</Button>
                   <span className="text-on-surface-low shrink-0">/</span>
                   {
 }

@@ -1,3 +1,4 @@
+import { IconButton } from '../../shared/ui/IconButton'
 import { useEffect, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
 import { motion } from 'framer-motion'
@@ -191,7 +192,7 @@ export function CodePlanReview({ draft, onBack, onLaunched }: {
               { }
               <div className="flex items-center justify-between">
                 <span data-type="label-s" className="text-on-surface-var" style={fvs(550)}>Stages ahead ({stages.length})</span>
-                <button type="button" onClick={addStage} data-type="caption" className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-on-surface-low hover:text-on-surface hover:bg-surface-high"><Plus size={13} /> Add stage</button>
+                <Button variant="ghost" size="sm" type="button" onClick={addStage} data-type="caption" className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-on-surface-low hover:text-on-surface hover:bg-surface-high"><Plus size={13} /> Add stage</Button>
               </div>
 
               {
@@ -483,7 +484,7 @@ function StageCard({ index, count, stage, onPatch, onRemove, onMove }: {
             {(stage.exit_criteria ?? []).map((c, ci) => (
               <div key={ci} data-type="body-s" className="flex items-center gap-1.5 rounded-md bg-surface-high/60 px-2 py-1 text-on-surface-var">
                 <span className="min-w-0 flex-1">{c}</span>
-                <button type="button" onClick={() => removeCrit(ci)} aria-label="Remove criterion" className="shrink-0 text-on-surface-low hover:text-danger"><X size={12} /></button>
+                <IconButton icon={X} iconSize={12} size={24} label="Remove criterion" onClick={() => removeCrit(ci)} className="shrink-0 text-on-surface-low hover:text-danger" />
               </div>
             ))}
             {
@@ -513,7 +514,7 @@ function StageCard({ index, count, stage, onPatch, onRemove, onMove }: {
                     placeholder="how / details (optional)…"
                     data-type="caption" className="min-w-0 flex-1 bg-transparent text-on-surface-low outline-none placeholder:text-on-surface-low/60 focus:ring-2 focus:ring-inset focus:ring-primary" />
                 </div>
-                <button type="button" onClick={() => removeTask(ti)} aria-label="Remove task" className="mt-1 shrink-0 text-on-surface-low hover:text-danger"><X size={12} /></button>
+                <IconButton icon={X} iconSize={12} size={24} label="Remove task" onClick={() => removeTask(ti)} className="mt-1 shrink-0 text-on-surface-low hover:text-danger" />
               </div>
             ))}
             <div className="flex items-center gap-1.5 rounded-md px-2 py-1">

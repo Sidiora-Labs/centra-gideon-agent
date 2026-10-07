@@ -1,3 +1,4 @@
+import { IconButton } from '../../shared/ui/IconButton'
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { reportActionFailure, reportingWrite } from '../../app/shell/reportingWrite'
 import { BookOpen, FileClock, Filter, Home, Plus, Search, Database, Sparkles, Network, Library, Trash2, Target, X, Pin, Star, Archive, Play, Pause, FileText, Loader2, CircleAlert, Boxes, WifiOff, Layers, Scale, Tag as TagIcon, Rss, ExternalLink, Gavel } from 'lucide-react'
@@ -941,7 +942,7 @@ function IntentEditor({ intent, onClose, onSaved }: { intent: KnowledgeIntent; o
         <span data-type="body-m" className="text-on-surface">New intent</span>
         {
 }
-        <button type="button" aria-label="Close the intent editor" onClick={onClose} className="text-on-surface-low hover:text-on-surface"><X size={16} /></button>
+        <IconButton icon={X} iconSize={16} size={28} label="Close the intent editor" onClick={onClose} className="text-on-surface-low hover:text-on-surface" />
       </div>
       <div className="flex flex-col gap-1.5">
         <label data-type="caption" className="text-on-surface-low uppercase tracking-wide">What do you want to track?</label>

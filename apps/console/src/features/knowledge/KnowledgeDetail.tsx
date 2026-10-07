@@ -1,3 +1,4 @@
+import { IconButton } from '../../shared/ui/IconButton'
 import { useEffect, useRef, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
 import { AlertTriangle, Pencil, Trash2, Check, X, ExternalLink, Sparkles, Layers, Loader2, Pin, Star, BookOpen, BookOpenText, Archive, Download, Target, Maximize2, Wand2, ChevronDown, WifiOff, RefreshCw, MessageCircleQuestion } from 'lucide-react'
@@ -318,11 +319,7 @@ export function KnowledgeDetail({ item, onChanged, onDeleted, onTagClick, onShow
     </HeaderActions>
   )
   const wandBtn = aiTitleAvailable ? (
-    <button type="button" onClick={applyAiTitle} aria-label="Use the AI-suggested title"
-      title={`Use AI title: "${full.ai_title}"`}
-      className="grid size-6 shrink-0 place-items-center rounded text-primary/70 hover:bg-surface-high hover:text-primary transition-colors">
-      <Wand2 size={14} />
-    </button>
+    <IconButton icon={Wand2} iconSize={14} size={24} label="Use the AI-suggested title" onClick={applyAiTitle} title={`Use AI title: "${full.ai_title}"`} className="grid size-6 shrink-0 place-items-center rounded text-primary/70 hover:bg-surface-high hover:text-primary transition-colors" />
   ) : null
 
   useEffect(() => {
@@ -590,10 +587,10 @@ function ProcessingStrip({ status, nodePhases, error, graph, onRetry, retrying }
   if (!active && status !== 'partial' && status !== 'failed' && !unreachable && !graph) return null
   const hasDag = !!graph && graph.nodes.length > 0
   const retryBtn = onRetry && (unreachable || status === 'failed') ? (
-    <button type="button" onClick={onRetry} disabled={retrying}
+    <Button variant="ghost" size="sm" type="button" onClick={onRetry} disabled={retrying}
       data-type="caption" className="inline-flex items-center gap-1 rounded-pill bg-surface-high px-2 py-0.5 text-on-surface-var transition-colors hover:text-on-surface disabled:opacity-60">
       <RefreshCw size={11} className={retrying ? 'animate-spin' : ''} /> {retrying ? 'Retrying…' : 'Retry'}
-    </button>
+    </Button>
   ) : null
 
   if (!hasDag) {
@@ -818,8 +815,7 @@ function FullscreenModal({ title, onClose, children }: { title: string; onClose:
     <div ref={trapRef} className="fixed inset-0 z-[var(--z-content)] flex flex-col bg-surface/95 backdrop-blur-sm" onClick={onClose}>
       <div className="flex items-center gap-s border-b border-outline-variant/40 px-l py-3">
         <span data-type="title-m" className="flex-1 truncate text-on-surface" style={fvs(500)}>{title}</span>
-        <button type="button" onClick={onClose} aria-label="Close fullscreen"
-          className="grid size-8 place-items-center rounded-pill text-on-surface-low hover:bg-surface-high hover:text-on-surface"><X size={18} /></button>
+        <IconButton icon={X} iconSize={18} size={32} label="Close fullscreen" onClick={onClose} className="grid size-8 place-items-center rounded-pill text-on-surface-low hover:bg-surface-high hover:text-on-surface" />
       </div>
       <div className="flex-1 overflow-auto p-l" onClick={(e) => e.stopPropagation()}>
         <div className="mx-auto" style={{ maxWidth: 'var(--content-width, 56rem)' }}>{children}</div>
@@ -830,9 +826,6 @@ function FullscreenModal({ title, onClose, children }: { title: string; onClose:
 
 function ExpandButton({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} aria-label="Expand to full screen" title="Expand to full screen"
-      className="grid size-6 place-items-center rounded text-on-surface-low hover:bg-surface-high hover:text-on-surface transition-colors">
-      <Maximize2 size={13} />
-    </button>
+    <IconButton icon={Maximize2} iconSize={13} size={24} label="Expand to full screen" onClick={onClick} title="Expand to full screen" className="grid size-6 place-items-center rounded text-on-surface-low hover:bg-surface-high hover:text-on-surface transition-colors" />
   )
 }

@@ -211,8 +211,8 @@ export function RsvpReader({ item, onClose }: { item: KnowledgeItem; onClose: ()
           <span className="w-12 text-right tabular-nums">{state.wpm}</span>
         </label>
         <div role="group" aria-label="Words per chunk" className="flex overflow-hidden rounded-md border border-outline-variant/40">
-          {[1, 2].map(size => <button key={size} type="button" aria-pressed={state.chunk_size === size} onClick={() => update({ chunk_size: size as 1 | 2 })}
-            className={`px-m py-2 ${state.chunk_size === size ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-var'}`}>{size} word{size === 1 ? '' : 's'}</button>)}
+          {[1, 2].map(size => <Button variant="ghost" size="sm" key={size} type="button" ariaPressed={state.chunk_size === size} onClick={() => update({ chunk_size: size as 1 | 2 })}
+            className={`px-m py-2 ${state.chunk_size === size ? 'bg-primary-container text-on-primary-container' : 'text-on-surface-var'}`}>{size} word{size === 1 ? '' : 's'}</Button>)}
         </div>
       </div>
     </div>

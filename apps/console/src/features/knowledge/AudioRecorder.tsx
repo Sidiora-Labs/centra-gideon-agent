@@ -1,3 +1,4 @@
+import { Button } from '../../shared/ui/Button'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { fvs } from '../../shared/theme/fontWeight'
 import { Mic, Square, Pause, Play, Trash2 } from 'lucide-react'
@@ -131,7 +132,7 @@ export function AudioRecorder({ onRecorded, onClear }: { onRecorded: (file: File
           <audio src={url} controls className="w-full max-w-md" />
           <div data-type="body-s" className="flex items-center gap-3 text-on-surface-low">
             <span>Recorded · {fmtDuration(duration)}</span>
-            <button type="button" onClick={discard} data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill px-m h-8 text-danger hover:bg-danger/10 transition-colors"><Trash2 size={14} /> Discard & re-record</button>
+            <Button variant="ghost" size="md" type="button" onClick={discard} data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill px-m h-8 text-danger hover:bg-danger/10 transition-colors"><Trash2 size={14} /> Discard & re-record</Button>
           </div>
         </>
       ) : (
@@ -153,18 +154,18 @@ export function AudioRecorder({ onRecorded, onClear }: { onRecorded: (file: File
 
           <div className="flex items-center gap-2">
             {state === 'idle' && (
-              <button type="button" onClick={start} data-type="body-s" className="inline-flex items-center gap-2 rounded-pill bg-primary text-on-primary px-5 h-10 hover:bg-primary-emphasis transition-colors"><Mic size={16} /> Start recording</button>
+              <Button variant="ghost" size="md" type="button" onClick={start} data-type="body-s" className="inline-flex items-center gap-2 rounded-pill bg-primary text-on-primary px-5 h-10 hover:bg-primary-emphasis transition-colors"><Mic size={16} /> Start recording</Button>
             )}
             {state === 'recording' && (
               <>
-                <button type="button" onClick={pause} aria-label="Pause" data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill bg-surface-high px-4 h-10 text-on-surface hover:bg-surface-highest transition-colors"><Pause size={16} /> Pause</button>
-                <button type="button" onClick={stop} aria-label="Stop" data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill bg-primary text-on-primary px-4 h-10 hover:bg-primary-emphasis transition-colors"><Square size={15} /> Stop</button>
+                <Button variant="ghost" size="md" type="button" onClick={pause} ariaLabel="Pause" data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill bg-surface-high px-4 h-10 text-on-surface hover:bg-surface-highest transition-colors"><Pause size={16} /> Pause</Button>
+                <Button variant="ghost" size="md" type="button" onClick={stop} ariaLabel="Stop" data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill bg-primary text-on-primary px-4 h-10 hover:bg-primary-emphasis transition-colors"><Square size={15} /> Stop</Button>
               </>
             )}
             {state === 'paused' && (
               <>
-                <button type="button" onClick={resume} aria-label="Resume" data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill bg-surface-high px-4 h-10 text-on-surface hover:bg-surface-highest transition-colors"><Play size={16} /> Resume</button>
-                <button type="button" onClick={stop} aria-label="Stop" data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill bg-primary text-on-primary px-4 h-10 hover:bg-primary-emphasis transition-colors"><Square size={15} /> Stop</button>
+                <Button variant="ghost" size="md" type="button" onClick={resume} ariaLabel="Resume" data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill bg-surface-high px-4 h-10 text-on-surface hover:bg-surface-highest transition-colors"><Play size={16} /> Resume</Button>
+                <Button variant="ghost" size="md" type="button" onClick={stop} ariaLabel="Stop" data-type="body-s" className="inline-flex items-center gap-1.5 rounded-pill bg-primary text-on-primary px-4 h-10 hover:bg-primary-emphasis transition-colors"><Square size={15} /> Stop</Button>
               </>
             )}
           </div>

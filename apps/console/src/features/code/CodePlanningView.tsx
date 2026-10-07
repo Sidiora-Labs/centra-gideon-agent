@@ -45,7 +45,7 @@ export function CodePlanningView({ projectId, onReady, onBack }: {
       <div className="relative flex h-full flex-col overflow-hidden">
         <TopBar
           left={<div className="flex items-center gap-2"><AlertTriangle size={17} className="text-warn" /><span data-type="title-l" className="text-on-surface">Planning paused</span></div>}
-          right={<button type="button" onClick={onBack} data-type="body-s" className="rounded-pill px-3 h-9 text-on-surface-low transition-colors hover:bg-surface-high hover:text-on-surface">Cancel and edit the task</button>} />
+          right={<Button variant="ghost" size="sm" type="button" onClick={onBack} data-type="body-s" className="rounded-pill px-3 h-9 text-on-surface-low transition-colors hover:bg-surface-high hover:text-on-surface">Cancel and edit the task</Button>} />
         <main className="min-h-0 flex-1 px-l py-l">
           <PlannerRecoveryNotice retrying={retrying} error={error} onRetry={retry} />
         </main>

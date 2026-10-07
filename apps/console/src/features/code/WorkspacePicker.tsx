@@ -142,11 +142,11 @@ export function WorkspacePicker({ mode, allowCreate, onPick, onClose }: {
                   </button>
                   {
 }
-                  <button type="button" onClick={() => onPick(d.path)}
+                  <Button variant="ghost" size="sm" type="button" onClick={() => onPick(d.path)}
                     data-type="caption" className="shrink-0 rounded px-1.5 py-0.5 text-on-surface-low opacity-50 transition-opacity hover:bg-surface-highest hover:text-primary hover:opacity-100 focus-visible:opacity-100 group-hover/row:opacity-100"
                     title={mode === 'brownfield' ? `Use ${d.name} as the codebase` : `Use ${d.name} as the project home`}>
                     Use
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>
@@ -171,10 +171,10 @@ export function WorkspacePicker({ mode, allowCreate, onPick, onClose }: {
               </Button>
             </div>
           ) : (
-            <button type="button" onClick={() => setCreating(true)}
+            <Button variant="ghost" size="sm" type="button" onClick={() => setCreating(true)}
               data-type="body-s" className="inline-flex items-center gap-1.5 self-start rounded-md px-2 py-1.5 text-on-surface-low hover:text-on-surface">
               <FolderPlus size={15} /> New folder here
-            </button>
+            </Button>
           )
         )}
 
