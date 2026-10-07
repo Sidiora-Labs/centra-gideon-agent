@@ -102,10 +102,10 @@ export const ContentSurface = forwardRef<ContentSurfaceHandle, ContentSurfacePro
           </>}
         </div>}
         {capability.draftEditable && <>
-          <SquareIconButton icon={RotateCcw} label="Revert unsaved changes" disabled={!dirty} iconSize={13} onClick={() => state.setDraft(state.base)} />
+          <SquareIconButton icon={RotateCcw} label="Revert unsaved changes" disabled={!dirty} disabledReason="There are no unsaved changes to revert." iconSize={13} onClick={() => state.setDraft(state.base)} />
           <button type="button" onClick={dirty && !state.baseMissing ? state.save : undefined} disabled={saving} aria-busy={saving || undefined} aria-disabled={(!dirty && !saving) || state.baseMissing || undefined}
             className="inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-xs disabled:opacity-40 aria-disabled:opacity-40"
-            style={{ background: dirty ? 'var(--color-primary)' : 'var(--color-surface-high)', color: dirty ? 'var(--color-on-primary)' : 'var(--color-on-surface-low)' }} title={state.baseMissing ? 'Refresh and rebase the draft before saving; the current source is unavailable' : dirty ? 'Save (⌘S)' : 'Save (⌘S) — no changes to save'}>
+            style={{ background: dirty ? 'var(--color-primary)' : 'var(--color-surface-high)', color: dirty ? 'var(--color-on-primary)' : 'var(--color-on-surface-low)' }} title={saving ? 'Saving changes…' : state.baseMissing ? 'Refresh and rebase the draft before saving; the current source is unavailable' : dirty ? 'Save (⌘S)' : 'Save (⌘S) — no changes to save'}>
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}{!compact && 'Save'}
           </button>
           {actions?.map(action => <button key={action.label} type="button" onClick={() => state.action(action.run)} disabled={saving} aria-busy={saving || undefined}

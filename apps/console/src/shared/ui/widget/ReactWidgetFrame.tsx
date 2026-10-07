@@ -39,7 +39,7 @@ export function ReactWidgetFrame({ jsx, title = 'React widget', onReady, onError
         {error && <span className="inline-flex items-center gap-1 text-xs text-danger" title={error}><AlertTriangle size={12} />error</span>}
       </div>
       <div className="flex gap-1" role="group" aria-label={`${title} actions`}>
-        <SquareIconButton label="Open in new tab" icon={ExternalLink} disabled={!source} onClick={() => source && exportWidget(source, title, 'tab')} />
+        <SquareIconButton label="Open in new tab" icon={ExternalLink} disabled={!source} disabledReason={error ? "Fix the widget source error before opening it in a new tab." : "The widget source is not ready to open in a new tab."} onClick={() => source && exportWidget(source, title, 'tab')} />
         <SquareIconButton label={expansion.expanded ? 'Minimize' : 'Expand'} icon={expansion.expanded ? Minimize2 : Maximize2} onClick={expansion.toggle} />
       </div>
     </div>

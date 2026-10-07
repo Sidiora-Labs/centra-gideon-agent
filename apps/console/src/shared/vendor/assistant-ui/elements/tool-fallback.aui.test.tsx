@@ -398,8 +398,16 @@ describe("ToolFallbackApproval", () => {
     fireEvent.click(button("Deny"));
 
     expect(respondToApproval).toHaveBeenLastCalledWith({ approved: false });
-    expect(button("Allow").disabled).toBe(true);
-    expect(button("Deny").disabled).toBe(true);
+    expect(button("Allow")).toHaveAttribute("aria-disabled", "true");
+    expect(button("Deny")).toHaveAttribute("aria-disabled", "true");
+    expect(button("Allow")).not.toBeDisabled();
+    expect(button("Allow")).toHaveAccessibleDescription("This response has been submitted; wait for the request to update.");
+    button("Allow").focus();
+    expect(button("Allow")).toHaveFocus();
+    const sentCount = respondToApproval.mock.calls.length;
+    fireEvent.click(button("Allow"));
+    fireEvent.click(button("Deny"));
+    expect(respondToApproval).toHaveBeenCalledTimes(sentCount);
   });
 
   it("reports a rejection raised after the response was enqueued", async () => {
@@ -415,7 +423,7 @@ describe("ToolFallbackApproval", () => {
     );
 
     fireEvent.click(button("Allow"));
-    expect(button("Allow").disabled).toBe(true);
+    expect(button("Allow")).toHaveAttribute("aria-disabled", "true");
 
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toBe("gate expired");
@@ -586,7 +594,7 @@ describe("ToolFallbackApproval", () => {
 
     expect(respondToApproval).toHaveBeenCalledTimes(1);
     expect(respondToApproval).toHaveBeenCalledWith({ approved: false });
-    expect(button("Send").disabled).toBe(true);
+    expect(button("Send")).toHaveAttribute("aria-disabled", "true");
   });
 
   it("dismisses a select question that accepts it beside its options", () => {

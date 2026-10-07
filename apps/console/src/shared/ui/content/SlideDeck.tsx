@@ -89,7 +89,7 @@ export function SlideDeck({ slug, title, readOnly, onDirty }: DocumentEditorProp
   const { model } = editor
   const currentPreview = preview?.slug === slug && preview.version === editor.baseline.version && !editor.dirty ? preview : null
   const renderPreview = async () => {
-    if (!editor.baseline || editor.dirty) return
+    if (!editor.baseline || editor.dirty || rendering || editor.saving) return
     setRendering(true); setPreviewError('')
     try { setPreview(await api.renderArtifactDeckPreview(slug, editor.baseline.version)) }
     catch (error) { setPreviewError(error instanceof Error ? error.message : String(error)) }
@@ -111,7 +111,7 @@ export function SlideDeck({ slug, title, readOnly, onDirty }: DocumentEditorProp
       <div className="min-w-[14rem] flex-1"><Field label="Deck title" hint="Saved as the deck’s cover slide."><TextInput size="sm" value={model.title} ariaLabel="Deck title" placeholder="No cover slide" {...controls} onChange={title => editor.edit(current => ({ ...current, title }))} /></Field></div>
       <div className="min-w-[14rem] flex-1"><Field label="PPTX template artifact" hint="Saved masters and layouts; template version stays pinned."><TextInput size="sm" value={model.template_slug ?? ''} ariaLabel="PPTX template artifact slug" placeholder="Optional template slug" {...controls} onChange={template_slug => editor.edit(current => ({ ...current, template_slug, template_version: 0 }))} /></Field></div>
       <div className="min-w-[13rem]"><Field label="Slide size"><Select value={slideSizeKey(model)} options={slideSizeOptions(model)} ariaLabel="Slide size" {...controls} onChange={key => editor.edit(current => withSlideSize(current, key))} /></Field></div>
-      <Button size="xs" variant="tonal" disabled={editor.dirty || rendering || editor.saving} loading={rendering} loadingLabel="Rendering slides…" onClick={() => void renderPreview()}>Render slide previews</Button>
+      <Button size="xs" variant="tonal" disabled={editor.dirty || rendering || editor.saving} disabledReason={editor.saving ? "Wait for the deck to finish saving." : editor.dirty ? "Save draft slide changes before rendering previews." : "Wait for the current preview render to finish."} loading={rendering} loadingLabel="Rendering slides…" onClick={() => void renderPreview()}>Render slide previews</Button>
       <StructuredSaveControl {...editor} onSave={() => void editor.save(baseline => confirmStructuredSave(title, 'deck', baseline))} />
     </div>
     {previewError && <InlineError icon multiline className="mx-m mt-2" onDismiss={() => setPreviewError('')}>{previewError}</InlineError>}

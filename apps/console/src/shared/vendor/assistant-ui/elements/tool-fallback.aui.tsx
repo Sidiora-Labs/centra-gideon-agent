@@ -386,6 +386,8 @@ function ToolFallbackApproval({
   const voiceActive = useAuiState((s) => s.thread.voice !== undefined);
   const canAnswer = Boolean(respondToApproval || (interrupt && resume) || addResult);
   const locked = submitted || voiceActive;
+  const lockedReason = submitted ? "This response has been submitted; wait for the request to update."
+    : voiceActive ? "End the voice session before answering this request." : undefined;
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -497,6 +499,7 @@ function ToolFallbackApproval({
   };
 
   const handleOption = (option: ToolApprovalOption) => {
+    if (locked) return;
     if (option.confirm) {
       setConfirmingId(option.id);
     } else {
@@ -517,9 +520,11 @@ function ToolFallbackApproval({
     <Button
       size="sm"
       variant="outline"
-      className={pressable}
+      className={cn(pressable, "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:active:scale-100")}
       onClick={dismiss}
-      disabled={locked}
+      aria-disabled={locked || undefined}
+      aria-description={lockedReason}
+      title={lockedReason}
     >
       Dismiss
     </Button>
@@ -538,8 +543,11 @@ function ToolFallbackApproval({
     <div className="aui-tool-fallback-approval-answer flex flex-col items-start gap-2">
       <Textarea
         value={answer}
-        onChange={(event) => setAnswer(event.target.value)}
-        disabled={locked}
+        onChange={(event) => { if (!locked) setAnswer(event.target.value); }}
+        readOnly={locked}
+        aria-disabled={locked || undefined}
+        aria-description={lockedReason}
+        title={lockedReason}
         aria-label={question ? (approval?.prompt ?? "Answer") : "Note"}
         placeholder={
           question ? "Type your answer" : "Add a note to your decision"
@@ -549,9 +557,11 @@ function ToolFallbackApproval({
         <div className="flex items-center gap-2">
           <Button
             size="sm"
-            className={pressable}
+            className={cn(pressable, "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:active:scale-100")}
             onClick={submitAnswer}
-            disabled={locked}
+            aria-disabled={locked || undefined}
+            aria-description={lockedReason}
+            title={lockedReason}
           >
             Send
           </Button>
@@ -597,18 +607,22 @@ function ToolFallbackApproval({
         <div className="flex items-center gap-2">
           <Button
             size="sm"
-            className={pressable}
+            className={cn(pressable, "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:active:scale-100")}
             onClick={() => respondWithOption(confirming)}
-            disabled={locked}
+            aria-disabled={locked || undefined}
+            aria-description={lockedReason}
+            title={lockedReason}
           >
             Confirm
           </Button>
           <Button
             size="sm"
             variant="outline"
-            className={pressable}
-            onClick={() => setConfirmingId(null)}
-            disabled={locked}
+            className={cn(pressable, "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:active:scale-100")}
+            onClick={() => { if (!locked) setConfirmingId(null); }}
+            aria-disabled={locked || undefined}
+            aria-description={lockedReason}
+            title={lockedReason}
           >
             Back
           </Button>
@@ -640,9 +654,11 @@ function ToolFallbackApproval({
                 key={option.id}
                 size="sm"
                 variant={option === allowOptions[0] ? "default" : "outline"}
-                className={pressable}
+                className={cn(pressable, "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:active:scale-100")}
                 onClick={() => handleOption(option)}
-                disabled={locked}
+                aria-disabled={locked || undefined}
+                aria-description={lockedReason}
+                title={lockedReason}
               >
                 {approvalOptionLabel(option)}
               </Button>
@@ -652,9 +668,11 @@ function ToolFallbackApproval({
             <Button
               size="sm"
               variant="outline"
-              className={pressable}
+              className={cn(pressable, "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:active:scale-100")}
               onClick={() => respond(false)}
-              disabled={locked}
+              aria-disabled={locked || undefined}
+              aria-description={lockedReason}
+              title={lockedReason}
             >
               Deny
             </Button>
@@ -702,18 +720,22 @@ function ToolFallbackApproval({
       <div className="flex items-center gap-2">
         <Button
           size="sm"
-          className={pressable}
+          className={cn(pressable, "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:active:scale-100")}
           onClick={() => respond(true)}
-          disabled={locked}
+          aria-disabled={locked || undefined}
+          aria-description={lockedReason}
+          title={lockedReason}
         >
           Allow
         </Button>
         <Button
           size="sm"
           variant="outline"
-          className={pressable}
+          className={cn(pressable, "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:active:scale-100")}
           onClick={() => respond(false)}
-          disabled={locked}
+          aria-disabled={locked || undefined}
+          aria-description={lockedReason}
+          title={lockedReason}
         >
           Deny
         </Button>

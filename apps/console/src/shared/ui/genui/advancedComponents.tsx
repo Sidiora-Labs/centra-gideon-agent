@@ -219,6 +219,7 @@ export function ActionPreviewComponent({ args }: GenUiRenderProps) {
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
+    if (command.busy || (!!sourceId && !selectedId)) return
     if (!reviewing) {
       setReviewing(true)
       return
@@ -252,8 +253,8 @@ export function ActionPreviewComponent({ args }: GenUiRenderProps) {
         <PreviewRows payload={payload} />
       </Surface>}
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <Button type="submit" size="sm" loading={command.busy} disabled={!!sourceId && !selectedId}>{reviewing ? confirmLabel : 'Review action'}</Button>
-        {reviewing && <Button type="button" size="sm" variant="secondary" disabled={command.busy} onClick={() => setReviewing(false)}>Cancel</Button>}
+        <Button type="submit" size="sm" loading={command.busy} loadingLabel="Running action…" disabled={!!sourceId && !selectedId} disabledReason="Select an option before reviewing this action.">{reviewing ? confirmLabel : 'Review action'}</Button>
+        {reviewing && <Button type="button" size="sm" variant="secondary" disabled={command.busy} disabledReason="Wait for the current action to finish before leaving its review." onClick={() => { if (!command.busy) setReviewing(false) }}>Cancel</Button>}
       </div>
       {command.error && <p role="alert" data-type="caption" className="break-words text-danger">{command.error}</p>}
       {command.status && <p role="status" data-type="caption" className="break-words text-on-surface-low">{command.status}</p>}
