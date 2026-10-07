@@ -25,12 +25,12 @@ export function SecurityView({ status, busy = '', error = '', onRefresh, onRevok
         ? <NetworkGrants grants={status.grants} decisions={status.decisions} onRevoke={onRevoke} />
         : <Surface tone="container" radius="lg" className="p-l">
           <div className="flex items-start gap-s"><ShieldAlert size={18} aria-hidden className="mt-0.5 shrink-0 text-warn" />
-            <div><h2 className="text-sm font-medium text-on-surface">Network security status unavailable</h2>
-              <p className="mt-xs break-words text-sm text-on-surface-low">{status.error?.message || 'The authenticated network policy authority did not return a status.'}</p></div>
+            <div><h2 data-type="title-m" className="font-medium text-on-surface">Network security status unavailable</h2>
+              <p data-type="body-s" className="mt-xs break-words text-on-surface-low">{status.error?.message || 'The authenticated network policy authority did not return a status.'}</p></div>
           </div>
         </Surface>}
       {busy && <p role="status" aria-live="polite" className="sr-only">Updating network grant</p>}
-      {error && <p role="alert" aria-live="assertive" className="mt-m break-words text-sm text-danger">{error}</p>}
+      {error && <p data-type="body-s" role="alert" aria-live="assertive" className="mt-m break-words text-danger">{error}</p>}
     </Section>
   </div>
 }

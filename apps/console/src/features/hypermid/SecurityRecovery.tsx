@@ -47,10 +47,10 @@ function PlanReview({ plan, reviewed, confirmed, busy, onReviewed, onConfirmed, 
   const decision = securityRecoveryApplyDecision(plan, reviewed ? plan.plan_digest : '', confirmed)
   return <section aria-labelledby="security-recovery-plan-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
     <div className="flex flex-wrap items-start justify-between gap-m"><div>
-      <h3 id="security-recovery-plan-title" className="text-base text-on-surface">Review encrypted {plan.destructive ? 'restore' : 'backup'} plan</h3>
-      <p className="mt-xs text-sm text-on-surface-low">Expires {new Date(plan.expires_at).toLocaleString()}</p></div>
+      <h3 data-type="title-m" id="security-recovery-plan-title" className="text-on-surface">Review encrypted {plan.destructive ? 'restore' : 'backup'} plan</h3>
+      <p data-type="caption" className="mt-xs text-on-surface-low">Expires {new Date(plan.expires_at).toLocaleString()}</p></div>
       <div className="flex gap-s">{plan.destructive && <StatusPill label="destructive" tone="warn" />}{plan.restart_required && <StatusPill label="restart required" tone="warn" />}</div></div>
-    <dl className="mt-m grid gap-s text-sm sm:grid-cols-2">
+    <dl data-type="body-s" className="mt-m grid gap-s sm:grid-cols-2">
       <div><dt className="text-on-surface-low">Authority digest</dt><dd className="break-all font-mono text-on-surface">{plan.authority_digest}</dd></div>
       <div><dt className="text-on-surface-low">Parameters digest</dt><dd className="break-all font-mono text-on-surface">{plan.params_digest}</dd></div>
       {plan.source_digest && <div><dt className="text-on-surface-low">Validated source digest</dt><dd className="break-all font-mono text-on-surface">{plan.source_digest}</dd></div>}
@@ -64,14 +64,14 @@ function PlanReview({ plan, reviewed, confirmed, busy, onReviewed, onConfirmed, 
       {plan.cursor && <div><dt className="text-on-surface-low">Cursor</dt><dd className="text-on-surface">{plan.cursor.epoch}:{plan.cursor.sequence}</dd></div>}
     </dl>
     <ol className="mt-m grid gap-s">{plan.steps.map((step, index) => <li key={step.id} className="rounded-lg bg-surface-container p-m">
-      <div className="flex flex-wrap items-center gap-s"><span className="text-xs text-on-surface-low">{index + 1}</span><span className="text-sm text-on-surface">{step.title}</span>
+      <div className="flex flex-wrap items-center gap-s"><span data-type="caption" className="text-on-surface-low">{index + 1}</span><span data-type="body-s" className="text-on-surface">{step.title}</span>
         <StatusPill label={step.effect.replaceAll('_', ' ')} tone={step.effect === 'read' ? 'muted' : 'warn'} /></div></li>)}</ol>
-    {plan.blockers.length > 0 && <div role="alert" className="mt-m rounded-lg border border-danger/40 bg-danger/10 p-m text-sm text-danger">
+    {plan.blockers.length > 0 && <div data-type="body-s" role="alert" className="mt-m rounded-lg border border-danger/40 bg-danger/10 p-m text-danger">
       <p>This plan cannot be applied:</p><ul className="mt-s list-disc pl-l">{plan.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul></div>}
     <p data-type="caption" className="mt-m break-all font-mono text-on-surface-low">Plan digest {plan.plan_digest}</p>
-    <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={reviewed} onChange={(checked) => onReviewed(checked)} className="size-4 accent-primary" ariaLabel={"I reviewed this exact scope, source evidence, steps, and digest."} />I reviewed this exact scope, source evidence, steps, and digest.</label>
-    {plan.destructive && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={confirmed} onChange={(checked) => onConfirmed(checked)} className="size-4 accent-primary" ariaLabel={"I confirm this restore may replace authoritative memory."} />I confirm this restore may replace authoritative memory.</label>}
-    {!decision.allowed && <p className="mt-s text-sm text-on-surface-low">{decision.reason}</p>}
+    <label data-type="label-s" className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-on-surface"><Checkbox checked={reviewed} onChange={(checked) => onReviewed(checked)} className="size-4 accent-primary" ariaLabel={"I reviewed this exact scope, source evidence, steps, and digest."} />I reviewed this exact scope, source evidence, steps, and digest.</label>
+    {plan.destructive && <label data-type="label-s" className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-on-surface"><Checkbox checked={confirmed} onChange={(checked) => onConfirmed(checked)} className="size-4 accent-primary" ariaLabel={"I confirm this restore may replace authoritative memory."} />I confirm this restore may replace authoritative memory.</label>}
+    {!decision.allowed && <p data-type="body-s" className="mt-s text-on-surface-low">{decision.reason}</p>}
     <div className="hypermid-action-bar mt-m flex justify-end"><Button size="sm" disabled={!decision.allowed} disabledReason={!decision.allowed ? decision.reason : undefined} loading={busy} onClick={onApply}><ShieldCheck size={14} /> Apply reviewed plan</Button></div>
   </section>
 }
@@ -84,14 +84,14 @@ function Receipt({ receipt, busy, onStatus, onRecover }: {
 }) {
   return <Surface tone="container" radius="lg" className="mt-m p-l" aria-live="polite">
     <div className="flex flex-wrap items-start justify-between gap-m"><div><div className="flex flex-wrap items-center gap-s"><FileCheck2 size={16} className="text-primary" />
-      <h3 className="text-sm text-on-surface">Security operation receipt</h3><StatusPill label={receipt.state.replaceAll('_', ' ')} tone={tone(receipt.state)} />
+      <h3 data-type="title-m" className="text-on-surface">Security operation receipt</h3><StatusPill label={receipt.state.replaceAll('_', ' ')} tone={tone(receipt.state)} />
       <StatusPill label={`effect ${receipt.effect_state.replaceAll('_', ' ')}`} tone={tone(receipt.effect_state)} /></div>
       <p data-type="caption" className="mt-xs text-on-surface-low">Job {receipt.job_id}{receipt.cursor ? ` · cursor ${receipt.cursor.epoch}:${receipt.cursor.sequence}` : ''}</p></div>
       <div className="flex flex-wrap gap-s"><Button size="sm" variant="secondary" loading={busy === 'status'} onClick={onStatus}><RefreshCw size={14} /> Check status</Button>
         <Button size="sm" variant="secondary" loading={busy === 'recover'} onClick={onRecover}><ArchiveRestore size={14} /> Recover outcome</Button></div></div>
-    {receiptNeedsRecovery(receipt) && <p role="alert" className="mt-m text-sm text-warn">The operation may have taken effect. Recover the authoritative receipt before preparing another backup or restore.</p>}
-    {receipt.error && <p role="alert" className="mt-m text-sm text-danger">{receipt.error.message}</p>}
-    <dl className="mt-m grid gap-s text-sm sm:grid-cols-2">
+    {receiptNeedsRecovery(receipt) && <p data-type="body-s" role="alert" className="mt-m text-warn">The operation may have taken effect. Recover the authoritative receipt before preparing another backup or restore.</p>}
+    {receipt.error && <p data-type="body-s" role="alert" className="mt-m text-danger">{receipt.error.message}</p>}
+    <dl data-type="body-s" className="mt-m grid gap-s sm:grid-cols-2">
       {receipt.artifact_path && <div><dt className="text-on-surface-low">Artifact</dt><dd className="break-words text-on-surface">{receipt.artifact_path}</dd></div>}
       {receipt.artifact_digest && <div><dt className="text-on-surface-low">Artifact digest</dt><dd className="break-all font-mono text-on-surface">{receipt.artifact_digest}</dd></div>}
       {receipt.source_digest && <div><dt className="text-on-surface-low">Source digest</dt><dd className="break-all font-mono text-on-surface">{receipt.source_digest}</dd></div>}
@@ -175,24 +175,24 @@ export function SecurityRecovery() {
     <Section title="Prepare a security plan" hint="The authenticated owner selects the configured credential. Secret material and internal handles never enter this page or request.">
       <RowGroup><Row label="Credential authority" hint="One owner-bound credential is configured for encrypted backup and restore.">
         <div className="flex flex-wrap items-center gap-s"><StatusPill label={configured ? 'configured' : 'not configured'} tone={configured ? 'ok' : 'warn'} />
-          <span className="text-sm text-on-surface-low">{credential?.label || 'Local backup key'}</span></div></Row>
-        <Row label="Action"><Select value={draft.action} onChange={(value) => changeDraft({ ...initialSecurityRecoveryDraft, action: value as SecurityRecoveryAction })} ariaLabel="Security recovery action" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "backup", label: "Create encrypted backup" }, { value: "restore", label: "Restore encrypted backup" }]} /></Row>
+          <span data-type="body-s" className="text-on-surface-low">{credential?.label || 'Local backup key'}</span></div></Row>
+        <Row label="Action"><Select value={draft.action} onChange={(value) => changeDraft({ ...initialSecurityRecoveryDraft, action: value as SecurityRecoveryAction })} ariaLabel="Security recovery action" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "backup", label: "Create encrypted backup" }, { value: "restore", label: "Restore encrypted backup" }]} /></Row>
         {draft.action === 'backup' ? <>
-          <Row label="Artifact destination" hint="A protected local path distinct from the active store."><TextInput value={draft.destination} onChange={(value) => changeDraft({ ...draft, destination: value })} ariaLabel="Encrypted backup destination" placeholder="/path/to/backup.hmbk" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
-          <Row label="Export ID" hint="Optional stable idempotency identity for this backup."><TextInput value={draft.export_id} onChange={(value) => changeDraft({ ...draft, export_id: value })} ariaLabel="Backup export ID" placeholder="optional-export-id" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m font-mono text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
+          <Row label="Artifact destination" hint="A protected local path distinct from the active store."><TextInput value={draft.destination} onChange={(value) => changeDraft({ ...draft, destination: value })} ariaLabel="Encrypted backup destination" placeholder="/path/to/backup.hmbk" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
+          <Row label="Export ID" hint="Optional stable idempotency identity for this backup."><TextInput value={draft.export_id} onChange={(value) => changeDraft({ ...draft, export_id: value })} ariaLabel="Backup export ID" placeholder="optional-export-id" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m font-mono text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
         </> : <>
-          <Row label="Encrypted artifact" hint="The server opens and validates this local artifact before a plan can be reviewed."><TextInput value={draft.artifact_path} onChange={(value) => changeDraft({ ...draft, artifact_path: value })} ariaLabel="Encrypted backup artifact" placeholder="/path/to/backup.hmbk" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
-          <Row label="Expected source digest" hint="Copy the source digest from the committed backup receipt."><TextInput value={draft.source_digest} onChange={(value) => changeDraft({ ...draft, source_digest: value.trim().toLowerCase() })} ariaLabel="Expected backup source digest" placeholder="64 lowercase hexadecimal characters" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m font-mono text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
+          <Row label="Encrypted artifact" hint="The server opens and validates this local artifact before a plan can be reviewed."><TextInput value={draft.artifact_path} onChange={(value) => changeDraft({ ...draft, artifact_path: value })} ariaLabel="Encrypted backup artifact" placeholder="/path/to/backup.hmbk" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
+          <Row label="Expected source digest" hint="Copy the source digest from the committed backup receipt."><TextInput value={draft.source_digest} onChange={(value) => changeDraft({ ...draft, source_digest: value.trim().toLowerCase() })} ariaLabel="Expected backup source digest" placeholder="64 lowercase hexadecimal characters" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m font-mono text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" /></Row>
         </>}</RowGroup>
       <div className="mt-m flex justify-end"><Button size="sm" variant="secondary" disabled={!configured} disabledReason={!configured ? 'Configure the security settings before preparing a plan.' : undefined} loading={busy === 'plan'} onClick={() => void review()}>Review security plan</Button></div>
       {plan && <PlanReview plan={plan} reviewed={reviewed} confirmed={confirmed} busy={busy === 'apply'} onReviewed={setReviewed} onConfirmed={setConfirmed} onApply={() => void apply()} />}
     </Section>
     <Section title="Outcome recovery" hint="Load the authoritative job receipt. An unknown outcome must be recovered before retrying.">
-      <div className="flex flex-wrap gap-s"><TextInput value={jobId} onChange={(value) => setJobId(value)} ariaLabel="Security operation job ID" placeholder="job-…" className="min-h-11 min-w-0 flex-1 rounded-lg border border-outline-variant bg-surface px-m font-mono text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" />
+      <div className="flex flex-wrap gap-s"><TextInput value={jobId} onChange={(value) => setJobId(value)} ariaLabel="Security operation job ID" placeholder="job-…" className="min-h-11 min-w-0 flex-1 rounded-lg border border-outline-variant bg-surface px-m font-mono text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" />
         <Button size="sm" variant="secondary" loading={busy === 'status'} onClick={() => void status()}>Load receipt</Button></div>
       {receipt && <Receipt receipt={receipt} busy={busy} onStatus={() => void status(receipt.job_id)} onRecover={() => void recover()} />}
     </Section>
-    {Boolean(credentials.error) && <p role="alert" className="mt-m flex items-start gap-s text-sm text-danger"><TriangleAlert size={16} className="mt-0.5 shrink-0" />The credential authority could not be loaded.</p>}
-    {error && <p role="alert" className="mt-m flex items-start gap-s text-sm text-danger"><TriangleAlert size={16} className="mt-0.5 shrink-0" />{error}</p>}
+    {Boolean(credentials.error) && <p data-type="body-s" role="alert" className="mt-m flex items-start gap-s text-danger"><TriangleAlert size={16} className="mt-0.5 shrink-0" />The credential authority could not be loaded.</p>}
+    {error && <p data-type="body-s" role="alert" className="mt-m flex items-start gap-s text-danger"><TriangleAlert size={16} className="mt-0.5 shrink-0" />{error}</p>}
   </div>
 }

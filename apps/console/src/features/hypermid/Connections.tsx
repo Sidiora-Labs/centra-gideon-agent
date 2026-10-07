@@ -48,7 +48,7 @@ function ConnectionCard({ connection, busy, onAction }: {
       <div className="flex min-w-0 items-start gap-s">
         <Icon size={17} aria-hidden className="mt-0.5 shrink-0 text-primary" />
         <div className="min-w-0">
-          <h3 className="break-words text-sm font-medium text-on-surface">{connection.display_name}</h3>
+          <h3 data-type="title-m" className="break-words font-medium text-on-surface">{connection.display_name}</h3>
           <p data-type="caption" className="mt-xs text-on-surface-low">{readable(connection.transport)} transport</p>
         </div>
       </div>
@@ -56,7 +56,7 @@ function ConnectionCard({ connection, busy, onAction }: {
     </div>
     <div className="mt-m">
       <p data-type="label-s" className="text-on-surface-low">Negotiated capabilities</p>
-      <p className="mt-xs break-words text-sm text-on-surface">
+      <p data-type="body-s" className="mt-xs break-words text-on-surface">
         {connection.capabilities.length ? connection.capabilities.map(readable).join(', ') : 'None reported'}
       </p>
     </div>
@@ -64,7 +64,7 @@ function ConnectionCard({ connection, busy, onAction }: {
     {connection.transport === 'stdio' && <p data-type="caption" className="mt-s text-on-surface-low">
       Budget {readable(connection.budget.state)} · fault {connection.fault.code ? readable(connection.fault.code) : readable(connection.fault.state)}
     </p>}
-    {connection.fault.code && <p role="status" className="mt-s break-words text-sm text-warn">{readable(connection.fault.code)}</p>}
+    {connection.fault.code && <p data-type="body-s" role="status" className="mt-s break-words text-warn">{readable(connection.fault.code)}</p>}
     {connection.operations.length > 0 && <div className="mt-m flex flex-wrap gap-s">
       {connection.operations.map((operation) => <Button key={operation} size="sm" variant={operation === 'stop' || operation === 'disable' ? 'secondary' : 'tonal'}
         className="hypermid-touch" loading={busy === `${connection.connection_id}:${operation}`}
@@ -89,31 +89,31 @@ export function ConnectionsView({ snapshot, busy = '', error = '', onRefresh, on
       <div className="grid gap-m lg:grid-cols-2">
         {fullHost.map((connection) => <ConnectionCard key={connection.connection_id} connection={connection} busy={busy} onAction={onAction} />)}
       </div>
-      {fullHost.length === 0 && <p role="status" className="rounded-lg bg-surface-container p-m text-sm text-on-surface-low">No full host integration was reported.</p>}
+      {fullHost.length === 0 && <p data-type="body-s" role="status" className="rounded-lg bg-surface-container p-m text-on-surface-low">No full host integration was reported.</p>}
     </Section>
     <Section title="Tool bridge" hint="Tool bridges expose only their listed catalog and call capabilities. They do not grant configuration, credential, lifecycle, or host-session authority.">
       <div className="grid gap-m lg:grid-cols-2">
         {toolBridges.map((connection) => <ConnectionCard key={connection.connection_id} connection={connection} busy={busy} onAction={onAction} />)}
       </div>
-      {toolBridges.length === 0 && <p role="status" className="rounded-lg bg-surface-container p-m text-sm text-on-surface-low">No tool bridge was reported.</p>}
+      {toolBridges.length === 0 && <p data-type="body-s" role="status" className="rounded-lg bg-surface-container p-m text-on-surface-low">No tool bridge was reported.</p>}
     </Section>
     <Section title="Conditions" hint="Condition results are bounded observations. A transition identity appears only when the native evaluator reports one.">
       <div className="grid gap-m lg:grid-cols-2">{snapshot.conditions.map((condition, index) => <Surface key={condition.condition_id || `${condition.failure_code || 'unavailable'}:${index}`} tone="container" radius="lg" className="p-l">
         <div className="flex flex-wrap items-center justify-between gap-s">
           <div className="flex min-w-0 items-center gap-s"><GitBranch size={16} aria-hidden className="shrink-0 text-primary" />
-            <h3 className="break-words text-sm font-medium text-on-surface">{condition.condition_id || 'Condition evaluator'}</h3></div>
+            <h3 data-type="title-m" className="break-words font-medium text-on-surface">{condition.condition_id || 'Condition evaluator'}</h3></div>
           <StatusPill label={condition.availability === 'available' ? condition.result ? 'Matched' : 'Not matched' : 'Unavailable'} tone={condition.availability === 'available' ? condition.result ? 'ok' : 'muted' : 'warn'} />
         </div>
-        {condition.transition_id && <p className="mt-s break-all text-xs text-on-surface-low">Transition {condition.transition_id}</p>}
-        {condition.failure_code && <p className="mt-s break-words text-sm text-warn">{readable(condition.failure_code)}</p>}
-        {condition.observed_facts.length > 0 && <dl className="mt-s grid gap-xs text-sm">{condition.observed_facts.map((fact) => <div key={`${fact.label}:${fact.value}`} className="flex flex-wrap justify-between gap-s">
+        {condition.transition_id && <p data-type="caption" className="mt-s break-all text-on-surface-low">Transition {condition.transition_id}</p>}
+        {condition.failure_code && <p data-type="body-s" className="mt-s break-words text-warn">{readable(condition.failure_code)}</p>}
+        {condition.observed_facts.length > 0 && <dl data-type="body-s" className="mt-s grid gap-xs">{condition.observed_facts.map((fact) => <div key={`${fact.label}:${fact.value}`} className="flex flex-wrap justify-between gap-s">
           <dt className="text-on-surface-low">{fact.label}</dt><dd className="break-all text-on-surface">{fact.value}</dd>
         </div>)}</dl>}
         <p data-type="caption" className="mt-s text-on-surface-low">Checked {new Date(condition.checked_at_ms).toLocaleString()}</p>
       </Surface>)}</div>
     </Section>
     <p data-type="caption" className="mb-m text-on-surface-low">Scope checked {new Date(snapshot.checked_at_ms).toLocaleString()}.</p>
-    {error && <p role="alert" aria-live="assertive" className="mb-m break-words text-sm text-danger">{error}</p>}
+    {error && <p data-type="body-s" role="alert" aria-live="assertive" className="mb-m break-words text-danger">{error}</p>}
   </div>
 }
 

@@ -83,7 +83,7 @@ export function RemoteAccess() {
           <StatusPill label={status.data.state} tone={status.data.state === 'remote' ? 'ok' : status.data.state === 'degraded' ? 'warn' : 'muted'} />
           <StatusPill label={status.data.tls.configured ? 'TLS configured' : 'TLS required'} tone={status.data.tls.configured ? 'ok' : 'warn'} />
         </div>
-        <p className="mt-s text-sm text-on-surface-low">{status.data.detail || (status.data.enabled ? 'Remote access is explicitly enabled.' : 'Remote access is disabled; local operation continues.')}</p>
+        <p data-type="body-s" className="mt-s text-on-surface-low">{status.data.detail || (status.data.enabled ? 'Remote access is explicitly enabled.' : 'Remote access is disabled; local operation continues.')}</p>
       </Surface>
     </Section>
     <Section title="Enroll a device" hint="Review creates an authoritative plan. Enablement requires that exact current plan digest.">
@@ -91,21 +91,21 @@ export function RemoteAccess() {
         <Row label="TLS endpoint" hint={endpointError || 'Explicit host and port. TLS is mandatory; credentials and private keys do not belong here.'}><TextInput value={endpoint} onChange={setEndpoint} ariaLabel="TLS endpoint" placeholder="tcp://hypermid.example.net:443" size="sm" /></Row>
         <Row label="Server name" hint="The certificate name this device must verify."><TextInput value={serverName} onChange={setServerName} ariaLabel="TLS server name" placeholder="hypermid.example.net" size="sm" /></Row>
         <Row label="Device name" hint="A human-readable name you will recognize when revoking access."><TextInput value={deviceName} onChange={setDeviceName} ariaLabel="Device name" placeholder="My phone" size="sm" /></Row>
-        <Row label="Expires after"><Select value={expiryHours} onChange={(value) => setExpiryHours(value)} ariaLabel="Enrollment expiry" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "1", label: "1 hour" }, { value: "24", label: "1 day" }, { value: "168", label: "7 days" }]} /></Row>
+        <Row label="Expires after"><Select value={expiryHours} onChange={(value) => setExpiryHours(value)} ariaLabel="Enrollment expiry" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "1", label: "1 hour" }, { value: "24", label: "1 day" }, { value: "168", label: "7 days" }]} /></Row>
       </RowGroup>
-      <fieldset className="mt-m"><legend className="mb-s text-sm text-on-surface">Allowed capabilities</legend>
-        <div className="grid gap-s sm:grid-cols-2">{REMOTE_CAPABILITIES.map((capability) => <label key={capability.id} className="hypermid-touch flex cursor-pointer items-center gap-s rounded-lg bg-surface-container px-m text-sm text-on-surface">
+      <fieldset className="mt-m"><legend data-type="label-s" className="mb-s text-on-surface">Allowed capabilities</legend>
+        <div className="grid gap-s sm:grid-cols-2">{REMOTE_CAPABILITIES.map((capability) => <label data-type="label-s" key={capability.id} className="hypermid-touch flex cursor-pointer items-center gap-s rounded-lg bg-surface-container px-m text-on-surface">
           <Checkbox checked={capabilities.includes(capability.id)} onChange={(checked) => toggleCapability(capability.id, checked)} className="size-4 accent-primary" ariaLabel={capability.label} />{capability.label}
         </label>)}</div>
       </fieldset>
       <div className="mt-m flex justify-end"><Button size="sm" disabled={!endpoint || !serverName.trim() || !deviceName.trim() || !capabilities.length || Boolean(endpointError)} disabledReason={!endpoint ? 'Enter the remote endpoint.' : endpointError || (!serverName.trim() ? 'Enter a server name.' : !deviceName.trim() ? 'Enter a device name.' : !capabilities.length ? 'Select at least one read capability.' : undefined)} loading={busy === 'plan'} onClick={() => void review()}><ShieldCheck size={14} /> Review remote access</Button></div>
       {plan && <section aria-labelledby="remote-plan-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
-        <h3 id="remote-plan-title" className="text-base text-on-surface">Review device enrollment</h3>
-        <dl className="mt-m grid gap-s text-sm sm:grid-cols-2"><div><dt className="text-on-surface-low">Device</dt><dd className="text-on-surface">{plan.device_name}</dd></div>
+        <h3 data-type="title-m" id="remote-plan-title" className="text-on-surface">Review device enrollment</h3>
+        <dl data-type="body-s" className="mt-m grid gap-s sm:grid-cols-2"><div><dt className="text-on-surface-low">Device</dt><dd className="text-on-surface">{plan.device_name}</dd></div>
           <div><dt className="text-on-surface-low">Scope</dt><dd className="text-on-surface">{plan.scope_label}</dd></div><div><dt className="text-on-surface-low">TLS server</dt><dd className="break-words text-on-surface">{plan.server_name}</dd></div>
           <div><dt className="text-on-surface-low">Expires</dt><dd className="text-on-surface">{new Date(plan.expires_at).toLocaleString()}</dd></div></dl>
-        <p className="mt-m text-sm text-on-surface-low">Capabilities: {plan.capabilities.map((id) => REMOTE_CAPABILITIES.find((item) => item.id === id)?.label || id).join(', ')}.</p>
-        {plan.warnings.map((warning) => <p key={warning} role="alert" className="mt-s text-sm text-warn">{warning}</p>)}
+        <p data-type="body-s" className="mt-m text-on-surface-low">Capabilities: {plan.capabilities.map((id) => REMOTE_CAPABILITIES.find((item) => item.id === id)?.label || id).join(', ')}.</p>
+        {plan.warnings.map((warning) => <p data-type="body-s" key={warning} role="alert" className="mt-s text-warn">{warning}</p>)}
         <div className="hypermid-action-bar mt-m flex flex-wrap justify-end gap-s"><Button size="sm" variant="secondary" onClick={() => setPlan(undefined)}>Cancel</Button>
           <Button size="sm" loading={busy === 'enable'} onClick={() => void enable()}>Enable with reviewed plan</Button></div>
       </section>}
@@ -114,11 +114,11 @@ export function RemoteAccess() {
       {status.data.devices.length === 0 ? <EmptyState icon={Smartphone} title="No enrolled devices" hint="Remote access stays unavailable until a device is enrolled." />
         : <div className="grid gap-m">{status.data.devices.map((device) => <Surface key={device.device_id} tone="container" radius="lg" className="p-l">
           <div className="flex flex-wrap items-start justify-between gap-m"><div><div className="flex items-center gap-s"><Smartphone size={16} className="text-primary" />
-            <h3 className="text-sm text-on-surface">{device.name}</h3><StatusPill label={device.state} tone={device.state === 'active' ? 'ok' : device.state === 'revoked' ? 'warn' : 'muted'} /></div>
+            <h3 data-type="title-m" className="text-on-surface">{device.name}</h3><StatusPill label={device.state} tone={device.state === 'active' ? 'ok' : device.state === 'revoked' ? 'warn' : 'muted'} /></div>
             <p data-type="caption" className="mt-xs text-on-surface-low">Expires {new Date(device.expires_at).toLocaleString()} · {device.capabilities.length} capabilities</p></div>
             {device.state === 'active' && <Button size="sm" variant="danger" loading={busy === `revoke:${device.device_id}`} onClick={() => void revoke(device.device_id, device.name)}><Trash2 size={14} /> Revoke</Button>}</div>
         </Surface>)}</div>}
     </Section>
-    {error && <p role="alert" aria-live="assertive" className="text-sm text-danger">{error}</p>}
+    {error && <p data-type="body-s" role="alert" aria-live="assertive" className="text-danger">{error}</p>}
   </div>
 }

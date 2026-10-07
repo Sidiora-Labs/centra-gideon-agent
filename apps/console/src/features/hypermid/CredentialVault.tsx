@@ -42,7 +42,7 @@ function CredentialRow({ credential, refresh }: { credential: HypermidCredential
     <div className="flex flex-wrap items-start justify-between gap-m">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-s"><KeyRound size={16} className="text-primary" />
-          <h3 className="font-mono text-sm text-on-surface">{credential.name}</h3>
+          <h3 data-type="title-m" className="font-mono text-on-surface">{credential.name}</h3>
           <StatusPill label={credential.present ? 'present' : 'missing'} tone={credential.present ? 'ok' : 'warn'} />
           <StatusPill label={credential.backend.replaceAll('_', ' ')} tone="muted" />
         </div>
@@ -52,7 +52,7 @@ function CredentialRow({ credential, refresh }: { credential: HypermidCredential
       <div className="flex flex-wrap gap-s"><Button size="sm" variant="secondary" loading={busy === 'validate'} onClick={() => void validate()}><ShieldCheck size={14} /> Validate</Button>
         <Button size="sm" variant="danger" loading={busy === 'plan' || busy === 'delete'} onClick={() => void remove()}><Trash2 size={14} /> Delete</Button></div>
     </div>
-    {error && <p role="alert" className="mt-s text-sm text-danger">{error}</p>}
+    {error && <p data-type="body-s" role="alert" className="mt-s text-danger">{error}</p>}
   </Surface>
 }
 
@@ -78,11 +78,11 @@ export function CredentialVault() {
       <Row label="Credential name" hint="Use the name shown by the model or integration that needs it."><TextInput value={name} onChange={setName} ariaLabel="Credential name" placeholder="OPENAI_API_KEY" mono size="sm" /></Row>
       <Row label="Secret value" hint="Write-only. Hypermid never returns this value through its read API."><TextInput value={value} onChange={setValue} ariaLabel="Credential value" type="password" size="sm" /></Row>
       <Row label=""><div className="flex flex-wrap items-center justify-end gap-s">
-        {notice && <span role="status" className="inline-flex items-center gap-xs text-sm text-success"><CheckCircle2 size={14} />{notice}</span>}
+        {notice && <span data-type="body-s" role="status" className="inline-flex items-center gap-xs text-success"><CheckCircle2 size={14} />{notice}</span>}
         <Button size="sm" disabled={!name.trim() || !value} disabledReason={!name.trim() ? 'Enter a credential name.' : !value ? 'Enter the secret value to store.' : undefined} loading={busy} onClick={() => void save()}>{credentials.data?.credentials.some((item) => item.name === name.trim()) ? 'Replace credential' : 'Store credential'}</Button>
       </div></Row>
     </RowGroup>
-    {error && <p role="alert" className="mt-m text-sm text-danger">{error}</p>}
+    {error && <p data-type="body-s" role="alert" className="mt-m text-danger">{error}</p>}
     <div className="mt-l">
       {credentials.error && !credentials.data ? <LoadError what="Hypermid credentials" error={credentials.error} onRetry={credentials.refresh} />
         : unsafe ? <LoadError what="Hypermid credentials" error="The server returned a forbidden secret-bearing field, so this response was not rendered." onRetry={credentials.refresh} />
