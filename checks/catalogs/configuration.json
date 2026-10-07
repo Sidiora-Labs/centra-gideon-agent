@@ -6,10 +6,20 @@
         "sensitive": false,
         "type": "bool"
       },
+      "agent.approval_channel": {
+        "default": "",
+        "sensitive": false,
+        "type": "str"
+      },
       "agent.approval_mode": {
         "default": "auto",
         "sensitive": false,
         "type": "str"
+      },
+      "agent.approval_timeout_minutes": {
+        "default": 120,
+        "sensitive": false,
+        "type": "int"
       },
       "agent.bot_name": {
         "default": "",
@@ -611,6 +621,11 @@
         "sensitive": false,
         "type": "int"
       },
+      "guardrails.loop_breaker.circuit_threshold": {
+        "default": 30,
+        "sensitive": false,
+        "type": "int"
+      },
       "guardrails.scan_mode": {
         "default": "redact",
         "sensitive": false,
@@ -620,6 +635,51 @@
         "default": {},
         "sensitive": false,
         "type": "dict"
+      },
+      "hypermid.features.automatic_reclaim": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "hypermid.features.background_summaries": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "hypermid.features.nudges": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "hypermid.features.reduction_tools": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "hypermid.features.subagent_contributions": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "hypermid.features.synthetic_hook_blocks": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "hypermid.mode": {
+        "default": "off",
+        "sensitive": false,
+        "type": "ContextMode"
+      },
+      "hypermid.overflow_policy": {
+        "default": "reclaim_then_refuse",
+        "sensitive": false,
+        "type": "OverflowPolicy"
+      },
+      "hypermid.refusal_policy": {
+        "default": "refuse",
+        "sensitive": false,
+        "type": "RefusalPolicy"
       },
       "inbox.enabled": {
         "default": false,
@@ -640,6 +700,11 @@
         "default": 60,
         "sensitive": false,
         "type": "int"
+      },
+      "inbox.sort_messages": {
+        "default": true,
+        "sensitive": false,
+        "type": "bool"
       },
       "inbox.style_rules": {
         "default": [],
@@ -1091,6 +1156,11 @@
         "sensitive": false,
         "type": "str"
       },
+      "model_prices.overrides": {
+        "default": {},
+        "sensitive": false,
+        "type": "dict[str, dict[str, Any]]"
+      },
       "observe_max_messages": {
         "default": 200,
         "sensitive": false,
@@ -1196,6 +1266,21 @@
         "sensitive": false,
         "type": "int"
       },
+      "rooms.enabled": {
+        "default": false,
+        "sensitive": false,
+        "type": "bool"
+      },
+      "rooms.max_members": {
+        "default": 8,
+        "sensitive": false,
+        "type": "int"
+      },
+      "rooms.round_budget": {
+        "default": 8,
+        "sensitive": false,
+        "type": "int"
+      },
       "routing.cloud_quality_margin": {
         "default": 0.1,
         "sensitive": false,
@@ -1292,6 +1377,11 @@
         "type": "bool"
       },
       "security.egress.deny_hosts": {
+        "default": [],
+        "sensitive": false,
+        "type": "list[str]"
+      },
+      "security.outside_home": {
         "default": [],
         "sensitive": false,
         "type": "list[str]"
@@ -1534,6 +1624,16 @@
         "default": 0.62,
         "sensitive": false,
         "type": "float"
+      },
+      "workflows.max_concurrent_io_nodes": {
+        "default": 2,
+        "sensitive": false,
+        "type": "int"
+      },
+      "workflows.max_concurrent_llm_nodes": {
+        "default": 4,
+        "sensitive": false,
+        "type": "int"
       },
       "workflows.max_materialized_per_foreach": {
         "default": 20,

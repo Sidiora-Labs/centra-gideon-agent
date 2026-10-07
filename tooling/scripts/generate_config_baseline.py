@@ -83,6 +83,8 @@ def _walk(cls: type, prefix: str, out: list[dict[str, Any]]) -> None:
     rather than emitting the section as a row. Everything else is a leaf.
     """
     for f in dataclasses.fields(cls):
+        if not f.init:
+            continue
         path = f"{prefix}{f.name}"
         default = _field_default(f)
         if dataclasses.is_dataclass(default) and not isinstance(default, type):
@@ -121,7 +123,12 @@ def decode_catalog(document: dict[str, Any]) -> list[dict[str, Any]]:
 def build_baseline() -> str:
     entries: list[dict[str, Any]] = []
     _walk(AppConfig, "", entries)
-    return json.dumps(encode_catalog(entries), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    return (
+        json.dumps(
+            encode_catalog(entries), indent=2, sort_keys=True, ensure_ascii=False
+        )
+        + "\n"
+    )
 
 
 def baseline_path() -> Path:

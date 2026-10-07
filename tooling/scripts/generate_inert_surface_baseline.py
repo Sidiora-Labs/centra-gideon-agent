@@ -163,6 +163,7 @@ def _load_body_kwarg_names(
     """
     names: set[str] = set()
     found: set[str] = set()
+    mappings: list[ast.AST] = []
     for cls in ast.walk(loader_tree):
         if isinstance(cls, ast.ClassDef) and cls.name == "AppConfig":
             for item in cls.body:
@@ -171,6 +172,7 @@ def _load_body_kwarg_names(
                     and item.name in _LOAD_MAPPING_METHODS
                 ):
                     found.add(item.name)
+                    mappings.append(item)
                     for call in ast.walk(item):
                         if isinstance(call, ast.Call):
                             if (
@@ -191,6 +193,102 @@ def _load_body_kwarg_names(
             "anchor. Re-point _LOAD_MAPPING_METHODS (here and in checks/harness/scanner.py) at "
             "whichever method now holds the load mapping."
         )
+
+    # Separate wire decoders assign their sections after the composable mapping.
+    # Count only readers reached by those actual load assignments.
+    def section_read(expression: ast.expr, section: str) -> bool:
+        return (
+            isinstance(expression, ast.Call)
+            and isinstance(expression.func, ast.Attribute)
+            and expression.func.attr == "get"
+            and isinstance(expression.func.value, ast.Name)
+            and expression.func.value.id == "values"
+            and bool(expression.args)
+            and isinstance(expression.args[0], ast.Constant)
+            and expression.args[0].value == section
+        )
+
+    hypermid_section_read = any(
+        isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "stored_hypermid"
+            for target in node.targets
+        )
+        and section_read(node.value, "hypermid")
+        for mapping in mappings
+        for node in ast.walk(mapping)
+    )
+    for node in (node for mapping in mappings for node in ast.walk(mapping)):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+            continue
+        assigned = {
+            target.attr
+            for target in node.targets
+            if isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "configuration"
+        }
+        call = node.value
+        if (
+            hypermid_section_read
+            and "hypermid" in assigned
+            and isinstance(call.func, ast.Attribute)
+            and isinstance(call.func.value, ast.Name)
+            and call.func.value.id == "ContextConfig"
+            and call.func.attr == "from_wire"
+            and call.args
+            and isinstance(call.args[0], ast.Name)
+            and call.args[0].id == "stored_hypermid"
+        ):
+            decoder = _parse(_src_root() / "hypermid" / "config.py")
+            if decoder is not None:
+                for cls in decoder.body:
+                    if not isinstance(cls, ast.ClassDef) or cls.name not in {
+                        "ContextConfig",
+                        "FeatureFlags",
+                    }:
+                        continue
+                    for method in cls.body:
+                        if (
+                            not isinstance(method, ast.FunctionDef)
+                            or method.name != "to_wire"
+                        ):
+                            continue
+                        for item in ast.walk(method):
+                            if (
+                                isinstance(item, ast.Attribute)
+                                and isinstance(item.value, ast.Name)
+                                and item.value.id == "self"
+                            ):
+                                names.add(item.attr)
+        if (
+            "model_prices" in assigned
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "ModelPricesConfig"
+            and call.args
+        ):
+            reader = call.args[0]
+            if (
+                isinstance(reader, ast.Call)
+                and isinstance(reader.func, ast.Name)
+                and reader.func.id == "price_overrides"
+                and reader.args
+                and section_read(reader.args[0], "model_prices")
+            ):
+                decoder = _parse(_src_root() / "core" / "config" / "pricing.py")
+                if decoder is not None:
+                    for item in ast.walk(decoder):
+                        if (
+                            isinstance(item, ast.Call)
+                            and isinstance(item.func, ast.Attribute)
+                            and item.func.attr == "get"
+                            and isinstance(item.func.value, ast.Name)
+                            and item.func.value.id == "section"
+                            and item.args
+                            and isinstance(item.args[0], ast.Constant)
+                            and isinstance(item.args[0].value, str)
+                        ):
+                            names.add(item.args[0].value)
     return names
 
 

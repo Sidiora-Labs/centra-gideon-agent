@@ -606,3 +606,31 @@ def test_catalog_reader_rejects_unknown_formats(field, value):
     document[field] = value
     with pytest.raises(ValueError, match="unsupported Gideon"):
         decode_catalog(document)
+
+
+def test_separate_config_wire_decoders_require_actual_load_calls():
+    from tooling.scripts.generate_inert_surface_baseline import _load_body_kwarg_names
+
+    loader = (
+        Path(__file__).resolve().parents[2] / "runtime/gideon/core/config/loader.py"
+    )
+    tree = ast.parse(loader.read_text())
+    names = _load_body_kwarg_names(tree)
+    assert "nudges" in names
+    assert "overrides" in names
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "from_wire"
+        ):
+            node.func.attr = "unwired"
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "price_overrides"
+        ):
+            node.func.id = "unwired"
+    names = _load_body_kwarg_names(tree)
+    assert "nudges" not in names
+    assert "overrides" not in names

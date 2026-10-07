@@ -125,3 +125,11 @@ def test_catalog_reader_rejects_unknown_formats(field, value):
     document[field] = value
     with pytest.raises(ValueError, match="unsupported Gideon"):
         decode_catalog(document)
+
+
+def test_private_load_bookkeeping_is_not_wire_configuration():
+    paths = {entry["path"] for entry in decode_catalog(json.loads(build_baseline()))}
+    assert "_loaded_values" not in paths
+    assert "_loaded_missing" not in paths
+    assert "hypermid.features.nudges" in paths
+    assert "model_prices.overrides" in paths
