@@ -33,14 +33,14 @@ function EffectCard({ effect, busy, onReview }: {
   return <Surface tone="container" radius="lg" className="min-w-0 p-l">
     <div className="flex flex-wrap items-start justify-between gap-m">
       <div className="flex min-w-0 items-start gap-s"><ShieldQuestion size={17} aria-hidden className="mt-0.5 shrink-0 text-primary" />
-        <div><h3 className="break-words text-sm font-medium text-on-surface">{readable(effect.operation)}</h3>
+        <div><h3 data-type="title-m" className="break-words text-on-surface">{readable(effect.operation)}</h3>
           <p data-type="caption" className="mt-xs text-on-surface-low">Recorded {new Date(effect.created_ms).toLocaleString()} · {effect.scope.workspace_id ? 'current workspace' : 'current project'}</p></div></div>
       <StatusPill label={readable(effect.state)} tone={tone(effect.state)} />
     </div>
     <p data-type="caption" className="mt-m break-all font-mono text-on-surface-low">Input digest {effect.input_digest}</p>
-    {effect.reason && <p className="mt-s break-words text-sm text-on-surface-low">{effect.reason}</p>}
-    {effect.next_action === 'wait_for_recovery' && <p className="mt-s flex items-start gap-s text-sm text-on-surface-low"><Clock3 size={15} aria-hidden className="mt-0.5 shrink-0" />Wait for daemon recovery before taking another action.</p>}
-    {awaitingProof && <p className="mt-s text-sm text-on-surface-low">Await authoritative provider status. Reconciliation remains unavailable until the daemon binds one unambiguous proof.</p>}
+    {effect.reason && <p data-type="body-s" className="mt-s break-words text-on-surface-low">{effect.reason}</p>}
+    {effect.next_action === 'wait_for_recovery' && <p data-type="body-s" className="mt-s flex items-start gap-s text-on-surface-low"><Clock3 size={15} aria-hidden className="mt-0.5 shrink-0" />Wait for daemon recovery before taking another action.</p>}
+    {awaitingProof && <p data-type="body-s" className="mt-s text-on-surface-low">Await authoritative provider status. Reconciliation remains unavailable until the daemon binds one unambiguous proof.</p>}
     {(effect.reviewable || effect.review_plan) && <div className="mt-m flex justify-end"><Button size="sm" variant="secondary" className="hypermid-touch" loading={busy}
       onClick={() => onReview(effect)}>{effect.review_plan ? 'Review saved reconciliation' : 'Check authoritative status'}</Button></div>}
   </Surface>
@@ -55,10 +55,10 @@ function PlanReview({ plan, reviewed, busy, onReviewed, onCancel, onReconcile }:
   onReconcile: () => void
 }) {
   return <section aria-labelledby="effect-review-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
-    <div className="flex flex-wrap items-start justify-between gap-s"><div><h3 id="effect-review-title" className="text-base text-on-surface">Review authoritative reconciliation</h3>
-      <p className="mt-xs text-sm text-on-surface-low">This records the provider-confirmed outcome. It does not repeat the external effect.</p></div>
+    <div className="flex flex-wrap items-start justify-between gap-s"><div><h3 id="effect-review-title" data-type="title-m" className="text-on-surface">Review authoritative reconciliation</h3>
+      <p data-type="body-s" className="mt-xs text-on-surface-low">This records the provider-confirmed outcome. It does not repeat the external effect.</p></div>
       <StatusPill label={readable(plan.proposed_state)} tone="ok" /></div>
-    <dl className="mt-m grid gap-s text-sm sm:grid-cols-2">
+    <dl data-type="body-s" className="mt-m grid gap-s sm:grid-cols-2">
       <div><dt className="text-on-surface-low">Operation</dt><dd className="break-words text-on-surface">{readable(plan.operation)}</dd></div>
       <div><dt className="text-on-surface-low">Scope</dt><dd className="text-on-surface">{plan.scope.workspace_id ? 'Current workspace' : 'Current project'}</dd></div>
       <div><dt className="text-on-surface-low">Proof observed</dt><dd className="text-on-surface">{new Date(plan.created_ms).toLocaleString()}</dd></div>
@@ -68,7 +68,7 @@ function PlanReview({ plan, reviewed, busy, onReviewed, onCancel, onReconcile }:
     <p data-type="caption" className="mt-xs break-all font-mono text-on-surface-low">Provider proof digest {plan.provider_proof_digest}</p>
     {plan.result_digest && <p data-type="caption" className="mt-xs break-all font-mono text-on-surface-low">Result digest {plan.result_digest}</p>}
     <p data-type="caption" className="mt-xs break-all font-mono text-on-surface-low">Plan digest {plan.plan_digest}</p>
-    <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={reviewed} onChange={(checked) => onReviewed(checked)} className="size-4 accent-primary" ariaLabel={"I reviewed this exact operation, scope, proposed outcome, and evidence digest."} />I reviewed this exact operation, scope, proposed outcome, and evidence digest.</label>
+    <label data-type="label-s" className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-on-surface"><Checkbox checked={reviewed} onChange={(checked) => onReviewed(checked)} className="size-4 accent-primary" ariaLabel={"I reviewed this exact operation, scope, proposed outcome, and evidence digest."} />I reviewed this exact operation, scope, proposed outcome, and evidence digest.</label>
     <div className="hypermid-action-bar mt-m flex flex-wrap justify-end gap-s"><Button size="sm" variant="secondary" onClick={onCancel}>Cancel</Button>
       <Button size="sm" disabled={!reviewed} disabledReason={!reviewed ? 'Review this exact operation, scope, outcome, and evidence digest first.' : undefined} loading={busy} onClick={onReconcile}><FileCheck2 size={14} /> Record reviewed outcome</Button></div>
   </section>
@@ -92,7 +92,7 @@ export function UnknownEffectsView({ snapshot, plan, reviewed = false, busy = ''
     {snapshot.effects.length === 0 ? <EmptyState title="No unsettled effects" hint="The authenticated scope has no external mutations awaiting recovery or reconciliation." />
       : <div className="grid gap-m lg:grid-cols-2">{snapshot.effects.map((effect) => <EffectCard key={effect.effect_id} effect={effect} busy={busy === effect.effect_id} onReview={onReview} />)}</div>}
     {plan && <PlanReview plan={plan} reviewed={reviewed} busy={busy === 'reconcile'} onReviewed={onReviewed} onCancel={onCancel} onReconcile={onReconcile} />}
-    {error && <p role="alert" aria-live="assertive" className="mt-m break-words text-sm text-danger">{error}</p>}
+    {error && <p role="alert" aria-live="assertive" data-type="body-s" className="mt-m break-words text-danger">{error}</p>}
     <p role="status" aria-live="polite" className="sr-only">{announcement}</p>
     <p data-type="caption" className="mt-m text-on-surface-low">Checked {new Date(snapshot.checked_at_ms).toLocaleString()}.</p>
   </Section>
@@ -106,7 +106,7 @@ export function UnknownEffects() {
   const [error, setError] = useState('')
   const [announcement, setAnnouncement] = useState('')
   if (!query.data && query.error) return <Section title="Unsettled external effects"><Surface tone="container" radius="lg" className="p-l">
-    <p className="text-sm text-on-surface">Effect status is unavailable.</p><p data-type="caption" className="mt-xs text-on-surface-low">Refresh after the authenticated daemon connection recovers.</p>
+    <p data-type="body-s" className="text-on-surface">Effect status is unavailable.</p><p data-type="caption" className="mt-xs text-on-surface-low">Refresh after the authenticated daemon connection recovers.</p>
     <Button size="sm" variant="secondary" className="hypermid-touch mt-s" onClick={query.refresh}>Refresh status</Button>
   </Surface></Section>
   if (!query.data) return <FormSkeleton sections={1} rows={3} what="Hypermid external effects" />

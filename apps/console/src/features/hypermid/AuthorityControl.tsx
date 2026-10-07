@@ -68,9 +68,9 @@ export function AuthorityControl({ onStatus, onCommitted }: {
     <Surface tone="container" radius="lg" className="p-l">
       <div className="flex flex-wrap items-center gap-s"><StatusPill label={active ? 'Hypermid writes' : 'Gideon writes'} tone={active ? 'ok' : 'muted'} />
         <StatusPill label={status.lease_state.replaceAll('_', ' ')} tone={status.lease_state === 'held' ? 'ok' : status.lease_state === 'unknown' ? 'warn' : 'muted'} />
-        <span className="text-sm text-on-surface-low">Mode {status.mode.replaceAll('_', ' ')} · authority generation {status.authority_epoch}</span></div>
-      {status.failure && <p role="alert" className="mt-s break-words text-sm text-danger">{status.failure}</p>}
-      {!canPlan && <p className="mt-s text-sm text-on-surface-low">Stage Primary mode and wait for the safe turn boundary before preparing the writer handoff.</p>}
+        <span data-type="caption" className="text-on-surface-low">Mode {status.mode.replaceAll('_', ' ')} · authority generation {status.authority_epoch}</span></div>
+      {status.failure && <p role="alert" data-type="body-s" className="mt-s break-words text-danger">{status.failure}</p>}
+      {!canPlan && <p data-type="body-s" className="mt-s text-on-surface-low">Stage Primary mode and wait for the safe turn boundary before preparing the writer handoff.</p>}
       <div className="mt-m flex flex-wrap justify-end gap-s">
         {status.lease_state === 'unknown' && <Button size="sm" variant="secondary" loading={busy === 'reconcile'} onClick={() => void reconcile()}><RefreshCw size={14} /> Reconcile authority</Button>}
         <Button size="sm" variant={active ? 'danger' : 'secondary'} disabled={!canPlan || status.lease_state === 'unknown'} disabledReason={busy === 'plan' ? 'Preparing the authority review.' : status.lease_state === 'unknown' ? 'Reconcile writer authority before reviewing a handoff.' : !canPlan ? 'Stage Primary mode and wait for the safe turn boundary.' : undefined} loading={busy === 'plan'} onClick={() => void prepare()}>
@@ -79,18 +79,18 @@ export function AuthorityControl({ onStatus, onCommitted }: {
       </div>
     </Surface>
     {plan && <section aria-labelledby="authority-plan-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
-      <h3 id="authority-plan-title" className="text-base text-on-surface">{plan.action === 'activate_primary' ? 'Review Primary writer handoff' : 'Review rollback to Gideon'}</h3>
-      <p className="mt-xs text-sm text-on-surface-low">This plan expires {new Date(plan.expires_at).toLocaleString()}.</p>
-      <ol className="mt-m grid gap-s">{plan.steps.map((step, index) => <li key={step} className="rounded-lg bg-surface-container px-m py-s text-sm text-on-surface">{index + 1}. {humanStep(step)}</li>)}</ol>
-      {plan.blockers.length > 0 && <div role="alert" className="mt-m rounded-lg bg-danger/10 p-m text-sm text-danger"><p>Handoff is blocked:</p><ul className="mt-s list-disc pl-l">{plan.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul></div>}
+      <h3 id="authority-plan-title" data-type="title-m" className="text-on-surface">{plan.action === 'activate_primary' ? 'Review Primary writer handoff' : 'Review rollback to Gideon'}</h3>
+      <p data-type="caption" className="mt-xs text-on-surface-low">This plan expires {new Date(plan.expires_at).toLocaleString()}.</p>
+      <ol className="mt-m grid gap-s">{plan.steps.map((step, index) => <li key={step} data-type="body-s" className="rounded-lg bg-surface-container px-m py-s text-on-surface">{index + 1}. {humanStep(step)}</li>)}</ol>
+      {plan.blockers.length > 0 && <div role="alert" data-type="body-s" className="mt-m rounded-lg bg-danger/10 p-m text-danger"><p>Handoff is blocked:</p><ul className="mt-s list-disc pl-l">{plan.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul></div>}
       <p data-type="caption" className="mt-m break-all font-mono text-on-surface-low">Plan digest {plan.plan_digest}</p>
-      <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={reviewed} onChange={(checked) => setReviewed(checked)} className="size-4 accent-primary" ariaLabel={"I reviewed this exact scope, sequence, and digest."} />I reviewed this exact scope, sequence, and digest.</label>
-      {!decision?.allowed && <p className="mt-s text-sm text-on-surface-low">{decision?.reason}</p>}
+      <label data-type="label-s" className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-on-surface"><Checkbox checked={reviewed} onChange={(checked) => setReviewed(checked)} className="size-4 accent-primary" ariaLabel={"I reviewed this exact scope, sequence, and digest."} />I reviewed this exact scope, sequence, and digest.</label>
+      {!decision?.allowed && <p data-type="body-s" className="mt-s text-on-surface-low">{decision?.reason}</p>}
       <div className="hypermid-action-bar mt-m flex flex-wrap justify-end gap-s"><Button size="sm" variant="secondary" onClick={() => { setPlan(undefined); setReviewed(false) }}>Cancel</Button>
         <Button size="sm" disabled={!decision?.allowed} disabledReason={!decision?.allowed ? decision?.reason : undefined} loading={busy === 'apply'} onClick={() => void apply()}>Apply reviewed handoff</Button></div>
     </section>}
-    {outcome === 'outcome_unknown' && <p role="alert" className="mt-m text-sm text-warn">The handoff may have taken effect. Reconcile writer authority before retrying.</p>}
-    {outcome === 'committed' && <p role="status" className="mt-m text-sm text-success">Writer authority changed and the returned status confirms the result.</p>}
-    {error && <p role="alert" className="mt-m break-words text-sm text-danger">{error}</p>}
+    {outcome === 'outcome_unknown' && <p role="alert" data-type="body-s" className="mt-m text-warn">The handoff may have taken effect. Reconcile writer authority before retrying.</p>}
+    {outcome === 'committed' && <p role="status" data-type="body-s" className="mt-m text-success">Writer authority changed and the returned status confirms the result.</p>}
+    {error && <p role="alert" data-type="body-s" className="mt-m break-words text-danger">{error}</p>}
   </Section>
 }

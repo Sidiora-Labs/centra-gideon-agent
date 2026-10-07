@@ -40,19 +40,19 @@ function bytes(value: number): string {
 
 function LifecycleFields({ draft, onChange }: { draft: LifecycleDraft; onChange: (next: LifecycleDraft) => void }) {
   if (draft.action === 'install' || draft.action === 'update') return <Row label="Target release" hint="The daemon validates platform, compatibility, space, restart, migration, and rollback requirements.">
-    <TextInput value={draft.target_version} onChange={(value) => onChange({ ...draft, target_version: value })} ariaLabel="Target release" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" placeholder="1.2.3" />
+    <TextInput value={draft.target_version} onChange={(value) => onChange({ ...draft, target_version: value })} ariaLabel="Target release" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" placeholder="1.2.3" />
   </Row>
   if (draft.action === 'uninstall') return <Row label="User data" hint="Runtime wiring and user data remain separate. Purge requires a second confirmation after plan review.">
-    <Select value={draft.data_disposition} onChange={(value) => onChange({ ...draft, data_disposition: value as DataDisposition })} ariaLabel="Uninstall data disposition" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "retain", label: "Retain user data" }, { value: "export", label: "Export before uninstall" }, { value: "purge", label: "Permanently purge user data" }]} />
+    <Select value={draft.data_disposition} onChange={(value) => onChange({ ...draft, data_disposition: value as DataDisposition })} ariaLabel="Uninstall data disposition" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[{ value: "retain", label: "Retain user data" }, { value: "export", label: "Export before uninstall" }, { value: "purge", label: "Permanently purge user data" }]} />
   </Row>
   if (draft.action === 'migrate' || draft.action === 'restore') return <Row label="Verified source" hint="The daemon stages and verifies this source before any visible state changes.">
-    <TextInput value={draft.source} onChange={(value) => onChange({ ...draft, source: value })} ariaLabel="Lifecycle source" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" placeholder="/path/to/artifact" />
+    <TextInput value={draft.source} onChange={(value) => onChange({ ...draft, source: value })} ariaLabel="Lifecycle source" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" placeholder="/path/to/artifact" />
   </Row>
   if (draft.action === 'export') return <Row label="Export destination" hint="The verified export excludes credentials, local authentication material, and rebuildable derivatives.">
-    <TextInput value={draft.destination} onChange={(value) => onChange({ ...draft, destination: value })} ariaLabel="Export destination" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" placeholder="/path/to/export" />
+    <TextInput value={draft.destination} onChange={(value) => onChange({ ...draft, destination: value })} ariaLabel="Export destination" className="min-h-11 w-full rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" placeholder="/path/to/export" />
   </Row>
   return <Row label="Rollback source" hint="The daemon selects only previously verified rollback material.">
-    <span className="text-sm text-on-surface-low">No local override. Review the daemon inventory and digest before apply.</span>
+    <span data-type="body-s" className="text-on-surface-low">No local override. Review the daemon inventory and digest before apply.</span>
   </Row>
 }
 
@@ -71,11 +71,11 @@ function PlanReview({ plan, reviewed, destructiveConfirmed, purgeConfirmed, busy
   const inventory = Object.entries(plan.inventory || {})
   const install = lifecycleInstallEvidence(plan)
   return <section aria-labelledby="lifecycle-plan-title" className="hypermid-review mt-m rounded-lg border border-outline-variant bg-surface p-l">
-    <div className="flex flex-wrap items-start justify-between gap-m"><div><h3 id="lifecycle-plan-title" className="text-base text-on-surface">Review lifecycle plan</h3>
-      <p className="mt-xs text-sm text-on-surface-low">Expires {new Date(plan.expires_at).toLocaleString()}</p></div><div className="flex flex-wrap gap-s">
+    <div className="flex flex-wrap items-start justify-between gap-m"><div><h3 id="lifecycle-plan-title" data-type="title-m" className="text-on-surface">Review lifecycle plan</h3>
+      <p data-type="caption" className="mt-xs text-on-surface-low">Expires {new Date(plan.expires_at).toLocaleString()}</p></div><div className="flex flex-wrap gap-s">
       {plan.restart_required && <StatusPill label="restart required" tone="warn" />}{plan.destructive && <StatusPill label="destructive" tone="warn" />}
       {plan.data_disposition && <StatusPill label={`data: ${plan.data_disposition}`} tone={plan.data_disposition === 'purge' ? 'warn' : 'muted'} />}</div></div>
-    <dl className="mt-m grid gap-s text-sm sm:grid-cols-2">
+    <dl data-type="body-s" className="mt-m grid gap-s sm:grid-cols-2">
       <div><dt className="text-on-surface-low">Owner scope</dt><dd className="break-words font-mono text-on-surface">{plan.scope.owner_id}</dd></div>
       <div><dt className="text-on-surface-low">Project scope</dt><dd className="break-words font-mono text-on-surface">{plan.scope.project_id}</dd></div>
       {plan.scope.workspace_id && <div><dt className="text-on-surface-low">Workspace scope</dt><dd className="break-words font-mono text-on-surface">{plan.scope.workspace_id}</dd></div>}
@@ -95,37 +95,37 @@ function PlanReview({ plan, reviewed, destructiveConfirmed, purgeConfirmed, busy
     {plan.rollback_digest && <p data-type="caption" className="mt-xs break-all font-mono text-on-surface-low">Rollback digest {plan.rollback_digest}</p>}
     {plan.authority_digest && <p data-type="caption" className="mt-xs break-all font-mono text-on-surface-low">Authority digest {plan.authority_digest}</p>}
     {plan.blocker_digest && <p data-type="caption" className="mt-xs break-all font-mono text-on-surface-low">Blocker digest {plan.blocker_digest}</p>}
-    {install.expiresMs != null && <Surface tone="container" radius="lg" className="mt-m p-m"><h4 className="text-sm text-on-surface">Local enrollment</h4>
-      <dl className="mt-s grid gap-s text-sm sm:grid-cols-2">
+    {install.expiresMs != null && <Surface tone="container" radius="lg" className="mt-m p-m"><h4 data-type="title-m" className="text-on-surface">Local enrollment</h4>
+      <dl data-type="body-s" className="mt-s grid gap-s sm:grid-cols-2">
         <div><dt className="text-on-surface-low">Operations</dt><dd className="break-words font-mono text-on-surface">{install.operations.join(', ') || 'None'}</dd></div>
         <div><dt className="text-on-surface-low">Resources</dt><dd className="break-words font-mono text-on-surface">{install.resources.join(', ') || 'None'}</dd></div>
         <div><dt className="text-on-surface-low">Expires</dt><dd className="text-on-surface">{install.expiresMs} · {new Date(install.expiresMs).toLocaleString()}</dd></div>
       </dl>
     </Surface>}
-    {inventory.length > 0 && <div className="mt-m"><h4 className="text-sm text-on-surface">Inventory</h4><div className="mt-s grid gap-s sm:grid-cols-2">
-      {inventory.map(([kind, entries]) => <Surface key={kind} tone="container" radius="lg" className="p-m"><p className="text-sm text-on-surface">{kind.replaceAll('_', ' ')}</p>
+    {inventory.length > 0 && <div className="mt-m"><h4 data-type="title-m" className="text-on-surface">Inventory</h4><div className="mt-s grid gap-s sm:grid-cols-2">
+      {inventory.map(([kind, entries]) => <Surface key={kind} tone="container" radius="lg" className="p-m"><p data-type="body-s" className="text-on-surface">{kind.replaceAll('_', ' ')}</p>
         <p data-type="caption" className="mt-xs break-words text-on-surface-low">{entries.join(', ') || 'None'}</p></Surface>)}</div></div>}
     {install.currentEnrollmentDigest && <Surface tone="container" radius="lg" className="mt-m p-m">
-      <h4 className="text-sm text-on-surface">Review runtime permissions</h4>
-      <p className="mt-xs text-sm text-on-surface-low">Applying this plan restarts the local runtime and preserves its identity and saved memory.</p>
-      <p className="mt-s text-sm text-on-surface">New operations: {install.addedOperations.join(', ') || 'None'}</p>
-      <p className="mt-xs text-sm text-on-surface">New resources: {install.addedResources.join(', ') || 'None'}</p>
-      {install.addedOperations.includes('administer') && <p className="mt-s text-sm text-on-surface-low">Memory service administration enables app memory activation and private work lifetimes.</p>}
-      {install.addedResources.includes('memory-embedding') && <p className="mt-xs text-sm text-on-surface-low">Embedding access enables semantic memory lookup and rebuilding its derived index.</p>}
+      <h4 data-type="title-m" className="text-on-surface">Review runtime permissions</h4>
+      <p data-type="body-s" className="mt-xs text-on-surface-low">Applying this plan restarts the local runtime and preserves its identity and saved memory.</p>
+      <p data-type="body-s" className="mt-s text-on-surface">New operations: {install.addedOperations.join(', ') || 'None'}</p>
+      <p data-type="body-s" className="mt-xs text-on-surface">New resources: {install.addedResources.join(', ') || 'None'}</p>
+      {install.addedOperations.includes('administer') && <p data-type="body-s" className="mt-s text-on-surface-low">Memory service administration enables app memory activation and private work lifetimes.</p>}
+      {install.addedResources.includes('memory-embedding') && <p data-type="body-s" className="mt-xs text-on-surface-low">Embedding access enables semantic memory lookup and rebuilding its derived index.</p>}
       <p data-type="caption" className="mt-s break-all font-mono text-on-surface-low">Current enrollment digest {install.currentEnrollmentDigest}</p>
     </Surface>}
-    {plan.exclusions && plan.exclusions.length > 0 && <p className="mt-m text-sm text-on-surface-low">Excluded from artifact: {plan.exclusions.join(', ')}.</p>}
+    {plan.exclusions && plan.exclusions.length > 0 && <p data-type="body-s" className="mt-m text-on-surface-low">Excluded from artifact: {plan.exclusions.join(', ')}.</p>}
     <ol className="mt-m grid gap-s">{plan.steps.map((step, index) => <li key={step.id} className="rounded-lg bg-surface-container p-m">
-      <div className="flex flex-wrap items-center gap-s"><span className="text-xs text-on-surface-low">{index + 1}</span><span className="text-sm text-on-surface">{step.title}</span>
-        <StatusPill label={step.effect.replaceAll('_', ' ')} tone={step.effect === 'read' ? 'muted' : 'warn'} /></div>{step.detail && <p className="mt-xs text-sm text-on-surface-low">{step.detail}</p>}
+      <div className="flex flex-wrap items-center gap-s"><span data-type="caption" className="text-on-surface-low">{index + 1}</span><span data-type="label-s" className="text-on-surface">{step.title}</span>
+        <StatusPill label={step.effect.replaceAll('_', ' ')} tone={step.effect === 'read' ? 'muted' : 'warn'} /></div>{step.detail && <p data-type="body-s" className="mt-xs text-on-surface-low">{step.detail}</p>}
     </li>)}</ol>
-    {plan.blockers.length > 0 && <div role="alert" className="mt-m rounded-lg border border-danger/40 bg-danger/10 p-m"><p className="text-sm text-on-surface">This plan cannot be applied:</p>
-      <ul className="mt-s list-disc pl-l text-sm text-on-surface-low">{plan.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul></div>}
+    {plan.blockers.length > 0 && <div role="alert" className="mt-m rounded-lg border border-danger/40 bg-danger/10 p-m"><p data-type="body-s" className="text-on-surface">This plan cannot be applied:</p>
+      <ul data-type="body-s" className="mt-s list-disc pl-l text-on-surface-low">{plan.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul></div>}
     <p data-type="caption" className="mt-m break-all font-mono text-on-surface-low">Plan digest {plan.plan_digest}</p>
-    <label className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={reviewed} onChange={(checked) => onReviewed(checked)} className="size-4 accent-primary" ariaLabel={"I reviewed this exact scope, inventory, plan, and digest."} />I reviewed this exact scope, inventory, plan, and digest.</label>
-    {plan.destructive && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={destructiveConfirmed} onChange={(checked) => onDestructive(checked)} className="size-4 accent-primary" ariaLabel={"I confirm the listed destructive effects."} />I confirm the listed destructive effects.</label>}
-    {plan.data_disposition === 'purge' && <label className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-sm text-on-surface"><Checkbox checked={purgeConfirmed} onChange={(checked) => onPurge(checked)} className="size-4 accent-primary" ariaLabel={"I separately confirm permanent user-data purge."} />I separately confirm permanent user-data purge.</label>}
-    {!decision.allowed && <p className="mt-s text-sm text-on-surface-low">{decision.reason}</p>}
+    <label data-type="label-s" className="hypermid-touch mt-m flex cursor-pointer items-center gap-s text-on-surface"><Checkbox checked={reviewed} onChange={(checked) => onReviewed(checked)} className="size-4 accent-primary" ariaLabel={"I reviewed this exact scope, inventory, plan, and digest."} />I reviewed this exact scope, inventory, plan, and digest.</label>
+    {plan.destructive && <label data-type="label-s" className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-on-surface"><Checkbox checked={destructiveConfirmed} onChange={(checked) => onDestructive(checked)} className="size-4 accent-primary" ariaLabel={"I confirm the listed destructive effects."} />I confirm the listed destructive effects.</label>}
+    {plan.data_disposition === 'purge' && <label data-type="label-s" className="hypermid-touch mt-s flex cursor-pointer items-center gap-s text-on-surface"><Checkbox checked={purgeConfirmed} onChange={(checked) => onPurge(checked)} className="size-4 accent-primary" ariaLabel={"I separately confirm permanent user-data purge."} />I separately confirm permanent user-data purge.</label>}
+    {!decision.allowed && <p data-type="body-s" className="mt-s text-on-surface-low">{decision.reason}</p>}
     <div className="hypermid-action-bar mt-m flex justify-end"><Button size="sm" disabled={!decision.allowed} disabledReason={!decision.allowed ? decision.reason : undefined} loading={busy} onClick={onApply}><ShieldCheck size={14} /> Apply reviewed plan</Button></div>
   </section>
 }
@@ -143,20 +143,20 @@ function RecoveryReceipt({ receipt, recoveryState, busy, onCheck, onRecover, onR
   const error = receipt.error?.message
   return <div aria-live={receipt.state === 'running' ? undefined : 'polite'}><Surface tone="container" radius="lg" className="mt-m p-l">
     <div className="flex flex-wrap items-start justify-between gap-m"><div><div className="flex flex-wrap items-center gap-s"><FileCheck2 size={16} className="text-primary" />
-      <h3 className="text-sm text-on-surface">Lifecycle receipt</h3><StatusPill label={receipt.state.replaceAll('_', ' ')} tone={tone(receipt.state)} />
+      <h3 data-type="title-m" className="text-on-surface">Lifecycle receipt</h3><StatusPill label={receipt.state.replaceAll('_', ' ')} tone={tone(receipt.state)} />
       {recoveryState && <StatusPill label={`recovery: ${recoveryState.replaceAll('_', ' ')}`} tone={tone(recoveryState)} />}</div>
       <p data-type="caption" className="mt-xs text-on-surface-low">Job {receipt.job_id}{receipt.cursor ? ` · cursor ${receipt.cursor.epoch}:${receipt.cursor.sequence}` : ''}</p></div>
       <div className="flex flex-wrap gap-s"><Button size="sm" variant="secondary" loading={busy === 'status'} onClick={onCheck}><RefreshCw size={14} /> Check status</Button>
         <Button size="sm" variant="secondary" loading={busy === 'recover'} onClick={onRecover}><ArchiveRestore size={14} /> Recover</Button></div></div>
-    <div className="mt-m grid gap-s">{receipt.steps.map((step) => <div key={step.id} className="flex flex-wrap items-center justify-between gap-s rounded-lg bg-surface px-m py-s text-sm">
+    <div className="mt-m grid gap-s">{receipt.steps.map((step) => <div key={step.id} data-type="body-s" className="flex flex-wrap items-center justify-between gap-s rounded-lg bg-surface px-m py-s">
       <span className="text-on-surface">{step.title}</span><StatusPill label={step.state} tone={tone(step.state)} /></div>)}</div>
-    {(receipt.state === 'outcome_unknown' || recoveryState === 'outcome_unknown') && <p role="alert" className="mt-m text-sm text-warn">The operation may have taken effect. Recover authoritative state before retrying or preparing another mutation.</p>}
-    {typeof error === 'string' && <p role="alert" className="mt-m text-sm text-danger">{error}</p>}
+    {(receipt.state === 'outcome_unknown' || recoveryState === 'outcome_unknown') && <p role="alert" data-type="body-s" className="mt-m text-warn">The operation may have taken effect. Recover authoritative state before retrying or preparing another mutation.</p>}
+    {typeof error === 'string' && <p role="alert" data-type="body-s" className="mt-m text-danger">{error}</p>}
     {receipt.artifact_digest && <p data-type="caption" className="mt-m break-all font-mono text-on-surface-low">Artifact digest {receipt.artifact_digest}</p>}
     {receipt.artifact_bytes != null && <p data-type="caption" className="mt-xs text-on-surface-low">Verified artifact size {bytes(receipt.artifact_bytes)}{receipt.artifact_path ? ` · ${receipt.artifact_path}` : ''}</p>}
     {action === 'resume' && <div className="mt-m flex justify-end"><Button size="sm" loading={busy === 'resume'} onClick={onResume}>Resume after reported cursor</Button></div>}
     {action === 'rollback' && <div className="mt-m flex justify-end"><Button size="sm" variant="secondary" onClick={onRollback}><RotateCcw size={14} /> Prepare rollback plan</Button></div>}
-    {action === 'recheck' && <p className="mt-m text-sm text-on-surface-low">Run recovery again after the daemon reconciles its journal.</p>}
+    {action === 'recheck' && <p data-type="body-s" className="mt-m text-on-surface-low">Run recovery again after the daemon reconciles its journal.</p>}
   </Surface></div>
 }
 
@@ -247,19 +247,19 @@ export function Lifecycle() {
   const selected = LIFECYCLE_ACTIONS.find((item) => item.id === draft.action)!
   return <div><PanelHeader title="Lifecycle" hint="Install, update, move, export, restore, or remove Hypermid through daemon-authored plans and recoverable receipts." />
     <Section title="Prepare a lifecycle plan" hint="Inputs select intent only. The authenticated daemon determines scope, inventory, blockers, staging, and exact effects.">
-      <RowGroup><Row label="Action" hint={selected.detail}><Select value={draft.action} onChange={(value) => changeDraft({ ...initialDraft, action: value as HypermidLifecycleAction })} ariaLabel="Lifecycle action" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[...LIFECYCLE_ACTIONS.map(item => ({ value: item.id, label: item.label }))]} /></Row>
+      <RowGroup><Row label="Action" hint={selected.detail}><Select value={draft.action} onChange={(value) => changeDraft({ ...initialDraft, action: value as HypermidLifecycleAction })} ariaLabel="Lifecycle action" className="min-h-11 rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" options={[...LIFECYCLE_ACTIONS.map(item => ({ value: item.id, label: item.label }))]} /></Row>
         <LifecycleFields draft={draft} onChange={changeDraft} /></RowGroup>
       <div className="mt-m flex justify-end"><Button size="sm" variant="secondary" loading={busy === 'plan'} onClick={() => void review()}>Review lifecycle plan</Button></div>
       {plan && <PlanReview plan={plan} reviewed={reviewed} destructiveConfirmed={destructiveConfirmed} purgeConfirmed={purgeConfirmed} busy={busy === 'apply'}
         onReviewed={setReviewed} onDestructive={setDestructiveConfirmed} onPurge={setPurgeConfirmed} onApply={() => void apply()} />}
     </Section>
     <Section title="Receipt recovery" hint="Reconnect using a job ID, then recover daemon journal state before deciding to resume or roll back.">
-      <div className="flex flex-wrap gap-s"><TextInput value={jobId} onChange={(value) => setJobId(value)} ariaLabel="Lifecycle job ID" className="min-h-11 min-w-0 flex-1 rounded-lg border border-outline-variant bg-surface px-m text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" />
+      <div className="flex flex-wrap gap-s"><TextInput value={jobId} onChange={(value) => setJobId(value)} ariaLabel="Lifecycle job ID" className="min-h-11 min-w-0 flex-1 rounded-lg border border-outline-variant bg-surface px-m text-on-surface focus:outline-none focus:ring-2 focus:ring-primary" />
         <Button size="sm" variant="secondary" loading={busy === 'status'} onClick={() => void status()}>Load receipt</Button>
         <Button size="sm" variant="secondary" loading={busy === 'recover'} onClick={() => void recover()}>Recover state</Button></div>
       {receipt && <RecoveryReceipt receipt={receipt} recoveryState={recoveryState} busy={busy} onCheck={() => void status(receipt.job_id)} onRecover={() => void recover()}
         onResume={() => void resume()} onRollback={prepareRollback} />}
-      {error && <p role="alert" className="mt-m flex items-start gap-s text-sm text-danger"><TriangleAlert size={16} className="mt-0.5 shrink-0" />{error}</p>}
+      {error && <p role="alert" data-type="body-s" className="mt-m flex items-start gap-s text-danger"><TriangleAlert size={16} className="mt-0.5 shrink-0" />{error}</p>}
     </Section>
   </div>
 }
