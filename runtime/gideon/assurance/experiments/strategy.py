@@ -32,14 +32,22 @@ def run(spec: dict) -> dict:
     scenario = str(spec.get("scenario") or "")
     candidates = spec.get("candidates")
     trials = spec.get("trials", 1)
-    if not scenario or not isinstance(candidates, list) or not 1 <= len(candidates) <= 8:
+    if (
+        not scenario
+        or not isinstance(candidates, list)
+        or not 1 <= len(candidates) <= 8
+    ):
         raise ValueError("scenario and 1 to 8 candidates are required")
     if not isinstance(trials, int) or isinstance(trials, bool) or not 1 <= trials <= 10:
         raise ValueError("trials must be 1 to 10")
     validated = []
     names: set[str] = set()
     for item in candidates:
-        if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not item["name"].strip():
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("name"), str)
+            or not item["name"].strip()
+        ):
             raise ValueError("every candidate needs a name")
         if item["name"] in names:
             raise ValueError("candidate names must be distinct")
@@ -52,15 +60,38 @@ def run(spec: dict) -> dict:
     source = json.dumps(spec, sort_keys=True, separators=(",", ":"))
     atomic_write(directory / "spec.json", source, mode=0o600)
     rows = []
-    for index, (name, component) in enumerate(validated):
+    for index, (name, component_record) in enumerate(validated):
         matrix_id = f"strategy-{experiment_id}-{index}"
         result = runner.run_matrix(
-            MatrixSpec(subject=scenario, axes={overlay.ARM_AXIS: [overlay.ARM_ON, overlay.ARM_OFF]}, trial_count=trials, component=component),
+            MatrixSpec(
+                subject=scenario,
+                axes={overlay.ARM_AXIS: [overlay.ARM_ON, overlay.ARM_OFF]},
+                trial_count=trials,
+                component=component_record,
+            ),
             matrix_id=matrix_id,
         )
-        rows.append({"name": name, "matrix_id": matrix_id, "cells": [cell.to_dict() for cell in result.cells], "aggregates": result.aggregates})
-    report = {"id": experiment_id, "created_at": datetime.now(timezone.utc).isoformat(), "spec_sha256": hashlib.sha256(source.encode()).hexdigest(), "scenario": scenario, "candidates": rows, "promotion": "human_review_required"}
-    atomic_write(directory / "report.json", json.dumps(report, indent=2, sort_keys=True), mode=0o600)
+        rows.append(
+            {
+                "name": name,
+                "matrix_id": matrix_id,
+                "cells": [cell.to_dict() for cell in result.cells],
+                "aggregates": result.aggregates,
+            }
+        )
+    report = {
+        "id": experiment_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "spec_sha256": hashlib.sha256(source.encode()).hexdigest(),
+        "scenario": scenario,
+        "candidates": rows,
+        "promotion": "human_review_required",
+    }
+    atomic_write(
+        directory / "report.json",
+        json.dumps(report, indent=2, sort_keys=True),
+        mode=0o600,
+    )
     return report
 
 
@@ -69,31 +100,57 @@ def run_local_jobs(spec: dict) -> dict:
     candidates = spec.get("candidates")
     trials = spec.get("trials", 1)
     timeout = spec.get("timeout_seconds", 60)
-    if not objective or not isinstance(candidates, list) or not 1 <= len(candidates) <= 8:
+    if (
+        not objective
+        or not isinstance(candidates, list)
+        or not 1 <= len(candidates) <= 8
+    ):
         raise ValueError("objective and 1 to 8 candidates are required")
     if not isinstance(trials, int) or isinstance(trials, bool) or not 1 <= trials <= 10:
         raise ValueError("trials must be 1 to 10")
-    if not isinstance(timeout, int) or isinstance(timeout, bool) or not 1 <= timeout <= 600:
+    if (
+        not isinstance(timeout, int)
+        or isinstance(timeout, bool)
+        or not 1 <= timeout <= 600
+    ):
         raise ValueError("timeout_seconds must be 1 to 600")
     names: set[str] = set()
     for item in candidates:
-        if not isinstance(item, dict) or not isinstance(item.get("name"), str) or not item["name"].strip():
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("name"), str)
+            or not item["name"].strip()
+        ):
             raise ValueError("every candidate needs a name")
         if item["name"] in names:
             raise ValueError("candidate names must be distinct")
         names.add(item["name"])
         argv = item.get("command")
-        if not isinstance(argv, list) or not 1 <= len(argv) <= 32 or not all(isinstance(arg, str) and arg and len(arg) <= 4000 for arg in argv):
-            raise ValueError("candidate command must be an argv list of 1 to 32 strings")
+        if (
+            not isinstance(argv, list)
+            or not 1 <= len(argv) <= 32
+            or not all(
+                isinstance(arg, str) and arg and len(arg) <= 4000 for arg in argv
+            )
+        ):
+            raise ValueError(
+                "candidate command must be an argv list of 1 to 32 strings"
+            )
     experiment_id = secrets.token_hex(12)
     directory = _root() / experiment_id
     directory.mkdir(mode=0o700)
     source = json.dumps(spec, sort_keys=True, separators=(",", ":"))
     atomic_write(directory / "spec.json", source, mode=0o600)
-    report = {"id": experiment_id, "kind": "local_job", "objective": objective,
-              "created_at": datetime.now(timezone.utc).isoformat(),
-              "spec_sha256": hashlib.sha256(source.encode()).hexdigest(),
-              "attempts": [], "promotion": "human_review_required"}
+    attempts: list[dict] = []
+    report = {
+        "id": experiment_id,
+        "kind": "local_job",
+        "objective": objective,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "spec_sha256": hashlib.sha256(source.encode()).hexdigest(),
+        "attempts": attempts,
+        "promotion": "human_review_required",
+    }
     _write_report(directory, report)
     for index, item in enumerate(candidates):
         for trial in range(trials):
@@ -101,16 +158,34 @@ def run_local_jobs(spec: dict) -> dict:
             work.mkdir(mode=0o700)
             home = work / "home"
             home.mkdir(mode=0o700)
-            env = build_child_env(site="evals-cell", extra={"GIDEON_WORKSPACE": str(work), "GIDEON_HOME": str(home)})
-            attempt = {"candidate": item["name"], "trial": trial, "command": item["command"],
-                       "workspace": str(work), "status": "running", "started_at": datetime.now(timezone.utc).isoformat()}
-            report["attempts"].append(attempt)
+            env = build_child_env(
+                site="evals-cell",
+                extra={"GIDEON_WORKSPACE": str(work), "GIDEON_HOME": str(home)},
+            )
+            attempt = {
+                "candidate": item["name"],
+                "trial": trial,
+                "command": item["command"],
+                "workspace": str(work),
+                "status": "running",
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
+            attempts.append(attempt)
             _write_report(directory, report)
             started = time.monotonic()
             try:
-                with (work / "stdout.log").open("wb") as out, (work / "stderr.log").open("wb") as err:
-                    proc = subprocess.Popen(item["command"], cwd=work, env=env,
-                                            stdout=out, stderr=err, start_new_session=True)
+                with (
+                    (work / "stdout.log").open("wb") as out,
+                    (work / "stderr.log").open("wb") as err,
+                ):
+                    proc = subprocess.Popen(
+                        item["command"],
+                        cwd=work,
+                        env=env,
+                        stdout=out,
+                        stderr=err,
+                        start_new_session=True,
+                    )
                     try:
                         returncode = proc.wait(timeout=timeout)
                         status = "complete" if returncode == 0 else "failed"
@@ -134,23 +209,35 @@ def run_local_jobs(spec: dict) -> dict:
                 try:
                     result = json.loads(line.removeprefix("GIDEON_STRATEGY_RESULT "))
                     candidate_score = float(result["score"])
-                    if not isinstance(result.get("valid"), bool) or not math.isfinite(candidate_score):
+                    if not isinstance(result.get("valid"), bool) or not math.isfinite(
+                        candidate_score
+                    ):
                         raise ValueError("invalid score or validity")
                     score = candidate_score if status == "complete" else None
                     valid = bool(result["valid"]) and status == "complete"
                 except (ValueError, TypeError, KeyError):
                     status, valid, score = "invalid_result", False, None
                 break
-            attempt.update(status=status, returncode=returncode, score=score, valid=valid,
-                           elapsed_seconds=round(time.monotonic() - started, 3),
-                           stdout_tail=stdout[-4000:], stderr_tail=stderr[-4000:],
-                           completed_at=datetime.now(timezone.utc).isoformat())
+            attempt.update(
+                status=status,
+                returncode=returncode,
+                score=score,
+                valid=valid,
+                elapsed_seconds=round(time.monotonic() - started, 3),
+                stdout_tail=stdout[-4000:],
+                stderr_tail=stderr[-4000:],
+                completed_at=datetime.now(timezone.utc).isoformat(),
+            )
             _write_report(directory, report)
     return report
 
 
 def _write_report(directory: Path, report: dict) -> None:
-    atomic_write(directory / "report.json", json.dumps(report, indent=2, sort_keys=True), mode=0o600)
+    atomic_write(
+        directory / "report.json",
+        json.dumps(report, indent=2, sort_keys=True),
+        mode=0o600,
+    )
 
 
 def _tail(path: Path) -> str:
@@ -172,7 +259,16 @@ def main() -> None:
     if args.command == "run":
         print(json.dumps(run(json.loads(args.spec.read_text())), indent=2))
     elif args.command == "list":
-        print(json.dumps([p.name for p in sorted(_root().iterdir()) if (p / "report.json").is_file()], indent=2))
+        print(
+            json.dumps(
+                [
+                    p.name
+                    for p in sorted(_root().iterdir())
+                    if (p / "report.json").is_file()
+                ],
+                indent=2,
+            )
+        )
     else:
         if len(args.id) != 24 or any(c not in "0123456789abcdef" for c in args.id):
             raise ValueError("invalid experiment ID")

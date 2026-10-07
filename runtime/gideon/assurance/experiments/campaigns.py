@@ -71,9 +71,17 @@ def create(spec: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("campaign text exceeds its limit")
     if direction not in ("maximize", "minimize"):
         raise ValueError("direction must be maximize or minimize")
-    if not isinstance(variants, list) or not 1 <= len(variants) <= 20 or not all(isinstance(v, dict) for v in variants):
+    if (
+        not isinstance(variants, list)
+        or not 1 <= len(variants) <= 20
+        or not all(isinstance(v, dict) for v in variants)
+    ):
         raise ValueError("variants must contain 1 to 20 workflow input objects")
-    if not isinstance(parallel, int) or isinstance(parallel, bool) or not 1 <= parallel <= 4:
+    if (
+        not isinstance(parallel, int)
+        or isinstance(parallel, bool)
+        or not 1 <= parallel <= 4
+    ):
         raise ValueError("max_parallel must be between 1 and 4")
     if not isinstance(tokens, int) or isinstance(tokens, bool) or tokens < 0:
         raise ValueError("max_tokens must be a nonnegative integer")
@@ -85,17 +93,34 @@ def create(spec: dict[str, Any]) -> dict[str, Any]:
     with _db() as db:
         db.execute(
             "INSERT INTO campaigns VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (campaign_id, title, objective, workflow, metric, direction, parallel, tokens, "active", now),
+            (
+                campaign_id,
+                title,
+                objective,
+                workflow,
+                metric,
+                direction,
+                parallel,
+                tokens,
+                "active",
+                now,
+            ),
         )
         db.executemany(
             "INSERT INTO attempts (campaign_id, ordinal, inputs, state, updated_at) VALUES (?, ?, ?, 'queued', ?)",
-            [(campaign_id, i, json.dumps(v, sort_keys=True), now) for i, v in enumerate(variants)],
+            [
+                (campaign_id, i, json.dumps(v, sort_keys=True), now)
+                for i, v in enumerate(variants)
+            ],
         )
     return detail(campaign_id) or {}
 
 
 def _reconcile(db: sqlite3.Connection, campaign_id: str) -> None:
-    for row in db.execute("SELECT ordinal, run_id FROM attempts WHERE campaign_id=? AND run_id!=''", (campaign_id,)):
+    for row in db.execute(
+        "SELECT ordinal, run_id FROM attempts WHERE campaign_id=? AND run_id!=''",
+        (campaign_id,),
+    ):
         run = store.get(row["run_id"])
         state = run.status.value if run is not None else "run_missing"
         db.execute(
@@ -105,14 +130,18 @@ def _reconcile(db: sqlite3.Connection, campaign_id: str) -> None:
 
 
 def _view(db: sqlite3.Connection, campaign_id: str) -> dict[str, Any] | None:
-    campaign = db.execute("SELECT * FROM campaigns WHERE id=?", (campaign_id,)).fetchone()
+    campaign = db.execute(
+        "SELECT * FROM campaigns WHERE id=?", (campaign_id,)
+    ).fetchone()
     if campaign is None:
         return None
     _reconcile(db, campaign_id)
     attempts = []
     total_tokens = 0
     tokens_recorded = True
-    for row in db.execute("SELECT * FROM attempts WHERE campaign_id=? ORDER BY ordinal", (campaign_id,)):
+    for row in db.execute(
+        "SELECT * FROM attempts WHERE campaign_id=? ORDER BY ordinal", (campaign_id,)
+    ):
         attempt = dict(row)
         attempt["inputs"] = json.loads(attempt["inputs"])
         attempt["valid"] = None if attempt["valid"] is None else bool(attempt["valid"])
@@ -120,19 +149,34 @@ def _view(db: sqlite3.Connection, campaign_id: str) -> dict[str, Any] | None:
         if run is not None:
             totals = journal.run_totals(run.id)
             attempt["tokens"] = totals.get("tokens")
-            attempt["cost_usd"] = totals.get("cost_usd") if totals.get("priced") else None
+            attempt["cost_usd"] = (
+                totals.get("cost_usd") if totals.get("priced") else None
+            )
             if totals.get("tokens") is None:
                 tokens_recorded = False
             else:
                 total_tokens += int(totals["tokens"])
             attempt["run_error"] = run.error_message
         attempts.append(attempt)
-    valid = [a for a in attempts if a["valid"] is True and a["score"] is not None and a["state"] == "complete"]
+    valid = [
+        a
+        for a in attempts
+        if a["valid"] is True and a["score"] is not None and a["state"] == "complete"
+    ]
     best = None
     if valid:
-        best = min(valid, key=lambda a: a["score"] if campaign["direction"] == "minimize" else -a["score"])
+        best = min(
+            valid,
+            key=lambda a: (
+                a["score"] if campaign["direction"] == "minimize" else -a["score"]
+            ),
+        )
     result = dict(campaign)
-    result.update(attempts=attempts, total_tokens=total_tokens if tokens_recorded else None, best_attempt=best["ordinal"] if best else None)
+    result.update(
+        attempts=attempts,
+        total_tokens=total_tokens if tokens_recorded else None,
+        best_attempt=best["ordinal"] if best else None,
+    )
     return result
 
 
@@ -143,11 +187,18 @@ def detail(campaign_id: str) -> dict[str, Any] | None:
 
 def listing() -> list[dict[str, Any]]:
     with _db() as db:
-        ids = [row[0] for row in db.execute("SELECT id FROM campaigns ORDER BY created_at DESC LIMIT 100")]
+        ids = [
+            row[0]
+            for row in db.execute(
+                "SELECT id FROM campaigns ORDER BY created_at DESC LIMIT 100"
+            )
+        ]
         return [view for campaign_id in ids if (view := _view(db, campaign_id))]
 
 
-async def advance(campaign_id: str, *, supervisor: Any, session_key: str = "") -> dict[str, Any]:
+async def advance(
+    campaign_id: str, *, supervisor: Any, session_key: str = ""
+) -> dict[str, Any]:
     if supervisor is None:
         raise RuntimeError("workflow supervisor is unavailable")
     with _db() as db:
@@ -157,22 +208,44 @@ async def advance(campaign_id: str, *, supervisor: Any, session_key: str = "") -
             raise KeyError(campaign_id)
         if view["status"] != "active":
             return view
-        busy = sum(a["state"] not in ("queued", "complete", "failed", "cancelled", "run_missing", "launch_failed", "needs_input", "escalated") for a in view["attempts"])
+        busy = sum(
+            a["state"]
+            not in (
+                "queued",
+                "complete",
+                "failed",
+                "cancelled",
+                "run_missing",
+                "launch_failed",
+                "needs_input",
+                "escalated",
+            )
+            for a in view["attempts"]
+        )
         remaining = max(0, view["max_parallel"] - busy)
-        if view["max_tokens"] and (view["total_tokens"] is None or view["total_tokens"] >= view["max_tokens"]):
+        if view["max_tokens"] and (
+            view["total_tokens"] is None or view["total_tokens"] >= view["max_tokens"]
+        ):
             remaining = 0
-        claims = []
+        claims: list[dict] = []
         for a in (a for a in view["attempts"] if a["state"] == "queued"):
             if len(claims) >= remaining:
                 break
-            changed = db.execute("UPDATE attempts SET state='launching', updated_at=? WHERE campaign_id=? AND ordinal=? AND state='queued'", (_now(), campaign_id, a["ordinal"]))
+            changed = db.execute(
+                "UPDATE attempts SET state='launching', updated_at=? WHERE campaign_id=? AND ordinal=? AND state='queued'",
+                (_now(), campaign_id, a["ordinal"]),
+            )
             if changed.rowcount:
                 claims.append(a)
     for attempt in claims:
         try:
             result = await service.start_run(
-                name=view["workflow_name"], inputs=attempt["inputs"], mode="background",
-                supervisor=supervisor, origin_kind=OriginKind.API, session_key=session_key,
+                name=view["workflow_name"],
+                inputs=attempt["inputs"],
+                mode="background",
+                supervisor=supervisor,
+                origin_kind=OriginKind.API,
+                session_key=session_key,
             )
             run_id = str(result.get("run_id") or "")
             state = "running" if result.get("ok") else "launch_failed"
@@ -181,11 +254,16 @@ async def advance(campaign_id: str, *, supervisor: Any, session_key: str = "") -
         except Exception:
             run_id, state = "", "launch_failed"
         with _db() as db:
-            db.execute("UPDATE attempts SET state=?, run_id=?, updated_at=? WHERE campaign_id=? AND ordinal=? AND state='launching'", (state, run_id, _now(), campaign_id, attempt["ordinal"]))
+            db.execute(
+                "UPDATE attempts SET state=?, run_id=?, updated_at=? WHERE campaign_id=? AND ordinal=? AND state='launching'",
+                (state, run_id, _now(), campaign_id, attempt["ordinal"]),
+            )
     return detail(campaign_id) or {}
 
 
-def observe(campaign_id: str, ordinal: int, *, score: float, valid: bool, observation: str) -> dict[str, Any]:
+def observe(
+    campaign_id: str, ordinal: int, *, score: float, valid: bool, observation: str
+) -> dict[str, Any]:
     if not math.isfinite(score):
         raise ValueError("score must be finite")
     if not observation.strip() or len(observation) > 4000:
@@ -196,14 +274,21 @@ def observe(campaign_id: str, ordinal: int, *, score: float, valid: bool, observ
             raise KeyError(campaign_id)
         target = next((a for a in view["attempts"] if a["ordinal"] == ordinal), None)
         if target is None or target["state"] != "complete":
-            raise ValueError("only completed workflow attempts can receive an observation")
-        db.execute("UPDATE attempts SET score=?, valid=?, observation=?, updated_at=? WHERE campaign_id=? AND ordinal=?", (score, int(valid), observation.strip(), _now(), campaign_id, ordinal))
+            raise ValueError(
+                "only completed workflow attempts can receive an observation"
+            )
+        db.execute(
+            "UPDATE attempts SET score=?, valid=?, observation=?, updated_at=? WHERE campaign_id=? AND ordinal=?",
+            (score, int(valid), observation.strip(), _now(), campaign_id, ordinal),
+        )
     return detail(campaign_id) or {}
 
 
 def stop(campaign_id: str) -> dict[str, Any]:
     with _db() as db:
-        if not db.execute("SELECT 1 FROM campaigns WHERE id=?", (campaign_id,)).fetchone():
+        if not db.execute(
+            "SELECT 1 FROM campaigns WHERE id=?", (campaign_id,)
+        ).fetchone():
             raise KeyError(campaign_id)
         db.execute("UPDATE campaigns SET status='stopped' WHERE id=?", (campaign_id,))
     return detail(campaign_id) or {}

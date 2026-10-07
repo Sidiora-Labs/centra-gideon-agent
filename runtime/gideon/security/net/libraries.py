@@ -54,7 +54,7 @@ def guard_the_hub(hub: Any) -> None:
     http = _hub_http()
     constants = sys.modules.get(f"{HUB}.constants") or getattr(hub, "constants", None)
     if constants is not None:
-        constants.HF_HUB_DISABLE_XET = True
+        setattr(constants, "HF_HUB_DISABLE_XET", True)
     set_client = getattr(hub, "set_client_factory", None)
     set_async_client = getattr(hub, "set_async_client_factory", None)
     default_client = getattr(http, "default_client_factory", None)
@@ -67,7 +67,7 @@ def guard_the_hub(hub: Any) -> None:
     ):
         os.environ["HF_HUB_OFFLINE"] = "1"
         if constants is not None:
-            constants.HF_HUB_OFFLINE = True
+            setattr(constants, "HF_HUB_OFFLINE", True)
         logger.error(
             "huggingface_hub %s takes no HTTP client from Gideon, so it cannot be held to "
             "the network settings: its downloads are switched off",
@@ -95,7 +95,9 @@ class _GuardOnImport(importlib.abc.MetaPathFinder):
             return None
         loader = spec.loader
         exec_module = getattr(loader, "exec_module", None)
-        if exec_module is None:  # pragma: no cover - every loader the library ships with has one
+        if (
+            exec_module is None
+        ):  # pragma: no cover - every loader the library ships with has one
             return spec
 
         def exec_and_guard(module: Any) -> None:

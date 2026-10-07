@@ -13,7 +13,9 @@ from gideon.security.owner_grants import GrantBook, seal
 
 BOOK = GrantBook("mcp_servers")
 WAITING = "waiting"
-WAITING_REASON = "This MCP server is waiting for the owner to allow its current definition."
+WAITING_REASON = (
+    "This MCP server is waiting for the owner to allow its current definition."
+)
 _CONFIRM = "Allow this exact MCP server definition to connect or run? Review its transport and fields before confirming."
 _REFERENCE = re.compile(r"^\{\{secret:([A-Za-z0-9_]+)\}\}$")
 _SECRET_KEY_RE = re.compile(
@@ -64,13 +66,17 @@ def _secret_reference(name: str, value: Any, *, required: bool) -> str | None:
     match = _REFERENCE.fullmatch(value)
     if match is None:
         if required:
-            raise McpGrantDefinitionError("MCP credentials must be stored as owner references")
+            raise McpGrantDefinitionError(
+                "MCP credentials must be stored as owner references"
+            )
         return None
     from gideon.extensions.providers.mcp_instances import mcp_owner
 
     reference = match.group(1)
     if not mcp_owner(name).owns(reference):
-        raise McpGrantDefinitionError("MCP credential reference belongs to another server")
+        raise McpGrantDefinitionError(
+            "MCP credential reference belongs to another server"
+        )
     return value
 
 
@@ -87,7 +93,9 @@ def _credential_fields(server: Any, field: str, name: str) -> dict[str, Any]:
             normalized[raw_key] = {"reference": reference or ""}
         else:
             if not isinstance(value, str) or "\0" in value:
-                raise McpGrantDefinitionError(f"MCP {field} values must be NUL-free strings")
+                raise McpGrantDefinitionError(
+                    f"MCP {field} values must be NUL-free strings"
+                )
             normalized[raw_key] = {"value": value}
     return normalized
 
@@ -98,12 +106,19 @@ def definition(server: Any) -> dict[str, Any]:
     source = _value(server, "source", "")
     command = _value(server, "command", "") or ""
     url = _value(server, "url", "") or ""
-    if not isinstance(name, str) or not name or not isinstance(source, str) or not source:
+    if (
+        not isinstance(name, str)
+        or not name
+        or not isinstance(source, str)
+        or not source
+    ):
         raise McpGrantDefinitionError("MCP server name and source are required")
     if not isinstance(command, str) or not isinstance(url, str):
         raise McpGrantDefinitionError("MCP command and URL must be strings")
     args = _value(server, "args", []) or []
-    if not isinstance(args, (list, tuple)) or any(not isinstance(arg, str) for arg in args):
+    if not isinstance(args, (list, tuple)) or any(
+        not isinstance(arg, str) for arg in args
+    ):
         raise McpGrantDefinitionError("MCP arguments must be a string list")
     cwd = _value(server, "cwd", "") or ""
     if not isinstance(cwd, str) or "\0" in cwd:
@@ -120,7 +135,11 @@ def definition(server: Any) -> dict[str, Any]:
             oauth_fields[key] = {"reference": reference or ""}
         else:
             oauth_fields[key] = {"value": value}
-    from gideon.integrations.mcp_argument_secrets import sealed_arguments, sealed_address, validate_references
+    from gideon.integrations.mcp_argument_secrets import (
+        sealed_address,
+        sealed_arguments,
+        validate_references,
+    )
 
     validate_references(name, {"args": list(args), "url": url})
     return {
@@ -140,7 +159,9 @@ def definition(server: Any) -> dict[str, Any]:
 
 
 def content(server: Any) -> str:
-    return json.dumps(definition(server), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        definition(server), ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
 
 
 def key(server: Any) -> str:
@@ -161,13 +182,21 @@ def carry_over(before: Any, after: Any) -> bool:
         earlier, later = definition(before), definition(after)
         if earlier != later:
             return False
-        legacy = {**earlier, "args": list(_value(before, "args", []) or []),
-                  "url": _value(before, "url", "") or ""}
-        written = json.dumps(legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        legacy = {
+            **earlier,
+            "args": list(_value(before, "args", []) or []),
+            "url": _value(before, "url", "") or "",
+        }
+        written = json.dumps(
+            legacy, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
         with BOOK._locked():
             grants = BOOK._read(strict=True)
             entry = grants.get(key(before))
-            if not entry or entry.get("seal") not in {seal(written), seal(content(before))}:
+            if not entry or entry.get("seal") not in {
+                seal(written),
+                seal(content(before)),
+            }:
                 return False
             replacement = {**entry, "seal": seal(content(after))}
             if entry != replacement:
@@ -180,7 +209,10 @@ def carry_over(before: Any, after: Any) -> bool:
 
 def exempt(server: Any) -> bool:
     """Only the product's own injected core server is exempt from a customer grant."""
-    if _value(server, "name", "") != "gideon-core" or _value(server, "source", "") != "agent":
+    if (
+        _value(server, "name", "") != "gideon-core"
+        or _value(server, "source", "") != "agent"
+    ):
         return False
     from gideon.engine.agent import _MANAGED_MCP_SERVERS
 
@@ -234,7 +266,11 @@ def allowed(server: Any) -> bool:
 
 
 def give(server: Any, principal: Principal) -> None:
-    if not isinstance(principal, Principal) or principal.kind != OWNER or not principal.name:
+    if (
+        not isinstance(principal, Principal)
+        or principal.kind != OWNER
+        or not principal.name
+    ):
         raise PermissionError("MCP server grants require an authenticated owner")
     if exempt(server):
         raise PermissionError("the managed Gideon MCP server does not take user grants")
@@ -271,7 +307,9 @@ def display(server: Any) -> dict[str, Any]:
 
     shown["command"], _ = redact_credentials(shown["command"])
     shown["command"], _ = redact_exfiltration_urls(shown["command"])
-    shown["args"] = [redact_exfiltration_urls(redact_credentials(arg)[0])[0] for arg in shown["args"]]
+    shown["args"] = [
+        redact_exfiltration_urls(redact_credentials(arg)[0])[0] for arg in shown["args"]
+    ]
     shown["url"], _ = redact_credentials(shown["url"])
     shown["url"], _ = redact_exfiltration_urls(shown["url"])
     from gideon.integrations.mcp_secret_refs import safe_display_args, safe_display_url
@@ -291,8 +329,8 @@ def question(server: Any, *, saving: bool = False) -> str:
         fields = f" with credential fields {', '.join(names)}" if names else ""
         pooling = " with a shared cross-session connection" if info["poolable"] else ""
         return f"{action} {info['name']} lets Gideon run {command}{location}{fields}{pooling} as you. Review this exact definition before confirming."
-    names = ", ".join(info["header_credentials"])
-    fields = f" with headers {names}" if names else ""
+    header_names = ", ".join(info["header_credentials"])
+    fields = f" with headers {header_names}" if header_names else ""
     pooling = " with a shared cross-session connection" if info["poolable"] else ""
     return f"{action} {info['name']} lets Gideon connect to {info['url']}{fields}{pooling}. Review this exact definition before confirming."
 

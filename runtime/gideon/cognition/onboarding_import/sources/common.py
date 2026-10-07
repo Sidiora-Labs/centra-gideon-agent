@@ -33,7 +33,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from gideon.cognition.onboarding_import.floors import read_text_safely, refuses, safe_text
+from gideon.cognition.onboarding_import.floors import (
+    read_text_safely,
+    refuses,
+    safe_text,
+)
 from gideon.cognition.onboarding_import.model import (
     ImportCategory,
     ImportItem,
@@ -68,7 +72,11 @@ class SkillScan:
         return self.verdict == "warning"
 
     def to_dict(self) -> dict[str, Any]:
-        return {"verdict": self.verdict, "findings": list(self.findings), "consent": self.consent}
+        return {
+            "verdict": self.verdict,
+            "findings": list(self.findings),
+            "consent": self.consent,
+        }
 
 
 @contextmanager
@@ -80,12 +88,15 @@ def one_walk(home: Path | None = None):
     finally:
         _SCAN_HOME.reset(token)
 
+
 # ── paths another machine recorded ────────────────────────────────────────────
 
 #: ``/Users/<name>`` or ``/home/<name>``: the part of a recorded path that names the machine's
 #: home directory rather than anything inside it.
 _HOME_PREFIX_RE = re.compile(r"^(?:/Users|/home)/[^/]+")
-_SCAN_HOME: ContextVar[Path | None] = ContextVar("onboarding_import_scan_home", default=None)
+_SCAN_HOME: ContextVar[Path | None] = ContextVar(
+    "onboarding_import_scan_home", default=None
+)
 
 
 def on_this_machine(recorded: str) -> Path | None:
@@ -200,9 +211,13 @@ def _skill_files(skill_dir: Path) -> list[dict[str, Any]]:
         if not path.is_file() or refuses(path):
             continue
         try:
-            files.append(read_skill_file_entry(path, path.relative_to(skill_dir).as_posix()))
+            files.append(
+                read_skill_file_entry(path, path.relative_to(skill_dir).as_posix())
+            )
         except OSError:
-            logger.warning("skipping unreadable file in imported skill %s", skill_dir.name)
+            logger.warning(
+                "skipping unreadable file in imported skill %s", skill_dir.name
+            )
     return files
 
 
@@ -226,7 +241,9 @@ class ImportedSkillMarketplace(SkillsMarketplace):
     def trust_tier(self) -> str:
         return "community"
 
-    def search(self, query: str, limit: int = 20) -> list[SkillEntry]:  # pragma: no cover
+    def search(
+        self, query: str, limit: int = 20
+    ) -> list[SkillEntry]:  # pragma: no cover
         return []
 
     def fetch(self, skill_id: str) -> SkillDetail:
@@ -260,7 +277,11 @@ def _skill_scan(skill_dir: Path, name: str) -> SkillScan | None:
             "severity": finding.severity.value,
             "path": finding.path,
             "gloss": rule_gloss(finding.rule),
-            "line": re.search(r"\bL(\d+):", finding.evidence).group(1) if re.search(r"\bL(\d+):", finding.evidence) else "",
+            "line": (
+                match.group(1)
+                if (match := re.search(r"\bL(\d+):", finding.evidence)) is not None
+                else ""
+            ),
             # A snippet of the skill's own file: through the detector like any text shown.
             "evidence": safe_text(finding.evidence)[0],
         }
@@ -296,13 +317,19 @@ def scan_skills(source: str, roots: list[tuple[Path, str]], result: ScanResult) 
             continue
         for skill_dir in sorted(p for p in root.iterdir() if p.is_dir()):
             name = skill_dir.name
-            if name.startswith(".") or name in seen or not (skill_dir / "SKILL.md").is_file():
+            if (
+                name.startswith(".")
+                or name in seen
+                or not (skill_dir / "SKILL.md").is_file()
+            ):
                 continue
             seen.add(name)
             # Count (and later exclude) any credential file sitting inside the skill. The
             # writer's fetch applies the same predicate, so a counted file is also an
             # uninstalled file — the count and the behaviour cannot drift.
-            withheld = sum(1 for f in skill_dir.rglob("*") if f.is_file() and refuses(f))
+            withheld = sum(
+                1 for f in skill_dir.rglob("*") if f.is_file() and refuses(f)
+            )
             result.secrets_skipped += withheld
             scan = _skill_scan(skill_dir, name)
             result.items.append(
@@ -314,7 +341,8 @@ def scan_skills(source: str, roots: list[tuple[Path, str]], result: ScanResult) 
                     path=str(skill_dir),
                     origin=origin,
                     note=_warnings_note(scan),
-                    preselect=scan is not None and scan.verdict not in {"warning", "dangerous"},
+                    preselect=scan is not None
+                    and scan.verdict not in {"warning", "dangerous"},
                     secrets_skipped=withheld,
                     scan=scan,
                 )
@@ -337,8 +365,11 @@ def prompt_history(path: Path) -> dict[str, Any] | None:
     count = count_lines(path)
     if not count:
         return None
-    return {"what": "Prompt history", "count": count,
-            "why": "Gideon keeps no separate list of past prompts. Prompts in conversations come over with them."}
+    return {
+        "what": "Prompt history",
+        "count": count,
+        "why": "Gideon keeps no separate list of past prompts. Prompts in conversations come over with them.",
+    }
 
 
 # ── commands a tool refuses, and the rest of its settings ─────────────────────
@@ -377,7 +408,9 @@ def denied_command_item(
     A command that itself holds a credential is left out and counted: its pattern would carry
     the credential into ``config.json``.
     """
-    title, redacted = safe_text(" ".join("|".join(alternatives) for alternatives in pattern))
+    title, redacted = safe_text(
+        " ".join("|".join(alternatives) for alternatives in pattern)
+    )
     if redacted:
         result.secrets_skipped += 1
         return
@@ -611,7 +644,9 @@ class Readings:
         self._lock = threading.Lock()
         self._kept: dict[str, tuple[tuple, Reading]] = {}
 
-    def recall(self, path: Path, signature: tuple, *, whole: bool) -> tuple[bool, Reading]:
+    def recall(
+        self, path: Path, signature: tuple, *, whole: bool
+    ) -> tuple[bool, Reading]:
         """``(found, reading)``: the reading kept for ``path`` at ``signature``, when there is one
         that answers the question (``whole`` asks for one read in full)."""
         with self._lock:
@@ -671,7 +706,9 @@ class McpServer:
     @property
     def id(self) -> str:
         """A stable id for this server in this scope — what a pick names instead of a path."""
-        raw = "\0".join((self.source, self.scope, self.project, self.name)).encode("utf-8")
+        raw = "\0".join((self.source, self.scope, self.project, self.name)).encode(
+            "utf-8"
+        )
         return hashlib.sha256(raw).hexdigest()[:16]
 
 

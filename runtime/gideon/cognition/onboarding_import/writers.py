@@ -35,14 +35,12 @@ Destinations
 
 from __future__ import annotations
 
-from gideon.integrations.mcp_argument_secrets import credential_values
-
 import json
 import logging
 import re
 import sys
-from dataclasses import replace
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -58,9 +56,9 @@ from gideon.cognition.onboarding_import.floors import refuses
 from gideon.cognition.onboarding_import.model import (
     ImportCategory,
     ImportItem,
+    ImportReport,
     ItemState,
     Plan,
-    ImportReport,
     WriteOutcome,
     WriteResult,
     withheld_notes,
@@ -73,6 +71,7 @@ from gideon.extensions.skills.marketplace import (
     SkillsMarketplace,
     read_skill_file_entry,
 )
+from gideon.integrations.mcp_argument_secrets import credential_values
 
 
 def config_dir() -> Path:
@@ -182,7 +181,9 @@ def _write_mcp_server(item: ImportItem) -> WriteResult:
     from gideon.extensions.providers.mcp_instances import store_server_credentials
 
     server_name = item.name or item.key
-    safe_item = replace(item, payload=store_server_credentials(server_name, item.payload))
+    safe_item = replace(
+        item, payload=store_server_credentials(server_name, item.payload)
+    )
     result = DocumentCommit.server(sys.modules[__name__], safe_item)
     try:
         config = json.loads(mcp_config_path().read_text(encoding="utf-8"))
@@ -271,8 +272,10 @@ def _write_agent(item: ImportItem) -> WriteResult:
 
     name = _slug(item.name or item.title or item.key).lower()
     destination = "config.json#agents." + name
-    value = {"description": str(item.payload.get("description", "")),
-             "system_prompt": item.text}
+    value = {
+        "description": str(item.payload.get("description", "")),
+        "system_prompt": item.text,
+    }
 
     def add(document: dict[str, Any]) -> None:
         agents = document.setdefault("agents", {})
@@ -283,30 +286,51 @@ def _write_agent(item: ImportItem) -> WriteResult:
     try:
         mutate_config(add)
     except ValueError:
-        return _result(item, WriteOutcome.CONFLICT, destination,
-                       "an agent profile with this name is already configured")
+        return _result(
+            item,
+            WriteOutcome.CONFLICT,
+            destination,
+            "an agent profile with this name is already configured",
+        )
     return _result(item, WriteOutcome.IMPORTED, destination)
 
 
 def _write_prompt(item: ImportItem) -> WriteResult:
     from gideon.integrations.prompt_providers.base import PromptTemplate, PromptVariable
-    from gideon.integrations.prompt_providers.native_provider import NativePromptProvider
+    from gideon.integrations.prompt_providers.native_provider import (
+        NativePromptProvider,
+    )
 
     name = _slug(item.name or item.key)
     destination = f"prompts/{name}.yaml"
     provider = NativePromptProvider()
     template = PromptTemplate(
-        name=name, title=item.title or name, description=str(item.payload.get("description", "")),
-        content=item.text, variables=[PromptVariable.from_dict(row)
-                                     for row in item.payload.get("variables", [])
-                                     if isinstance(row, dict)],
+        name=name,
+        title=item.title or name,
+        description=str(item.payload.get("description", "")),
+        content=item.text,
+        variables=[
+            PromptVariable.from_dict(row)
+            for row in item.payload.get("variables", [])
+            if isinstance(row, dict)
+        ],
         source="user",
     )
     existing = provider.get_prompt(name)
     if existing is not None:
-        same = existing.to_dict() | {"updated_at": 0.0} == template.to_dict() | {"updated_at": 0.0}
-        return _result(item, WriteOutcome.EXISTING if same else WriteOutcome.CONFLICT,
-                       destination, "already imported" if same else "a prompt of this name is already configured")
+        same = existing.to_dict() | {"updated_at": 0.0} == template.to_dict() | {
+            "updated_at": 0.0
+        }
+        return _result(
+            item,
+            WriteOutcome.EXISTING if same else WriteOutcome.CONFLICT,
+            destination,
+            (
+                "already imported"
+                if same
+                else "a prompt of this name is already configured"
+            ),
+        )
     provider.create_prompt(template)
     return _result(item, WriteOutcome.IMPORTED, destination)
 
@@ -330,10 +354,18 @@ def _write_denied_command(item: ImportItem) -> WriteResult:
     try:
         changed = mutate_config(add)
     except ValueError:
-        return _result(item, WriteOutcome.CONFLICT, destination,
-                       "denied-command configuration changed after preview")
-    return _result(item, WriteOutcome.IMPORTED if changed else WriteOutcome.EXISTING,
-                   destination, "added as an additional restrictive rule" if changed else "already denied")
+        return _result(
+            item,
+            WriteOutcome.CONFLICT,
+            destination,
+            "denied-command configuration changed after preview",
+        )
+    return _result(
+        item,
+        WriteOutcome.IMPORTED if changed else WriteOutcome.EXISTING,
+        destination,
+        "added as an additional restrictive rule" if changed else "already denied",
+    )
 
 
 _WRITERS: dict[ImportCategory, Callable[[ImportItem], WriteResult]] = {
@@ -352,7 +384,9 @@ _WRITERS: dict[ImportCategory, Callable[[ImportItem], WriteResult]] = {
 def write_item(item: ImportItem) -> WriteResult:
     plan = plan_item(item)
     if plan.state is not ItemState.NEW:
-        return _result(item, WriteOutcome(plan.state.value), plan.destination, plan.detail)
+        return _result(
+            item, WriteOutcome(plan.state.value), plan.destination, plan.detail
+        )
     return ImportBatch.dispatch(sys.modules[__name__], item)
 
 
@@ -377,56 +411,122 @@ def _file_plan(path: Path, content: str) -> Plan:
         same = path.is_file() and path.read_text(encoding="utf-8") == content
     except OSError:
         same = False
-    return Plan(ItemState.EXISTING if same else ItemState.CONFLICT, destination,
-                "already imported, unchanged" if same else "different content is already here; the existing item is kept")
+    return Plan(
+        ItemState.EXISTING if same else ItemState.CONFLICT,
+        destination,
+        (
+            "already imported, unchanged"
+            if same
+            else "different content is already here; the existing item is kept"
+        ),
+    )
 
 
 def plan_item(item: ImportItem) -> Plan:
     if item.category in (ImportCategory.INSTRUCTIONS, ImportCategory.MEMORIES):
-        return _file_plan(_memory_doc_path(item), item.text + ("" if item.text.endswith("\n") else "\n"))
+        return _file_plan(
+            _memory_doc_path(item),
+            item.text + ("" if item.text.endswith("\n") else "\n"),
+        )
     if item.category is ImportCategory.SETTINGS:
-        content = json.dumps({"source": item.source, "key": item.key, "settings": item.payload}, indent=2, sort_keys=True) + "\n"
+        content = (
+            json.dumps(
+                {"source": item.source, "key": item.key, "settings": item.payload},
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        )
         return _file_plan(staged_settings_path(item.source, item.key), content)
     if item.category is ImportCategory.MCP_SERVERS:
         server_name = item.name or item.key
         destination = f"{_rel_to_home(mcp_config_path())}#mcpServers.{server_name}"
         try:
-            data = json.loads(mcp_config_path().read_text(encoding="utf-8")) if mcp_config_path().exists() else {}
+            data = (
+                json.loads(mcp_config_path().read_text(encoding="utf-8"))
+                if mcp_config_path().exists()
+                else {}
+            )
             if not isinstance(data, dict):
                 raise ValueError("invalid MCP configuration")
         except (OSError, ValueError):
-            return Plan(ItemState.CONFLICT, destination, "the existing mcp.json could not be parsed; it is kept")
+            return Plan(
+                ItemState.CONFLICT,
+                destination,
+                "the existing mcp.json could not be parsed; it is kept",
+            )
         servers = data.get("mcpServers")
         existing = servers.get(server_name) if isinstance(servers, dict) else None
         if existing is None:
             return Plan(ItemState.NEW, destination)
         try:
             from gideon.extensions.providers import mcp_instances
+
             resolver = getattr(mcp_instances, "resolve_server_credentials", None)
-            same = (resolver(server_name, existing) == resolver(server_name, item.payload)) if resolver else existing == item.payload
+            same = (
+                (resolver(server_name, existing) == resolver(server_name, item.payload))
+                if resolver
+                else existing == item.payload
+            )
         except (ValueError, PermissionError):
             same = False
-        return Plan(ItemState.EXISTING if same else ItemState.CONFLICT, destination,
-                    "already configured identically" if same else "an MCP server of this name is configured differently; it is kept")
+        return Plan(
+            ItemState.EXISTING if same else ItemState.CONFLICT,
+            destination,
+            (
+                "already configured identically"
+                if same
+                else "an MCP server of this name is configured differently; it is kept"
+            ),
+        )
     if item.category is ImportCategory.SKILLS:
         target = imported_skills_dir(item.source) / item.key
         destination = _rel_to_home(target)
         source = Path(item.path) if item.path else None
         if source is None or not source.is_dir() or refuses(source):
-            return Plan(ItemState.REJECTED, destination, "source skill directory is missing or sensitive")
+            return Plan(
+                ItemState.REJECTED,
+                destination,
+                "source skill directory is missing or sensitive",
+            )
         if target.exists():
             ours = _ours(item.fingerprint)
-            return Plan(ItemState.EXISTING if ours else ItemState.CONFLICT, destination,
-                        "already imported" if ours else "a skill of this name is already here; it is kept")
+            return Plan(
+                ItemState.EXISTING if ours else ItemState.CONFLICT,
+                destination,
+                (
+                    "already imported"
+                    if ours
+                    else "a skill of this name is already here; it is kept"
+                ),
+            )
         from gideon.extensions.skills.marketplace import scan_before_install
+
         try:
-            report, _consent = scan_before_install(_ImportedSkillsMarketplace(source), item.key)
+            report, _consent = scan_before_install(
+                _ImportedSkillsMarketplace(source), item.key
+            )
         except (ValueError, OSError):
-            return Plan(ItemState.REJECTED, destination, "the skill could not be scanned; preview it again")
+            return Plan(
+                ItemState.REJECTED,
+                destination,
+                "the skill could not be scanned; preview it again",
+            )
         if report.verdict.value == "dangerous":
-            rules = ", ".join(sorted({finding.rule for finding in report.findings
-                                      if finding.severity.value == "dangerous"}))
-            return Plan(ItemState.REJECTED, destination, f"the skill supply-chain scan refuses it as dangerous: {rules}")
+            rules = ", ".join(
+                sorted(
+                    {
+                        finding.rule
+                        for finding in report.findings
+                        if finding.severity.value == "dangerous"
+                    }
+                )
+            )
+            return Plan(
+                ItemState.REJECTED,
+                destination,
+                f"the skill supply-chain scan refuses it as dangerous: {rules}",
+            )
         return Plan(ItemState.NEW, destination)
     if item.category is ImportCategory.AGENTS:
         from gideon.core.config.loader import AppConfig
@@ -436,56 +536,104 @@ def plan_item(item: ImportItem) -> Plan:
         destination = f"config.json#agents.{name}"
         if existing is None:
             return Plan(ItemState.NEW, destination)
-        same = (getattr(existing, "description", "") == item.payload.get("description", "")
-                and getattr(existing, "system_prompt", "") == item.text)
-        return Plan(ItemState.EXISTING if same else ItemState.CONFLICT, destination,
-                    "already configured" if same else "an agent profile of this name is already configured; it is kept")
+        same = (
+            getattr(existing, "description", "") == item.payload.get("description", "")
+            and getattr(existing, "system_prompt", "") == item.text
+        )
+        return Plan(
+            ItemState.EXISTING if same else ItemState.CONFLICT,
+            destination,
+            (
+                "already configured"
+                if same
+                else "an agent profile of this name is already configured; it is kept"
+            ),
+        )
     if item.category is ImportCategory.PROMPTS:
-        from gideon.integrations.prompt_providers.base import PromptTemplate, PromptVariable
-        from gideon.integrations.prompt_providers.native_provider import NativePromptProvider
+        from gideon.integrations.prompt_providers.base import (
+            PromptTemplate,
+            PromptVariable,
+        )
+        from gideon.integrations.prompt_providers.native_provider import (
+            NativePromptProvider,
+        )
 
         name = _slug(item.name or item.key)
         destination = f"prompts/{name}.yaml"
         expected = PromptTemplate(
-            name=name, title=item.title or name,
-            description=str(item.payload.get("description", "")), content=item.text,
-            variables=[PromptVariable.from_dict(row) for row in item.payload.get("variables", [])
-                       if isinstance(row, dict)], source="user",
+            name=name,
+            title=item.title or name,
+            description=str(item.payload.get("description", "")),
+            content=item.text,
+            variables=[
+                PromptVariable.from_dict(row)
+                for row in item.payload.get("variables", [])
+                if isinstance(row, dict)
+            ],
+            source="user",
         )
         existing = NativePromptProvider().get_prompt(name)
         if existing is None:
             return Plan(ItemState.NEW, destination)
-        same = (existing.title == expected.title and existing.description == expected.description
-                and existing.content == expected.content
-                and [v.to_dict() for v in existing.variables] == [v.to_dict() for v in expected.variables])
-        return Plan(ItemState.EXISTING if same else ItemState.CONFLICT, destination,
-                    "already imported" if same else "a prompt of this name is already configured; it is kept")
+        same = (
+            existing.title == expected.title
+            and existing.description == expected.description
+            and existing.content == expected.content
+            and [v.to_dict() for v in existing.variables]
+            == [v.to_dict() for v in expected.variables]
+        )
+        return Plan(
+            ItemState.EXISTING if same else ItemState.CONFLICT,
+            destination,
+            (
+                "already imported"
+                if same
+                else "a prompt of this name is already configured; it is kept"
+            ),
+        )
     if item.category is ImportCategory.DENIED_COMMANDS:
         from gideon.core.config.loader import AppConfig
 
         pattern = item.payload.get("pattern")
         destination = "config.json#security.denied_commands"
         if not isinstance(pattern, str) or not pattern:
-            return Plan(ItemState.REJECTED, destination, "the imported deny rule is invalid")
+            return Plan(
+                ItemState.REJECTED, destination, "the imported deny rule is invalid"
+            )
         exists = pattern in (AppConfig.load().security.denied_commands or [])
-        return Plan(ItemState.EXISTING if exists else ItemState.NEW, destination,
-                    "already denied" if exists else "adds a restrictive command rule")
+        return Plan(
+            ItemState.EXISTING if exists else ItemState.NEW,
+            destination,
+            "already denied" if exists else "adds a restrictive command rule",
+        )
     if item.category is ImportCategory.CONVERSATIONS:
         from gideon.cognition.history import ConversationLog
+
         rows = item.payload.get("messages")
         if not isinstance(rows, list) or not rows:
+            read_for_import = None
             try:
                 if item.source == "claude_code":
-                    from gideon.cognition.onboarding_import.sources.claude_code import read_for_import
+                    from gideon.cognition.onboarding_import.sources.claude_code import (
+                        read_for_import as read_claude,
+                    )
+
+                    read_for_import = read_claude
                 elif item.source == "codex":
-                    from gideon.cognition.onboarding_import.sources.codex import read_for_import
+                    from gideon.cognition.onboarding_import.sources.codex import (
+                        read_for_import as read_codex,
+                    )
+
+                    read_for_import = read_codex
                 else:
                     read_for_import = None
                 read = read_for_import(item) if read_for_import is not None else None
             except Exception:
                 read = None
             conversation = read[0] if read is not None else None
-            rows = conversation.get("messages") if isinstance(conversation, dict) else None
+            rows = (
+                conversation.get("messages") if isinstance(conversation, dict) else None
+            )
         if not isinstance(rows, list) or not rows:
             return Plan(ItemState.REJECTED, "", "conversation has no readable messages")
         path = ConversationLog()._path(f"imported_{item.source}_{item.fingerprint}")
@@ -495,9 +643,19 @@ def plan_item(item: ImportItem) -> Plan:
         try:
             with path.open(encoding="utf-8") as handle:
                 metadata = json.loads(handle.readline())
-            same = metadata.get("import_source") == item.source and metadata.get("import_key") == item.key
+            same = (
+                metadata.get("import_source") == item.source
+                and metadata.get("import_key") == item.key
+            )
         except (OSError, ValueError, AttributeError):
             same = False
-        return Plan(ItemState.EXISTING if same else ItemState.CONFLICT, destination,
-                    "already imported" if same else "a conversation is already here; it is kept")
+        return Plan(
+            ItemState.EXISTING if same else ItemState.CONFLICT,
+            destination,
+            (
+                "already imported"
+                if same
+                else "a conversation is already here; it is kept"
+            ),
+        )
     raise KeyError(f"no planner for import category {item.category!r}")

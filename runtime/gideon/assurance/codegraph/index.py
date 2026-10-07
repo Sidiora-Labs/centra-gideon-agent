@@ -12,6 +12,11 @@ result partial — a partial index still answers most queries, and the alternati
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sqlite3 import Connection as SQLiteConnection, Row as SQLiteRow
+
 import hashlib
 import logging
 import os
@@ -158,14 +163,14 @@ class CodeGraphIndex:
     def __init__(self, workspace: str, db_path: "Path | None" = None) -> None:
         self.workspace = os.path.abspath(os.path.expanduser(str(workspace or "")))
         self._db_path = Path(db_path) if db_path else default_db_path(self.workspace)
-        self._db: sqlite3.Connection | None = None
+        self._db: SQLiteConnection | None = None
 
     @property
     def db_path(self) -> Path:
         return self._db_path
 
     @property
-    def db(self) -> sqlite3.Connection:
+    def db(self) -> SQLiteConnection:
         if self._db is None:
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
             conn = connect_shared(

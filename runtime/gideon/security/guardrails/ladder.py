@@ -210,7 +210,8 @@ def _parse_record(raw: object) -> ReversalRecord | None:
     if not _RECORD_ID_RE.match(rid):
         return None
     handle = str(raw.get("handle", "") or "")
-    if parse_handle(handle) is None:
+    parsed = parse_handle(handle)
+    if parsed is None:
         logger.warning(
             "autonomy_reversals.json: %s has an unusable handle — ignored", rid
         )
@@ -292,15 +293,18 @@ def record_reversal_handle(
     provider that returned garbage produces no button at all instead of a button whose
     only possible outcome is a refusal.
     """
-    if parse_handle(handle) is None:
+    parsed = parse_handle(handle)
+    if parsed is None:
         logger.warning(
             "autonomy: %s returned an unusable reversal handle — no undo recorded",
             action_type,
         )
         return ""
-    kind, _ = parse_handle(handle)
+    kind, _ = parsed
     if _reverser_for(action_type, kind) is None:
-        logger.warning("autonomy: no declared provider can reverse %s for %s", kind, action_type)
+        logger.warning(
+            "autonomy: no declared provider can reverse %s for %s", kind, action_type
+        )
         return ""
     record = ReversalRecord(
         id=f"rev_{secrets.token_hex(8)}",
@@ -465,14 +469,20 @@ async def reverse_action(record_id: str) -> ReversalOutcome:
         )
     from gideon.automation.triggers.executor import classify
     from gideon.automation.triggers.models import Outcome
+
     observed, _ = classify(str(getattr(result, "outcome", "") or ""))
     if getattr(result, "success", False) is True and observed != Outcome.RAN.value:
         return _refuse(
-            "provider_outcome_unknown", "The provider did not confirm that this action was undone.",
-            record_id=record.id, action_type=record.action_type,
+            "provider_outcome_unknown",
+            "The provider did not confirm that this action was undone.",
+            record_id=record.id,
+            action_type=record.action_type,
         )
-    if (getattr(result, "success", False) is not True or getattr(result, "blocked", False)
-            or getattr(result, "exit_code", 0) not in (0, None)):
+    if (
+        getattr(result, "success", False) is not True
+        or getattr(result, "blocked", False)
+        or getattr(result, "exit_code", 0) not in (0, None)
+    ):
         return _refuse(
             "provider_refused",
             str(getattr(result, "error", "") or "")
@@ -538,11 +548,20 @@ def _provenance(spec, resolved: str, granted: str, state, held: bool) -> str:
     )
 
 
-def _authority_sentence(spec, resolved: str, granted: str, state, held: bool, route) -> str:
-    from gideon.security.guardrails.rungs import NARROWED_BY_NO_UNDO, NARROWED_BY_POSTURE, rung_label
+def _authority_sentence(
+    spec, resolved: str, granted: str, state, held: bool, route
+) -> str:
+    from gideon.security.guardrails.rungs import (
+        NARROWED_BY_NO_UNDO,
+        NARROWED_BY_POSTURE,
+        rung_label,
+    )
+
     sentence = _provenance(spec, resolved, granted, state, held)
     if route.narrowed_by == NARROWED_BY_NO_UNDO:
-        sentence += f" What it does cannot be taken back, so it {rung_label(route.rung)}."
+        sentence += (
+            f" What it does cannot be taken back, so it {rung_label(route.rung)}."
+        )
     elif route.narrowed_by == NARROWED_BY_POSTURE:
         sentence += f" When it runs with nobody watching, it {rung_label(route.rung)}."
     return sentence
@@ -557,7 +576,10 @@ def _type_row(spec) -> dict:
     held = rung_rank(granted) > rung_rank(resolved)
     from gideon.security.guardrails.policy import unattended_dispatch_key
     from gideon.security.guardrails.rungs import route_action_type
-    route = route_action_type(spec.key, session_key=unattended_dispatch_key("autonomy-ladder"))
+
+    route = route_action_type(
+        spec.key, session_key=unattended_dispatch_key("autonomy-ladder")
+    )
     return {
         "key": spec.key,
         "floor": spec.floor,

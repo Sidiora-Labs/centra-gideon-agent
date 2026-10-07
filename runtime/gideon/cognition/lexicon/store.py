@@ -15,6 +15,11 @@ Access mirrors KnowledgeStore (WAL, busy_timeout, Row factory, check_same_thread
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sqlite3 import Connection as SQLiteConnection, Row as SQLiteRow
+
 import json
 import os
 import time
@@ -114,14 +119,14 @@ class _LexiconDB:
         self._conn.row_factory = sqlite3.Row
 
     @property
-    def conn(self) -> sqlite3.Connection:
+    def conn(self) -> SQLiteConnection:
         return self._conn
 
 
 # -- row mappers ---------------------------------------------------------------
 
 
-def _row_to_term(r: sqlite3.Row) -> LexiconTerm:
+def _row_to_term(r: SQLiteRow) -> LexiconTerm:
     return LexiconTerm(
         id=r["id"],
         canonical=r["canonical"],
@@ -134,7 +139,7 @@ def _row_to_term(r: sqlite3.Row) -> LexiconTerm:
     )
 
 
-def _correction_from_row(r: sqlite3.Row) -> Correction:
+def _correction_from_row(r: SQLiteRow) -> Correction:
     return Correction(
         r["id"],
         r["heard"],
@@ -183,7 +188,7 @@ class _TermQuery:
 class _TermRepo:
     """Term admission, phonetic-index replacement, selection and pruning."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: SQLiteConnection) -> None:
         self._c = conn
 
     # admission -----------------------------------------------------------
@@ -237,7 +242,7 @@ class _TermRepo:
 
     @staticmethod
     def _resolve_admission(
-        prior: sqlite3.Row | None, source: str, enabled: bool, now: str
+        prior: SQLiteRow | None, source: str, enabled: bool, now: str
     ) -> tuple[str, bool, str]:
         """Return (effective_source, effective_enabled, created_at)."""
         if prior is None:
@@ -338,7 +343,7 @@ class _TermRepo:
 class _CorrectionRepo:
     """Correction admission, count/auto-apply control flow and read models."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: SQLiteConnection) -> None:
         self._c = conn
 
     def record(
@@ -377,7 +382,7 @@ class _CorrectionRepo:
 
     def _count_up(
         self,
-        prior: sqlite3.Row,
+        prior: SQLiteRow,
         heard: str,
         meant: str,
         forced: bool | None,

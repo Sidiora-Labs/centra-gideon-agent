@@ -94,7 +94,7 @@ import json
 import warnings
 from dataclasses import fields
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from gideon.integrations.channel_transports.base import (
     ChannelCapabilities,
@@ -150,7 +150,7 @@ class ChannelContractError(AssertionError):
     """A channel transport violated a named clause of the conformance contract."""
 
 
-def _fail(clause: str, detail: str) -> None:
+def _fail(clause: str, detail: str) -> NoReturn:
     raise ChannelContractError(f"[{clause}] {detail}")
 
 
@@ -332,7 +332,11 @@ def assert_channel_contract(
             fake_backend=fake_backend,
         )
     if press is not None:
-        _require(delivery is not None, "approvals", "press= requires the app's production delivery.")
+        _require(
+            delivery is not None,
+            "approvals",
+            "press= requires the app's production delivery.",
+        )
         _run(assert_channel_approvals(delivery, press=press, ask_approval=ask_approval))
     _warn_on_incomplete_vendor_seams(
         provider,
@@ -1095,56 +1099,95 @@ _APPROVAL_SEQUENCE = itertools.count(1)
 
 def _approval_event() -> Any:
     from types import SimpleNamespace
+
     from gideon.integrations.channel_delivery import APPROVAL_ANSWERS
     from gideon.security.approval_brief import APPROVAL_BRIEF_META_KEY
-    brief = {"tool": "write_file", "input": '{"path":"notes.txt"}',
-             "purpose": "Save the meeting notes", "risk": "caution",
-             "summary": "Can: writes files · Risk: Caution",
-             "blastRadius": {"writes": True}, "blastRadiusLine": "writes files",
-             "answers": [answer.as_dict() for answer in APPROVAL_ANSWERS]}
-    return SimpleNamespace(request_id=f"approval-contract-{next(_APPROVAL_SEQUENCE)}",
-        title=brief["tool"], tool_input=brief["input"], tool_purpose=brief["purpose"],
-        risk_level="caution", tool_meta={APPROVAL_BRIEF_META_KEY: brief})
+
+    brief = {
+        "tool": "write_file",
+        "input": '{"path":"notes.txt"}',
+        "purpose": "Save the meeting notes",
+        "risk": "caution",
+        "summary": "Can: writes files · Risk: Caution",
+        "blastRadius": {"writes": True},
+        "blastRadiusLine": "writes files",
+        "answers": [answer.as_dict() for answer in APPROVAL_ANSWERS],
+    }
+    return SimpleNamespace(
+        request_id=f"approval-contract-{next(_APPROVAL_SEQUENCE)}",
+        title=brief["tool"],
+        tool_input=brief["input"],
+        tool_purpose=brief["purpose"],
+        risk_level="caution",
+        tool_meta={APPROVAL_BRIEF_META_KEY: brief},
+    )
 
 
 async def _approval_asked(delivery: Any, ask: Any) -> tuple[Any, Any, tuple]:
     from gideon.integrations.channel_delivery import offered_answers
     from gideon.security.approval_brief import APPROVAL_BRIEF_META_KEY
+
     event = _approval_event()
     if ask is not None:
         result = await asyncio.wait_for(ask(event), _APPROVAL_WAIT_SECS)
-        _require(isinstance(result, tuple) and len(result) == 2, "approvals",
-                 "ask_approval MUST return the actual pending record and delivery wait.")
+        _require(
+            isinstance(result, tuple) and len(result) == 2,
+            "approvals",
+            "ask_approval MUST return the actual pending record and delivery wait.",
+        )
         pending, wait = result
         wait = asyncio.ensure_future(wait)
     else:
         seen = []
+
         def prompted(pending):
             seen.append(pending)
             return True
-        wait = asyncio.create_task(delivery.request_approval(event, source="approval contract", on_prompted=prompted))
+
+        wait = asyncio.create_task(
+            delivery.request_approval(
+                event, source="approval contract", on_prompted=prompted
+            )
+        )
         deadline = asyncio.get_running_loop().time() + _APPROVAL_WAIT_SECS
-        while not seen and not wait.done() and asyncio.get_running_loop().time() < deadline:
-            await asyncio.sleep(.01)
+        while (
+            not seen
+            and not wait.done()
+            and asyncio.get_running_loop().time() < deadline
+        ):
+            await asyncio.sleep(0.01)
         if not seen:
             wait.cancel()
             await asyncio.gather(wait, return_exceptions=True)
-            _fail("approvals", "request_approval MUST hand the owner controller a pending record; wire an authenticated owner and originating conversation, or supply ask_approval.")
+            _fail(
+                "approvals",
+                "request_approval MUST hand the owner controller a pending record; wire an authenticated owner and originating conversation, or supply ask_approval.",
+            )
         pending = seen[-1]
     future = getattr(pending, "future", None)
     if not isinstance(future, asyncio.Future) or future.done():
         wait.cancel()
         await asyncio.gather(wait, return_exceptions=True)
-        _fail("approvals", "the actual pending record MUST carry an unresolved asyncio.Future.")
+        _fail(
+            "approvals",
+            "the actual pending record MUST carry an unresolved asyncio.Future.",
+        )
     values = getattr(pending, "answers", None)
     if values is None and ask is None:
         values = event.tool_meta[APPROVAL_BRIEF_META_KEY]["answers"]
-    wire = [value.as_dict() if hasattr(value, "as_dict") else value for value in values] if isinstance(values, (tuple,list)) else None
+    wire = (
+        [value.as_dict() if hasattr(value, "as_dict") else value for value in values]
+        if isinstance(values, (tuple, list))
+        else None
+    )
     answers = offered_answers(wire)
     if answers is None:
         wait.cancel()
         await asyncio.gather(wait, return_exceptions=True)
-        _fail("approvals", "the pending record MUST identify its exact frozen offered vocabulary.")
+        _fail(
+            "approvals",
+            "the pending record MUST identify its exact frozen offered vocabulary.",
+        )
     return pending, wait, answers
 
 
@@ -1173,7 +1216,9 @@ async def _approval_pressed(press: Any, pending: Any, key: str) -> Any:
         _fail("approvals", f"the actual callback press on {key!r} failed: {exc!r}.")
 
 
-async def assert_channel_approvals(delivery: Any, *, press: Any, ask_approval: Any = None) -> None:
+async def assert_channel_approvals(
+    delivery: Any, *, press: Any, ask_approval: Any = None
+) -> None:
     """Assert clause 10 on a live event loop, using actual offers and callback authority.
 
     ``press(pending, key)`` drives the production callback and returns the owner's
@@ -1189,28 +1234,61 @@ async def assert_channel_approvals(delivery: Any, *, press: Any, ask_approval: A
         pending, wait, answers = await _approval_asked(delivery, ask_approval)
         actual_answers = answers
         pending.future.set_result(ending)
-        result = await _approval_ended(wait, f"the controller ended the approval {ending!r}")
-        _require(result is (ending == "approved"), "approvals", f"ending {ending!r} MUST return True only for approved; got {result!r}.")
+        result = await _approval_ended(
+            wait, f"the controller ended the approval {ending!r}"
+        )
+        _require(
+            result is (ending == "approved"),
+            "approvals",
+            f"ending {ending!r} MUST return True only for approved; got {result!r}.",
+        )
         told = await _approval_pressed(press, pending, "approved")
-        _require(_approval_outcome(pending) == ending, "approvals", "a late answer MUST leave the actual ending unchanged.")
-        _require(isinstance(told, str) and told.strip(), "approvals", "a late answer MUST show the owner how this approval ended.")
+        _require(
+            _approval_outcome(pending) == ending,
+            "approvals",
+            "a late answer MUST leave the actual ending unchanged.",
+        )
+        _require(
+            isinstance(told, str) and told.strip(),
+            "approvals",
+            "a late answer MUST show the owner how this approval ended.",
+        )
         told_late[ending] = told
-    _require(len(set(told_late.values())) == len(told_late), "approvals",
-             "late answers MUST distinguish approved, denied, expired and cancelled endings.")
+    _require(
+        len(set(told_late.values())) == len(told_late),
+        "approvals",
+        "late answers MUST distinguish approved, denied, expired and cancelled endings.",
+    )
+    assert actual_answers is not None
     for answer in actual_answers:
         pending, wait, offered = await _approval_asked(delivery, ask_approval)
         try:
-            _require(answer in offered, "approvals", "the authenticated offer changed during this assertion; restart under a stable owner policy.")
+            _require(
+                answer in offered,
+                "approvals",
+                "the authenticated offer changed during this assertion; restart under a stable owner policy.",
+            )
             await _approval_pressed(press, pending, "unoffered")
-            _require(not pending.future.done() and not getattr(pending, "chosen_answer", ""), "approvals",
-                     "an answer outside the offered vocabulary MUST decide nothing.")
+            _require(
+                not pending.future.done() and not getattr(pending, "chosen_answer", ""),
+                "approvals",
+                "an answer outside the offered vocabulary MUST decide nothing.",
+            )
             await _approval_pressed(press, pending, answer.key)
             result = await _approval_ended(wait, f"the owner answered {answer.label!r}")
             outcome = _approval_outcome(pending)
             chosen = getattr(pending, "chosen_answer", "")
-            _require((chosen == answer.key and outcome == answer.ends) or (not chosen and outcome == answer.key),
-                     "approvals", f"the accepted key {answer.key!r} MUST be recorded without replacing an authoritative controller ending; got key={chosen!r}, ending={outcome!r}.")
-            _require(result is (answer.ends == "approved"), "approvals", "the delivery boolean MUST describe whether the accepted answer approves.")
+            _require(
+                (chosen == answer.key and outcome == answer.ends)
+                or (not chosen and outcome == answer.key),
+                "approvals",
+                f"the accepted key {answer.key!r} MUST be recorded without replacing an authoritative controller ending; got key={chosen!r}, ending={outcome!r}.",
+            )
+            _require(
+                result is (answer.ends == "approved"),
+                "approvals",
+                "the delivery boolean MUST describe whether the accepted answer approves.",
+            )
         finally:
             if not wait.done():
                 wait.cancel()
@@ -1223,4 +1301,7 @@ async def assert_channel_approvals(delivery: Any, *, press: Any, ask_approval: A
         return
     except asyncio.TimeoutError:
         _fail("approvals", "a cancelled wait MUST stop with its requesting work.")
-    _fail("approvals", "request_approval MUST propagate cancellation of its requesting work.")
+    _fail(
+        "approvals",
+        "request_approval MUST propagate cancellation of its requesting work.",
+    )

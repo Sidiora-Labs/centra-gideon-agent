@@ -327,12 +327,16 @@ def _register_cell_type(binding: CellProviderBinding) -> str:
         entry_max_tokens = options.pop("max_tokens", None)
         if isinstance(entry_max_tokens, int) and not isinstance(entry_max_tokens, bool):
             ceiling = spec.max_tokens
+            from gideon.integrations.llm.branded_specs import BrandedProviderSpec
+
             options_spec = BrandedProviderSpec(
                 **{
                     **spec.__dict__,
-                    "max_tokens": entry_max_tokens
-                    if ceiling is None
-                    else min(ceiling, entry_max_tokens),
+                    "max_tokens": (
+                        entry_max_tokens
+                        if ceiling is None
+                        else min(ceiling, entry_max_tokens)
+                    ),
                 }
             )
         else:

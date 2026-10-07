@@ -61,7 +61,9 @@ ACTION_TYPES: tuple[str, ...] = (
 
 #: The kinds that act on an Inbox row: archive it, mute its thread, dismiss it, or put a reply
 #: draft on it. A channel conversation or a run has no Inbox row for them to act on.
-INBOX_ROW_ACTIONS: frozenset[str] = frozenset({"archive", "mute_thread", "dismiss", "reply_draft"})
+INBOX_ROW_ACTIONS: frozenset[str] = frozenset(
+    {"archive", "mute_thread", "dismiss", "reply_draft"}
+)
 
 #: What each kind may bind in its ``action_config``, and nothing else. A proposal is the model's,
 #: written over fenced untrusted text, so its config never names a provider, an operation, an item,
@@ -143,7 +145,9 @@ def _one_line(value: object, limit: int) -> str:
     return " ".join(text.split())[:limit].rstrip()
 
 
-def bind_arguments(action_type: str, raw: object) -> tuple[dict[str, str], tuple[str, ...]]:
+def bind_arguments(
+    action_type: str, raw: object
+) -> tuple[dict[str, str], tuple[str, ...]]:
     """The arguments *raw* binds that *action_type* declares, and the keys it gave that it
     could not bind (undeclared, or a value the argument cannot hold).
 
@@ -254,7 +258,9 @@ def proposal_schema(allowed_ordinals: frozenset[str] | set[str] | None = None) -
     """
     item_id: dict = {"type": "string", "maxLength": 8}
     if allowed_ordinals:
-        item_id["enum"] = sorted(allowed_ordinals, key=lambda s: int(s) if s.isdigit() else 0)
+        item_id["enum"] = sorted(
+            allowed_ordinals, key=lambda s: int(s) if s.isdigit() else 0
+        )
     return {
         "type": "object",
         "additionalProperties": False,
@@ -277,7 +283,9 @@ def proposal_schema(allowed_ordinals: frozenset[str] | set[str] | None = None) -
                             "additionalProperties": False,
                             "properties": {
                                 name: {"type": "string", "maxLength": TASK_TITLE_MAX}
-                                for name in sorted(set().union(*ACTION_ARGUMENTS.values()))
+                                for name in sorted(
+                                    set().union(*ACTION_ARGUMENTS.values())
+                                )
                             },
                         },
                         "tier": {"type": "string", "enum": list(TIERS)},
@@ -299,7 +307,11 @@ def _proposals_payload(raw: object) -> tuple[dict | None, str]:
     """
     from gideon.integrations.llm_helpers import parse_llm_json
 
-    payload = raw if isinstance(raw, dict) else parse_llm_json(raw)
+    payload = (
+        raw
+        if isinstance(raw, dict)
+        else parse_llm_json(raw) if isinstance(raw, str) else None
+    )
     if payload is None:
         return None, "no JSON object"
     if not isinstance(payload.get("proposals"), list):
@@ -340,7 +352,9 @@ def parse_proposals(raw: object, *, manifest: Manifest) -> ProposalBatch:
 
     for entry in payload["proposals"]:
         if not isinstance(entry, dict):
-            refused.append(RefusedProposal(reason=REFUSE_MALFORMED, detail=type(entry).__name__))
+            refused.append(
+                RefusedProposal(reason=REFUSE_MALFORMED, detail=type(entry).__name__)
+            )
             continue
         extras.update(k for k in entry if k not in PROPOSAL_FIELDS)
 
@@ -360,7 +374,9 @@ def parse_proposals(raw: object, *, manifest: Manifest) -> ProposalBatch:
         if action_type not in ACTION_TYPES:
             refused.append(
                 RefusedProposal(
-                    reason=REFUSE_UNKNOWN_ACTION, item_id=item_id, action_type=action_type
+                    reason=REFUSE_UNKNOWN_ACTION,
+                    item_id=item_id,
+                    action_type=action_type,
                 )
             )
             continue
@@ -374,20 +390,27 @@ def parse_proposals(raw: object, *, manifest: Manifest) -> ProposalBatch:
             # it is never offered.
             refused.append(
                 RefusedProposal(
-                    reason=REFUSE_CANNOT_ACT, item_id=item_id, action_type=action_type, detail=why
+                    reason=REFUSE_CANNOT_ACT,
+                    item_id=item_id,
+                    action_type=action_type,
+                    detail=why,
                 )
             )
             continue
         if item_id in proposed:
             refused.append(
                 RefusedProposal(
-                    reason=REFUSE_DUPLICATE_ITEM, item_id=item_id, action_type=action_type
+                    reason=REFUSE_DUPLICATE_ITEM,
+                    item_id=item_id,
+                    action_type=action_type,
                 )
             )
             continue
         if len(accepted) >= MAX_PROPOSALS:
             refused.append(
-                RefusedProposal(reason=REFUSE_OVER_CAP, item_id=item_id, action_type=action_type)
+                RefusedProposal(
+                    reason=REFUSE_OVER_CAP, item_id=item_id, action_type=action_type
+                )
             )
             continue
 

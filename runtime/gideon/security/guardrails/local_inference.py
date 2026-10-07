@@ -1,19 +1,22 @@
 """Transport admission for models executed on this machine, across event loops."""
+
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import contextvars
-from dataclasses import dataclass, field
+import ipaddress
 import threading
 import time
-from urllib.parse import urlsplit
 import uuid
-import ipaddress
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 
 class LocalInferenceBusy(RuntimeError):
     """The request was never sent; the finite chain may try its next entry."""
+
     unsent = True
 
 
@@ -23,7 +26,9 @@ class Attended:
     session: str = ""
 
 
-_ATTENDED = contextvars.ContextVar("gideon_local_attended", default=None)
+_ATTENDED: contextvars.ContextVar[Attended | None] = contextvars.ContextVar(
+    "gideon_local_attended", default=None
+)
 _NEXT = contextvars.ContextVar("gideon_local_next", default="")
 
 
@@ -39,6 +44,7 @@ def attending(who: Attended | None):
 @contextlib.contextmanager
 def next_entry(ref: str):
     from gideon.security.execution_lineage import admits
+
     token = _NEXT.set(ref if not ref or admits(ref) else "")
     try:
         yield
@@ -49,7 +55,13 @@ def next_entry(ref: str):
 def resource_key(provider: str, model: str) -> str:
     """A declared local execution resource, never a provider-name or suffix guess."""
     try:
-        from gideon.integrations.llm.registry import get_default_registry, serving_entry, serving_endpoint, served_on_this_machine
+        from gideon.integrations.llm.registry import (
+            get_default_registry,
+            served_on_this_machine,
+            serving_endpoint,
+            serving_entry,
+        )
+
         entry = serving_entry(provider)
         if entry is None or not served_on_this_machine(entry, model):
             return ""
@@ -95,7 +107,7 @@ class _Resource:
 
 _LOCK = threading.RLock()
 _RESOURCES: dict[str, _Resource] = {}
-_LISTENERS = set()
+_LISTENERS: set[Callable[[], object]] = set()
 
 
 def subscribe(listener):
@@ -134,11 +146,13 @@ def _grant_locked(resource: _Resource):
 def _wake(request):
     if request is None:
         return
+
     def resolve():
         if request.future.done():
             _release(request)
         else:
             request.future.set_result(None)
+
     try:
         request.loop.call_soon_threadsafe(resolve)
     except RuntimeError:
@@ -157,7 +171,11 @@ def _release(request):
         if resource.active is request:
             resource.active = None
         granted = _grant_locked(resource)
-        if resource.active is None and not resource.attended and not resource.background:
+        if (
+            resource.active is None
+            and not resource.attended
+            and not resource.background
+        ):
             _RESOURCES.pop(request.key, None)
     _wake(granted)
     _notify()
@@ -174,8 +192,18 @@ async def acquire(provider: str, model: str, *, within: float | None = None):
     if who is not None and next_ref:
         limit = min(limit, 15.0) if limit is not None else 15.0
     from gideon.security.guardrails.audit import current_caller
-    request = _Request(key, provider, model, who, next_ref, current_caller(), loop,
-                       loop.create_future(), time.monotonic() + max(0, limit) if limit is not None else None)
+
+    request = _Request(
+        key,
+        provider,
+        model,
+        who,
+        next_ref,
+        current_caller(),
+        loop,
+        loop.create_future(),
+        time.monotonic() + max(0, limit) if limit is not None else None,
+    )
     with _LOCK:
         resource = _RESOURCES.setdefault(key, _Resource())
         (resource.attended if who is not None else resource.background).append(request)
@@ -188,11 +216,15 @@ async def acquire(provider: str, model: str, *, within: float | None = None):
         else:
             await asyncio.wait_for(request.future, max(0.001, limit))
         if request.moved:
-            raise LocalInferenceBusy("The queued request was not sent; moving to the next model.")
+            raise LocalInferenceBusy(
+                "The queued request was not sent; moving to the next model."
+            )
         return request
     except TimeoutError as error:
         _release(request)
-        raise LocalInferenceBusy("The local model is busy; this request was not sent.") from error
+        raise LocalInferenceBusy(
+            "The local model is busy; this request was not sent."
+        ) from error
     except BaseException:
         _release(request)
         raise
@@ -213,14 +245,31 @@ def waits() -> list[dict]:
     with _LOCK:
         for resource in _RESOURCES.values():
             holder = resource.active
-            for position, request in enumerate(resource.attended + resource.background, 1):
+            for position, request in enumerate(
+                resource.attended + resource.background, 1
+            ):
                 if request.attended is None:
                     continue
-                rows.append(dict(id=request.id, step=request.attended.step,
-                                 provider=request.provider, model=request.model,
-                                 holder="another request you are waiting for" if holder and holder.attended else "background work",
-                                 position=position, next_ref=request.next_ref,
-                                 seconds_left=max(0, request.deadline - time.monotonic()) if request.deadline else None))
+                rows.append(
+                    dict(
+                        id=request.id,
+                        step=request.attended.step,
+                        provider=request.provider,
+                        model=request.model,
+                        holder=(
+                            "another request you are waiting for"
+                            if holder and holder.attended
+                            else "background work"
+                        ),
+                        position=position,
+                        next_ref=request.next_ref,
+                        seconds_left=(
+                            max(0, request.deadline - time.monotonic())
+                            if request.deadline
+                            else None
+                        ),
+                    )
+                )
     return rows
 
 
@@ -229,7 +278,11 @@ def move_on(wait_id: str) -> bool:
     with _LOCK:
         for resource in _RESOURCES.values():
             for candidate in resource.attended:
-                if candidate.id == wait_id and candidate.next_ref and not candidate.granted:
+                if (
+                    candidate.id == wait_id
+                    and candidate.next_ref
+                    and not candidate.granted
+                ):
                     resource.attended.remove(candidate)
                     candidate.moved = True
                     request = candidate
@@ -238,9 +291,11 @@ def move_on(wait_id: str) -> bool:
                 break
     if request is None:
         return False
+
     def resolve():
         if not request.future.done():
             request.future.set_result(None)
+
     try:
         request.loop.call_soon_threadsafe(resolve)
     except RuntimeError:
@@ -253,19 +308,33 @@ def move_on(wait_id: str) -> bool:
 async def native_turn(runtime):
     """Give native chat inference the same transport turn as guarded helpers."""
     model = runtime._model
-    ref = str(getattr(model, "served_model_ref", "") or runtime._preferred_model_ref or "")
+    ref = str(
+        getattr(model, "served_model_ref", "") or runtime._preferred_model_ref or ""
+    )
     provider, _, selected = ref.partition(":")
     override = runtime._definition.model if runtime._active_fallback is None else ""
     if override:
-        selected = str(override).partition(":")[2] if str(override).startswith(provider + ":") else str(override)
-    from gideon.security.session_credentials import current_work
+        selected = (
+            str(override).partition(":")[2]
+            if str(override).startswith(provider + ":")
+            else str(override)
+        )
     from gideon.security.approval_answer import OWNER
+    from gideon.security.session_credentials import current_work
+
     work = current_work()
-    owner_turn = work is not None and work.initiator.kind == OWNER and not work.created_by_app
-    who = Attended("Answering your chat", runtime._session_key) if owner_turn and not runtime._unattended else None
+    owner_turn = (
+        work is not None and work.initiator.kind == OWNER and not work.created_by_app
+    )
+    who = (
+        Attended("Answering your chat", runtime._session_key)
+        if owner_turn and not runtime._unattended
+        else None
+    )
     next_ref = ""
     if runtime._announce_failover:
         from gideon.extensions.providers.use_cases import resolution_chain
+
         chain = resolution_chain("chat")
         current = runtime._active_fallback or runtime._preferred_model_ref
         if current in chain and chain.index(current) + 1 < len(chain):
@@ -274,5 +343,7 @@ async def native_turn(runtime):
         if getattr(model, "takes_local_turns", False):
             yield
         else:
-            async with turn(provider, selected, within=model.first_token_timeout_secs or None):
+            async with turn(
+                provider, selected, within=model.first_token_timeout_secs or None
+            ):
                 yield

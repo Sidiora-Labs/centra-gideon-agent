@@ -57,6 +57,11 @@ ONCE at INFO (the probe is cached) and surfaced as a Doctor capability line.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sqlite3 import Connection as SQLiteConnection
+
 import logging
 from dataclasses import dataclass
 from functools import lru_cache
@@ -97,7 +102,7 @@ class VecCapability:
     version: str = ""
 
 
-def _load_extension(conn: "sqlite3.Connection") -> str:
+def _load_extension(conn: "SQLiteConnection") -> str:
     """Load ``sqlite-vec`` into ``conn`` and return its version.
 
     Split out as the single seam every load goes through: the availability probe, the store's
@@ -180,7 +185,7 @@ class ChunkVectorIndex:
     knowledge store on a build without the extension costs nothing.
     """
 
-    def __init__(self, db: "sqlite3.Connection"):
+    def __init__(self, db: "SQLiteConnection"):
         self.db = db
         self._loaded: bool | None = None
         self._synced: set[int] = set()

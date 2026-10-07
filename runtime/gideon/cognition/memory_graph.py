@@ -11,6 +11,10 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from itertools import combinations
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sqlite3 import Connection as SQLiteConnection
 
 from gideon.core.sqlite_compat import sqlite3
 
@@ -685,7 +689,7 @@ class _VolunteerEvents(_GraphTable):
 
 
 class MemoryGraph:
-    def __init__(self, db: sqlite3.Connection, *, log_event=None) -> None:
+    def __init__(self, db: SQLiteConnection, *, log_event=None) -> None:
         self.db, self._log_event = db, log_event
         self._entity_rows = _EntityRows(self)
         self._link_rows = _LinkRows(self)

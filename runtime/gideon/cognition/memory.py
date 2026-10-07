@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sqlite3 import Connection as SQLiteConnection
+
 import logging
 import threading
 from collections.abc import Iterator
@@ -9,7 +14,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from gideon.core.atomic_write import atomic_write
 from gideon.core.config import loader as config_loader
@@ -62,7 +66,6 @@ def _index_failure_reason(error: BaseException) -> str:
     if "readonly" in text:
         return reasons["SQLITE_READONLY"]
     return "the keyword search projection could not be used"
-
 
 
 def config_dir() -> Path:
@@ -332,8 +335,11 @@ class MemoryJournal:
                 reason = self.search_degraded()
         return {
             "state": "degraded" if reason else "available",
-            "detail": reason or "Keyword search can read its index over the memory files.",
-            "repair_id": "memory.rebuild-fts" if reason and self._fts_available else None,
+            "detail": reason
+            or "Keyword search can read its index over the memory files.",
+            "repair_id": (
+                "memory.rebuild-fts" if reason and self._fts_available else None
+            ),
         }
 
     def _check_database_header(self) -> None:
@@ -343,11 +349,13 @@ class MemoryJournal:
             return
         with self._index_db.open("rb") as source:
             header = source.read(16)
-        sidecars = any(Path(str(self._index_db) + suffix).exists() for suffix in ("-wal", "-shm"))
+        sidecars = any(
+            Path(str(self._index_db) + suffix).exists() for suffix in ("-wal", "-shm")
+        )
         if header != b"SQLite format 3\x00" and (header or sidecars):
             raise sqlite3.DatabaseError("file is not a database")
 
-    def _try_create_db(self) -> sqlite3.Connection:
+    def _try_create_db(self) -> SQLiteConnection:
         self._check_database_header()
         database = sqlite3.connect(str(self._index_db), timeout=2.0)
         try:
@@ -357,7 +365,7 @@ class MemoryJournal:
             raise
         return database
 
-    def _get_db(self) -> sqlite3.Connection:
+    def _get_db(self) -> SQLiteConnection:
         try:
             return self._try_create_db()
         except (sqlite3.Error, OSError) as error:
@@ -377,9 +385,13 @@ class MemoryJournal:
                     if table == "memory_fts" or table.startswith("memory_fts_"):
                         continue
                     quoted = '"' + table.replace('"', '""') + '"'
-                    checks = database.execute(f"PRAGMA quick_check({quoted})").fetchall()
+                    checks = database.execute(
+                        f"PRAGMA quick_check({quoted})"
+                    ).fetchall()
                     if any(str(row[0]) != "ok" for row in checks):
-                        raise sqlite3.DatabaseError("Non-index database pages failed integrity checks")
+                        raise sqlite3.DatabaseError(
+                            "Non-index database pages failed integrity checks"
+                        )
                 with database:
                     database.execute("BEGIN IMMEDIATE")
                     database.execute("DROP TABLE IF EXISTS memory_fts")
@@ -391,7 +403,7 @@ class MemoryJournal:
                 database.close()
 
     @contextmanager
-    def _database(self) -> Iterator[sqlite3.Connection]:
+    def _database(self) -> Iterator[SQLiteConnection]:
         database = self._get_db()
         try:
             with database:
@@ -458,10 +470,19 @@ class MemoryJournal:
                     )
             except sqlite3.Error as error:
                 code = str(getattr(error, "sqlite_errorname", "") or "")
-                if any(code.startswith(name) for name in (
-                    "SQLITE_BUSY", "SQLITE_LOCKED", "SQLITE_READONLY", "SQLITE_FULL",
-                    "SQLITE_CANTOPEN", "SQLITE_IOERR", "SQLITE_PERM", "SQLITE_NOTADB",
-                )):
+                if any(
+                    code.startswith(name)
+                    for name in (
+                        "SQLITE_BUSY",
+                        "SQLITE_LOCKED",
+                        "SQLITE_READONLY",
+                        "SQLITE_FULL",
+                        "SQLITE_CANTOPEN",
+                        "SQLITE_IOERR",
+                        "SQLITE_PERM",
+                        "SQLITE_NOTADB",
+                    )
+                ):
                     raise
                 self._repair_index(files)
         except (sqlite3.Error, OSError) as error:
@@ -485,6 +506,8 @@ class MemoryJournal:
                     dict(zip(("path", "snippet", "rank"), match)) for match in matches
                 ]
         except (sqlite3.Error, OSError) as error:
-            if "syntax error" not in str(error) and "unterminated string" not in str(error):
+            if "syntax error" not in str(error) and "unterminated string" not in str(
+                error
+            ):
                 self._record_index_failure(error)
             return []

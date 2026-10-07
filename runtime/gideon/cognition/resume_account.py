@@ -379,10 +379,10 @@ def _facts_from_tool_history(
                 )
             )
         if msg.get("role") == "tool":
-            status = msg.get("_tool_status")
+            result_status = msg.get("_tool_status")
             results[str(msg.get("tool_call_id") or "")] = (
                 str(msg.get("content") or ""),
-                status if isinstance(status, bool) else None,
+                result_status if isinstance(result_status, bool) else None,
             )
 
     facts: list[StepFact] = []

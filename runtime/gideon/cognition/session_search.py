@@ -85,7 +85,11 @@ class SessionIndexer:
             long_count = len(long_keys & eligible)
         else:
             long_count = state["long"]
-        of = len(eligible) if eligible is not None else len(self.log.list_session_records())
+        of = (
+            len(eligible)
+            if eligible is not None
+            else len(self.log.list_session_records())
+        )
         building = bool(self._thread and self._thread.is_alive()) and len(keys) < of
         return {
             "indexed": len(keys),
@@ -292,7 +296,11 @@ def answer(
     elif not search_ok:
         scan_rows = entries[:_FALLBACK_WINDOW]
     else:
-        scan_rows = [row for row in entries[:_FALLBACK_WINDOW] if row.get("key") not in index_keys]
+        scan_rows = [
+            row
+            for row in entries[:_FALLBACK_WINDOW]
+            if row.get("key") not in index_keys
+        ]
     scan_error = False
     for row in scan_rows:
         key = str(row.get("key", "") or "")
@@ -301,9 +309,10 @@ def answer(
         if search_ok and not rest and key in index_keys:
             continue
         scanned.add(key)
-        hit, read_error = _direct_hit(log, row, query_terms)
+        direct_hit, read_error = _direct_hit(log, row, query_terms)
+        hit = direct_hit if direct_hit is not None else {}
         scan_error = scan_error or read_error
-        if hit is None:
+        if direct_hit is None:
             try:
                 if not log._path(key).exists():
                     scan_error = True
@@ -331,10 +340,7 @@ def answer(
         }
         for row in entries
     }
-    enriched = [
-        {**catalog.get(key, {}), **hit}
-        for key, hit in results.items()
-    ]
+    enriched = [{**catalog.get(key, {}), **hit} for key, hit in results.items()]
     ordered = sorted(
         enriched,
         key=lambda row: (row.get("rank", 0), row.get("title", "").casefold()),

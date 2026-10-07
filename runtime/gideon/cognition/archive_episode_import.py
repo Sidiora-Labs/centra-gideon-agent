@@ -89,11 +89,10 @@ def validate_authored_episode(value):
     ):
         raise ValueError("Invalid or private episodic memory tags")
     importance = value.get("importance")
-    if (
-        type(importance) not in (int, float)
-        or not math.isfinite(importance)
-        or not 0 <= importance <= 1
-    ):
+    if type(importance) not in (int, float):
+        raise ValueError("Invalid episodic memory importance")
+    assert isinstance(importance, (int, float))
+    if not math.isfinite(importance) or not 0 <= importance <= 1:
         raise ValueError("Invalid episodic memory importance")
     created = _timestamp(value.get("created_at"), "created_at")
     updated = _timestamp(value.get("updated_at"), "updated_at")
@@ -191,8 +190,8 @@ class AuthoredEpisodeImport:
                     value["created_at"],
                 ),
             )
-            event_type = "delete" if value["is_deleted"] else None
-        if event_type is not None:
+            event_type = "delete" if value["is_deleted"] else ""
+        if event_type:
             database.execute(
                 "INSERT INTO memory_events(event_type,memory_type,memory_key,old_value,new_value,source,created_at) "
                 "VALUES(?,?,?,?,?,?,?)",

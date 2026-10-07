@@ -9,6 +9,8 @@ Episodic: conversation fragments with embeddings, importance scoring,
 time-decay retrieval via FAISS (falls back to FTS5 without embeddings).
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
@@ -29,6 +31,11 @@ from snowballstemmer import stemmer as _snowball_stemmer
 from gideon.cognition import memory_holder, memory_slots
 from gideon.cognition.identity import current_username
 from gideon.core.config import loader as config_loader
+from gideon.hypermid.foundation import Cursor
+
+if TYPE_CHECKING:
+    from sqlite3 import Connection as SQLiteConnection
+
 from gideon.core.sqlite_compat import sqlite3
 from gideon.integrations.memory_providers.base import MemoryProvider
 
@@ -205,7 +212,7 @@ class HybridRecallHit:
 @dataclass(frozen=True)
 class HybridRecallResult:
     hits: tuple[HybridRecallHit, ...]
-    cursor: object
+    cursor: Cursor
     arms: tuple[RecallArmEvidence, ...]
     degraded: bool
     degradation_reason: str | None
@@ -215,7 +222,14 @@ class HybridRecallResult:
     def inspection(self) -> dict[str, object]:
         return {
             "cursor": self.cursor.to_wire(),
-            **({"cursor_scope": self.scope_cursors[0]["scope"], "scope_cursors": list(self.scope_cursors)} if self.scope_cursors else {}),
+            **(
+                {
+                    "cursor_scope": self.scope_cursors[0]["scope"],
+                    "scope_cursors": list(self.scope_cursors),
+                }
+                if self.scope_cursors
+                else {}
+            ),
             "arms": [arm.to_dict() for arm in self.arms],
             "degraded": self.degraded,
             "degradation_reason": self.degradation_reason,
@@ -343,13 +357,13 @@ CREATE INDEX IF NOT EXISTS idx_events_key ON memory_events(memory_key);
 """
 
 
-def _migrate_v2(db: sqlite3.Connection) -> None:
+def _migrate_v2(db: SQLiteConnection) -> None:
     from gideon.cognition.archive_foundation import ColumnExpansion
 
     ColumnExpansion(db, sqlite3).add("semantic_memory", (("embedding", "BLOB"),))
 
 
-def _migrate_v3(db: sqlite3.Connection) -> None:
+def _migrate_v3(db: SQLiteConnection) -> None:
     from gideon.cognition.archive_foundation import ColumnExpansion
 
     ColumnExpansion(db, sqlite3).add(
@@ -357,7 +371,7 @@ def _migrate_v3(db: sqlite3.Connection) -> None:
     )
 
 
-def _migrate_v4(db: sqlite3.Connection) -> None:
+def _migrate_v4(db: SQLiteConnection) -> None:
     from gideon.cognition.archive_foundation import ColumnExpansion
 
     ColumnExpansion(db, sqlite3).add(
@@ -365,33 +379,33 @@ def _migrate_v4(db: sqlite3.Connection) -> None:
     )
 
 
-def _migrate_v5(db: sqlite3.Connection) -> None:
+def _migrate_v5(db: SQLiteConnection) -> None:
     from gideon.cognition.archive_foundation import ColumnExpansion
 
     ColumnExpansion(db, sqlite3).add("memory_events", (("undone_at", "TEXT"),))
 
 
-def _migrate_v6(db: sqlite3.Connection) -> None:
+def _migrate_v6(db: SQLiteConnection) -> None:
     from gideon.cognition.archive_foundation import expand_axes
 
     expand_axes(db, sqlite3)
 
 
-def _migrate_v7(db: sqlite3.Connection) -> None:
+def _migrate_v7(db: SQLiteConnection) -> None:
     from gideon.cognition.archive_foundation import install_entity_schema
     from gideon.cognition.memory_graph import SCHEMA_V7
 
     install_entity_schema(db, SCHEMA_V7, logger)
 
 
-def _migrate_v8(db: sqlite3.Connection) -> None:
+def _migrate_v8(db: SQLiteConnection) -> None:
     from gideon.cognition.memory_graph import SCHEMA_V8
 
     install = db.executescript
     install(SCHEMA_V8)
 
 
-def _migrate_v9(db: sqlite3.Connection) -> None:
+def _migrate_v9(db: SQLiteConnection) -> None:
     from gideon.cognition.archive_foundation import ColumnExpansion
 
     expansion = ColumnExpansion(db, sqlite3)
@@ -400,7 +414,7 @@ def _migrate_v9(db: sqlite3.Connection) -> None:
     expansion.index("idx_semantic_contributor", "semantic_memory", "contributor")
 
 
-def _migrate_v10(db: sqlite3.Connection) -> None:
+def _migrate_v10(db: SQLiteConnection) -> None:
     from gideon.cognition.archive_foundation import ColumnExpansion
 
     expansion = ColumnExpansion(db, sqlite3, logger)
@@ -412,7 +426,7 @@ def _migrate_v10(db: sqlite3.Connection) -> None:
     expansion.index("idx_semantic_holder", "semantic_memory", "holder")
 
 
-def _migrate_v11(db: sqlite3.Connection) -> None:
+def _migrate_v11(db: SQLiteConnection) -> None:
     from gideon.cognition.archive_foundation import ColumnExpansion
 
     expansion = ColumnExpansion(db, sqlite3, logger)
@@ -423,7 +437,7 @@ def _migrate_v11(db: sqlite3.Connection) -> None:
         )
 
 
-_MIGRATIONS: list[tuple[int, str, "Callable[[sqlite3.Connection], None] | None"]] = [
+_MIGRATIONS: list[tuple[int, str, "Callable[[SQLiteConnection], None] | None"]] = [
     (1, _SCHEMA_V1, None),
     (2, "", _migrate_v2),
     (3, "", _migrate_v3),
@@ -571,7 +585,9 @@ class SemanticArchive(MemoryProvider):
         self._db: Any | None = None
         self._faiss_id_map: list[Any] = []
         self._faiss_fingerprint: tuple[str, str] | None = None
-        self._faiss_bundle: tuple[Any, list[Any], int, tuple[str, str] | None] | None = None
+        self._faiss_bundle: (
+            tuple[Any, list[Any], int, tuple[str, str] | None] | None
+        ) = None
         self._alias_generation: int = 0
         self.embed_fn: Callable[[str], Any] | None = None
         self.contradiction_judge: Any | None = None
@@ -779,7 +795,7 @@ class SemanticArchive(MemoryProvider):
         ArchiveBootstrap.close(self)
 
     @property
-    def db(self) -> sqlite3.Connection:
+    def db(self) -> SQLiteConnection:
         connection = self._db
         if connection is not None:
             return connection
@@ -1499,7 +1515,9 @@ class ScopedHybridRecall:
                     status="active",
                     source_time_ms=self._stamp_ms(record),
                     importance=record.importance,
-                    verification="supported" if record.confidence >= 0.8 else "unverified",
+                    verification=(
+                        "supported" if record.confidence >= 0.8 else "unverified"
+                    ),
                     provenance=(
                         Provenance(
                             source_kind="gideon_memory",
@@ -1551,7 +1569,9 @@ class ScopedHybridRecall:
             candidates,
             cursor=cursor,
         )
-        graph_scores = self.archive._graph_boosts(query) if self.archive.graph_enabled else {}
+        graph_scores = (
+            self.archive._graph_boosts(query) if self.archive.graph_enabled else {}
+        )
         by_id = {candidate.id: candidate for candidate in candidates}
         hits: list[HybridRecallHit] = []
         included: set[str] = set()

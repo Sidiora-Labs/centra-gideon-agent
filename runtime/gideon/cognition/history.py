@@ -196,9 +196,9 @@ def span_digest(messages: list[dict]) -> str:
         [str(message.get("role", "")), str(message.get("content", ""))]
         for message in messages
     ]
-    payload = json.dumps(
-        canonical, ensure_ascii=False, separators=(",", ":")
-    ).encode("utf-8")
+    payload = json.dumps(canonical, ensure_ascii=False, separators=(",", ":")).encode(
+        "utf-8"
+    )
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -222,7 +222,7 @@ def summary_holds(record: dict | None, messages: list[dict]) -> bool:
 
 def model_view(messages: list[dict], record: dict | None) -> list[dict]:
     """Apply a current summary without changing the authoritative transcript."""
-    if not summary_holds(record, messages):
+    if record is None or not summary_holds(record, messages):
         return [dict(message) for message in messages]
     summarized = int(record["summarized"])
     reduced = int(record["reduced"])
@@ -294,8 +294,12 @@ class _SessionSummary:
         metadata = self.metadata()
         result = dict(
             key=self.key,
-            messages=(metadata.get("message_count") if isinstance(metadata.get("message_count"), int)
-                      and metadata.get("message_count") >= 0 else max(1, int(self.stat.st_size / 200))),
+            messages=(
+                metadata.get("message_count")
+                if isinstance(metadata.get("message_count"), int)
+                and metadata.get("message_count") >= 0
+                else max(1, int(self.stat.st_size / 200))
+            ),
             modified=self.stat.st_mtime,
             created=datetime.fromtimestamp(self.stat.st_mtime).isoformat(),
         )
@@ -422,9 +426,7 @@ class ConversationLog:
     def summary_path(self, key: str) -> Path:
         return self._dir.joinpath(_safe_key(key) + ".summary.json")
 
-    def read_summary(
-        self, key: str, messages: list[dict] | None = None
-    ) -> dict | None:
+    def read_summary(self, key: str, messages: list[dict] | None = None) -> dict | None:
         path = self.summary_path(key)
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
@@ -444,7 +446,7 @@ class ConversationLog:
         messages: list[dict] | None = None,
     ) -> dict:
         transcript = self._read_messages(key) if messages is None else messages
-        record = {
+        record: dict[str, object] = {
             "stamp": None,
             "turns": len(transcript),
             "summary": summary,
@@ -469,9 +471,7 @@ class ConversationLog:
         )
         return record
 
-    def model_view(
-        self, key: str, messages: list[dict] | None = None
-    ) -> list[dict]:
+    def model_view(self, key: str, messages: list[dict] | None = None) -> list[dict]:
         transcript = self._read_messages(key) if messages is None else messages
         return model_view(transcript, self.read_summary(key, transcript))
 
@@ -497,7 +497,7 @@ class ConversationLog:
         tab_id: str | None = None,
         speaker: str | None = None,
         meta: dict[str, Any] | None = None,
-    ) -> None:
+    ) -> ConversationSourceEvent | None:
         with self.journal_write(key):
             path = self._path(key)
             if not path.exists():
@@ -608,7 +608,9 @@ class ConversationLog:
         paths = [self._path(key)]
         archive = _archive_dir(self._dir)
         if archive.is_dir():
-            paths.extend(sorted(archive.glob(f"{_safe_key(key)}__*.jsonl"), reverse=True))
+            paths.extend(
+                sorted(archive.glob(f"{_safe_key(key)}__*.jsonl"), reverse=True)
+            )
         for path in paths:
             if not path.is_file():
                 continue
@@ -616,7 +618,10 @@ class ConversationLog:
                 for line in stream:
                     event = self._source_event(line, key)
                     if event is not None and event.source_event_id == source_event_id:
-                        if hashlib.sha256(event.raw_bytes).hexdigest() != event.source_digest:
+                        if (
+                            hashlib.sha256(event.raw_bytes).hexdigest()
+                            != event.source_digest
+                        ):
                             raise ValueError("conversation source digest mismatch")
                         return event.raw_bytes
         raise KeyError(f"conversation source event {source_event_id!r} is unavailable")
@@ -630,9 +635,7 @@ class ConversationLog:
             sorted({str(key) for key in session_keys if str(key)})
             if session_keys is not None
             else sorted(
-                path.stem
-                for path in self._dir.glob("*.jsonl")
-                if path.is_file()
+                path.stem for path in self._dir.glob("*.jsonl") if path.is_file()
             )
         )
         checkpoints: list[ConversationCheckpoint] = []
@@ -766,9 +769,7 @@ class ConversationLog:
                     continue
                 if not os.path.isfile(entry.path):
                     continue
-                identity = [
-                    int(info.st_ino), int(info.st_size), int(info.st_mtime_ns)
-                ]
+                identity = [int(info.st_ino), int(info.st_size), int(info.st_mtime_ns)]
                 prior = cached.get(entry.name)
                 if isinstance(prior, dict) and prior.get("identity") == identity:
                     item = prior.get("item")
@@ -786,7 +787,10 @@ class ConversationLog:
                     item = _SessionSummary(self, path, info).project()
                 key = str(item.get("key", "") or "")
                 mode = str(item.get("memory_mode", "persistent") or "persistent")
-                if mode.strip().lower() in ("incognito", "temporary") or _live_restricted(key):
+                if mode.strip().lower() in (
+                    "incognito",
+                    "temporary",
+                ) or _live_restricted(key):
                     self._forget_search_rows(key)
                     changed = changed or prior is not None
                     continue
@@ -1126,21 +1130,28 @@ class HistoryConsolidator:
 
     def _admit_consolidation(self, key: str) -> None:
         from gideon.cognition.consolidation_cycle import ConsolidationPolicyDenied
-
         from gideon.security.session_credentials import current_work, memory_reach
 
         work = current_work()
         reach = memory_reach()
         from gideon.security.durable_work import validate_background_work
+
         if not validate_background_work(self._log, key, work):
-            raise ConsolidationPolicyDenied("authenticated background source no longer valid")
-        allowed_keys = () if work is None else (work.session_key, work.origin_session_key)
+            raise ConsolidationPolicyDenied(
+                "authenticated background source no longer valid"
+            )
+        allowed_keys = (
+            () if work is None else (work.session_key, work.origin_session_key)
+        )
         if not reach.background_allowed or self._log._canonical_key(key) not in {
             self._log._canonical_key(value) for value in allowed_keys if value
         }:
             raise ConsolidationPolicyDenied("background grant denied: " + reach.reason)
         metadata = self._log.get_metadata(key)
-        if _live_restricted(key) or metadata.get("memory_mode") in {"temporary", "incognito"}:
+        if _live_restricted(key) or metadata.get("memory_mode") in {
+            "temporary",
+            "incognito",
+        }:
             raise ConsolidationPolicyDenied("session blocks background memory writes")
 
     async def consolidate_now(self, key: str) -> bool:
@@ -1177,6 +1188,7 @@ class HistoryConsolidator:
         if key in self._running or self._log.unconsolidated_count(key):
             return False
         from gideon.security.durable_work import background_work
+
         with background_work(self._log, key):
             return await self._seal_with_background_work(key)
 
@@ -1189,7 +1201,9 @@ class HistoryConsolidator:
             self._admit_consolidation(key)
             removed = self._svc.seal_session(key)
             if removed:
-                logger.info("Sealed session %s — swept %d unpromoted record(s)", key, removed)
+                logger.info(
+                    "Sealed session %s — swept %d unpromoted record(s)", key, removed
+                )
             from gideon.cognition.memory_vault import mirror_after_consolidation
 
             await mirror_after_consolidation(self._svc)
@@ -1213,7 +1227,9 @@ class HistoryConsolidator:
     async def _consolidate(self, key: str, include_history: bool = True) -> bool:
         with single_flight(f"consolidate:{key}") as acquired:
             if acquired:
-                return await self._consolidate_locked(key, include_history=include_history)
+                return await self._consolidate_locked(
+                    key, include_history=include_history
+                )
             else:
                 self._running.discard(key)
                 logger.info(
@@ -1225,8 +1241,8 @@ class HistoryConsolidator:
     async def _consolidate_locked(self, key: str, include_history: bool = True) -> bool:
         try:
             from gideon.cognition.consolidation_cycle import ConsolidationRound
-
             from gideon.security.durable_work import background_work
+
             with background_work(self._log, key):
                 return await ConsolidationRound(self, key, include_history).run()
         except Exception:
@@ -1394,8 +1410,9 @@ class HistoryConsolidator:
         from gideon.integrations.llm_helpers import one_shot_completion, parse_llm_json
 
         try:
-            text = await one_shot_completion(prompt, use_case="background", output_type=dict,
-                                             validate=validate)
+            text = await one_shot_completion(
+                prompt, use_case="background", output_type=dict, validate=validate
+            )
         except ProviderResolutionError as error:
             raise ConsolidationUnavailable("consolidation model unavailable") from error
         result = parse_llm_json(text)

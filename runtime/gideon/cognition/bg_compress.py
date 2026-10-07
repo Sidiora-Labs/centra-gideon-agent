@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
-import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable
@@ -38,9 +38,11 @@ async def quiesce_background_compression(
 ) -> BackgroundQuiesceReceipt:
     """Fence new compression and wait for already admitted work to finish."""
 
-    keys = {_GLOBAL_QUIESCE} if session_keys is None else {
-        str(key) for key in session_keys if str(key)
-    }
+    keys = (
+        {_GLOBAL_QUIESCE}
+        if session_keys is None
+        else {str(key) for key in session_keys if str(key)}
+    )
     _quiesced_sessions.update(keys)
     active = {
         task
@@ -61,9 +63,11 @@ async def quiesce_background_compression(
 
 
 def resume_background_compression(session_keys: Iterable[str] | None = None) -> None:
-    keys = {_GLOBAL_QUIESCE} if session_keys is None else {
-        str(key) for key in session_keys if str(key)
-    }
+    keys = (
+        {_GLOBAL_QUIESCE}
+        if session_keys is None
+        else {str(key) for key in session_keys if str(key)}
+    )
     _quiesced_sessions.difference_update(keys)
 
 
@@ -251,7 +255,7 @@ async def run_bg_compression_pass(
     eligible = _eligible_keys(log, age, time.time())
     if not eligible:
         return []
-    results = []
+    results: list[dict] = []
     limit = max(1, max_sessions)
     for key in eligible:
         if len(results) >= limit:

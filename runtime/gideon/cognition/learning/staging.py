@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from sqlite3 import (
+        Connection as SQLiteConnection,
+        Row as SQLiteRow,
+        Cursor as SQLiteCursor,
+    )
+
 import json
 import logging
-from gideon.core.sqlite_compat import connect, sqlite3
 import threading
 import time
 from contextlib import contextmanager
@@ -15,6 +23,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from gideon.cognition.learning.hygiene import fingerprint
+from gideon.core.sqlite_compat import connect, sqlite3
 
 from .staging_journal import (
     STAGING_SCHEMA,
@@ -74,14 +83,14 @@ class StagingStore:
     def __init__(self, base_dir: Path | str | None = None) -> None:
         directory = Path(base_dir) if base_dir else _default_home()
         self._base, self._path = directory, directory / DB_FILE
-        self._conn: sqlite3.Connection | None = None
+        self._conn: SQLiteConnection | None = None
         self._lock = threading.RLock()
 
     @property
     def path(self) -> Path:
         return self._path
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self) -> SQLiteConnection:
         if self._conn is not None:
             return self._conn
         self._base.mkdir(parents=True, exist_ok=True)
@@ -92,7 +101,7 @@ class StagingStore:
         return self._conn
 
     @contextmanager
-    def _cursor(self) -> Iterator[sqlite3.Cursor]:
+    def _cursor(self) -> Iterator[SQLiteCursor]:
         with self._lock:
             connection = self._connect()
             cursor = connection.cursor()
@@ -106,7 +115,7 @@ class StagingStore:
                 cursor.close()
 
     @staticmethod
-    def _bootstrap(conn: sqlite3.Connection) -> None:
+    def _bootstrap(conn: SQLiteConnection) -> None:
         for operation, statement in (
             (conn.executescript, STAGING_SCHEMA),
             (
@@ -491,7 +500,7 @@ def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def _row_to_entry(row: sqlite3.Row) -> StagingEntry:
+def _row_to_entry(row: SQLiteRow) -> StagingEntry:
     try:
         metadata = json.loads(row["meta"] or "{}")
     except Exception:
