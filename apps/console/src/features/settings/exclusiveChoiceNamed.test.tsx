@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import ts from 'typescript'
 import { SegToggle } from './bento'
 import { SegPills } from './settingsUI'
 
@@ -140,26 +141,42 @@ describe('the family is DERIVED, so the next pill group cannot be missed', () =>
     const out: { rel: string; state: boolean; cmp: string; via: 'equality' | 'membership' }[] = []
     for (const f of walk(SRC)) {
       const src = stripComments(readFileSync(f, 'utf8'))
-      for (const m of src.matchAll(/\.map\(\s*\(?\s*(\w+)[^)]{0,40}\)?\s*=>\s*\{/g)) {
-        const body = src.slice(m.index!, m.index! + 1100)
-        const item = m[1]
-        const eq = body.match(new RegExp(`const \\w+ = (?:${item}(?:\\.\\w+)? === (\\w+)|(\\w+) === ${item}(?:\\.\\w+)?)`))
-        const member = body.match(new RegExp(
-          `const \\w+ = !?\\w+\\.(?:includes|has)\\(\\s*${item}(?:\\.\\w+)?\\s*\\)`
-          + `|const \\w+ = \\w+\\.indexOf\\(\\s*${item}(?:\\.\\w+)?\\s*\\)\\s*(?:>= 0|!== -1)`))
-        const cmp = eq ?? member
-        if (!cmp) continue
-        if (eq && LITERAL.test(eq[1] ?? eq[2] ?? '')) continue
-        const rows = [...tags(body, 'button'), ...tags(body, 'motion\\.button')]
-        const delegates = DELEGATES.some((c) => new RegExp(`<${c}\\b`).test(body))
-        if (rows.length === 0 && !delegates) continue
-        out.push({
-          rel: f.slice(SRC.length + 1),
-          state: delegates || rows.some((t) => STATE.test(t)),
-          cmp: cmp[0],
-          via: eq ? 'equality' : 'membership',
-        })
+      const file = ts.createSourceFile(f, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+      const visit = (node: ts.Node) => {
+        if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'map') {
+          const callback = node.arguments[0]
+          if (callback && ts.isArrowFunction(callback) && callback.parameters[0]) {
+            const binding = callback.parameters[0].name
+            const items = ts.isIdentifier(binding) ? [binding.text] : ts.isObjectBindingPattern(binding) ? binding.elements.map(element => element.name.getText(file)) : []
+            const body = callback.body.getText(file)
+            for (const item of items) {
+              const eq = body.match(new RegExp(String.raw`const \w+ = (?:${item}(?:\.\w+)? === (\w+)|(\w+) === ${item}(?:\.\w+)?)`))
+              const member = body.match(new RegExp(String.raw`\w+\.(?:includes|has)\(\s*${item}(?:\.\w+)?\s*\)|\w+\.indexOf\(\s*${item}(?:\.\w+)?\s*\)\s*(?:>= 0|!== -1)`))
+              const cmp = eq ?? member
+              if (!cmp || (eq && LITERAL.test(eq[1] ?? eq[2] ?? ''))) continue
+              const rows = [...tags(body, 'button'), ...tags(body, 'motion\\.button')]
+              const delegates = DELEGATES.some(component => new RegExp(String.raw`<${component}\b`).test(body))
+              if (rows.length === 0 && !delegates) continue
+              const marked = STATE.test(body)
+              const variable = /const (\w+) =/.exec(cmp[0])?.[1]
+              const visualChoice = !!variable && rows.some(tag => {
+                const visual = /(?:className|style|variant)=([\s\S]*)/.exec(tag)?.[1] ?? ''
+                return new RegExp(String.raw`\b${variable}\b`).test(visual)
+              })
+              // Availability, completion and viewport metadata are not choices.
+              if (!delegates && !marked && !visualChoice) continue
+              out.push({ rel: f.slice(SRC.length + 1), state: delegates || marked, cmp: cmp[0], via: eq ? 'equality' : 'membership' })
+              break
+            }
+          }
+        }
+        ts.forEachChild(node, visit)
       }
+      visit(file)
+      for (const tag of tags(src, 'HeaderSegmented')) {
+        out.push({ rel: f.slice(SRC.length + 1), state: /ariaLabel=/.test(tag), cmp: tag, via: 'equality' })
+      }
+
     }
     return out
   }
@@ -239,9 +256,9 @@ describe('the last two current-item markers in the tree', () => {
 
   it("the task-list pill says which list the page is showing", () => {
     const code = codeOf('features/tasks/TasksListPage.tsx')
-    expect(code).toMatch(/aria-label=\{`Task list: \$\{l\.name\}`\} aria-pressed=\{isActive\}/)
+    expect(code).toMatch(/aria-label=\{`Task list: \$\{list\.name\}`\} aria-pressed=\{picked\}/)
     expect(code, 'and the Reset button keeps its own separate name')
-      .toMatch(/aria-label=\{`Reset list \$\{l\.name\}`\}/)
+      .toMatch(/aria-label=\{`Reset list \$\{list\.name\}`\}/)
   })
 
   it("the file tree says which file is open, and only where the tint claims it", () => {

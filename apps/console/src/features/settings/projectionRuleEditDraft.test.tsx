@@ -6,15 +6,16 @@ import type { ProjectionRule } from '../../shared/data/api'
 
 const RULE: ProjectionRule = { name: 'myapp', match_regex: '^\\[MYAPP\\]', strategy: 'log' }
 
-const setProjectionRules = vi.fn((_rules: ProjectionRule[]) => Promise.resolve({}))
+const REVISION = '58123f40ec97b04c'
+const setProjectionRules = vi.fn((_rules: ProjectionRule[], _revision: string) => Promise.resolve({ ok: true }))
 
 async function mount() {
   vi.resetModules()
   setProjectionRules.mockClear()
   vi.doMock('../../shared/data/api', () => ({
     api: {
-      projectionRules: () => Promise.resolve([{ ...RULE }]),
-      setProjectionRules: (rules: ProjectionRule[]) => setProjectionRules(rules),
+      projectionRules: () => Promise.resolve({ value: [{ ...RULE }], revision: REVISION }),
+      setProjectionRules: (rules: ProjectionRule[], revision: string) => setProjectionRules(rules, revision),
       toolsSavings: () => Promise.resolve(null),
     },
   }))
@@ -44,6 +45,7 @@ describe('editing an existing projection rule (draft-and-commit, #674)', () => {
 
     await userEvent.tab()
     expect(setProjectionRules).toHaveBeenCalledTimes(1)
+    expect(setProjectionRules.mock.calls[0][1]).toBe(REVISION)
     const sent = setProjectionRules.mock.calls[0][0]
     expect(sent[0].match_regex).toBe('^\\[MYAPP\\]QWERT')
   })
@@ -53,6 +55,7 @@ describe('editing an existing projection rule (draft-and-commit, #674)', () => {
     await userEvent.click(field)
     await userEvent.keyboard('X{Enter}')
     expect(setProjectionRules).toHaveBeenCalledTimes(1)
+    expect(setProjectionRules.mock.calls[0][1]).toBe(REVISION)
     expect(setProjectionRules.mock.calls[0][0][0].match_regex).toBe('^\\[MYAPP\\]X')
   })
 })

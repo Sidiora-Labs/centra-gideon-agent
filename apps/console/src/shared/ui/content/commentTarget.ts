@@ -1,4 +1,5 @@
 import { api } from '../../data/api'
+import { reportActionFailure } from '../../../app/shell/reportingWrite'
 
 export interface CommentSubmission { message: string; docPaths: string[] }
 export interface CommentTarget { label: string; submit: (submission: CommentSubmission) => void | Promise<void> }
@@ -14,7 +15,11 @@ export function newSessionTarget(navigate: (path: string) => void, opts?: { name
       const { key } = await api.createChatSession({ name: opts?.name || 'Document comments' })
       await api.sendChat(message, key, docPaths.length ? { files: docPaths } : undefined)
       destination = `chat/${key}`
-    } catch {}
+    } catch (error) {
+      reportActionFailure('send your document comments')(error)
+      navigate(destination)
+      throw error
+    }
     navigate(destination)
   })
 }

@@ -7,7 +7,8 @@ import { FeedbackPanel } from './FeedbackPanel'
 
 
 const feedbackProducers = vi.fn()
-vi.mock('../../shared/data/api', () => ({
+vi.mock('../../shared/data/api', async (orig) => ({
+  ...await orig<typeof import('../../shared/data/api')>(),
   api: {
     feedbackProducers: (...a: unknown[]) => feedbackProducers(...a),
     feedbackSnooze: vi.fn(),

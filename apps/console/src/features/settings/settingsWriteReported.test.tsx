@@ -82,9 +82,22 @@ describe('the shared settings mutation reports as well as reconciles', () => {
   it("the model repair reports, like the two siblings in its own file", () => {
     const code = codeOf('features/settings/ModelsPanel.tsx')
     const at = code.indexOf('const repair =')
-    const fn = code.slice(at, at + 520)
-    expect(fn, 'an unhandled rejection made a failed repair look like a dead click').toMatch(/catch \(e\)[\s\S]{0,200}?notify\(/)
-    expect(fn, 'and the pending flag still clears on both paths').toMatch(/finally \{ setRepairing\(null\) \}/)
+    const fn = code.slice(at, code.indexOf('  return (', at))
+    expect(fn, 'a failed repair must retain a visible error').toMatch(/catch \(e\)[\s\S]{0,200}?setRepairErrors\(/)
+    expect(fn, 'the repair delegates to the native download lifecycle').toContain('await startDownload(m.id, m.provider)')
+    expect(code, 'the actual error reaches an alert').toMatch(/repairErrors\[ref\] && <div role="alert"/)
+    const lifecycle = codeOf('features/settings/useModelDownloads.ts')
+    expect(lifecycle, 'the download lifecycle refuses a failed request').toContain('const job = await api.startModelDownload(selectedProvider, model)')
+    expect(lifecycle, 'a failed request is not swallowed by the start handler').toMatch(/const start =[\s\S]*?await api\.startModelDownload[\s\S]*?\}, \[provider, attach\]\)/)
+
+  })
+
+  it('failed document comments report and reject before the consumer removes drafts', () => {
+    const target = codeOf('shared/ui/content/commentTarget.ts')
+    expect(target).toMatch(/catch \(error\)\s*\{[\s\S]*?reportActionFailure\('send your document comments'\)\(error\)[\s\S]*?navigate\(destination\)[\s\S]*?throw error/)
+    const consumer = codeOf('features/files/comments/CommentLayer.tsx')
+    expect(consumer).toMatch(/await onSubmit\(message, docPaths\)\s*commentStore\.removeMany/)
+    expect(consumer).toMatch(/catch \(error\)\s*\{\s*setSubmitError/)
   })
 
   it('the deliberate optimists are still named, and still deliberate', () => {

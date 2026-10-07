@@ -67,8 +67,9 @@ describe('the rendered rows', () => {
       api: {
         usageTotals: () => Promise.resolve({ totals: null }),
         usageRollup: () => Promise.resolve({ rows: [] }),
-        usageFold: () => Promise.reject(new Error('no fold')),
+        usageFold: () => Promise.resolve({ window: 'day', group: 'purpose', dates: [], rows: [], total: { key: 'total', calls: 0, tokens_in: 0, tokens_out: 0, tokens: 0, dollars_est: 0, estimated_dollars: 0, estimated_share: 0, unpriced_calls: 0, local_calls: 0, priced: true }, series: [], estimated_share: 0, unmapped: {}, app_sources: {}, uncounted: { calls: 0, total_calls: 0, total_dollars_est: 0, by_use_case: {} }, reachable_purposes: [] }),
         gideonConfig: () => Promise.resolve(null),
+        triggerBudget: () => Promise.resolve({ tokens: 0, dollars: 0, max_tokens: 0, max_dollars: 0, status: 'ok', reason: '', paused: false, paid_calls_paused: false, unpriced: 0, held_tokens: 0, held_dollars: 0, resumes_at: '' }),
         system: () => Promise.resolve({ stats: { ...stats, ...overrides } }),
       },
     }))

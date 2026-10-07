@@ -6,7 +6,26 @@ import { DialogHost } from '../../shared/ui/dialog/DialogHost'
 import { closeDialog, subscribeDialogs } from '../../shared/ui/dialog/dialogStore'
 import { api } from '../../shared/data/api'
 import type { ChannelTrust, ChannelTrustProvider, ChannelTrustSender } from '../../shared/data/api'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { invalidateKeys } from '../../shared/data/data'
+
+function readConfiguration(): Awaited<ReturnType<typeof api.gideonConfig>> {
+  const home = mkdtempSync(join(tmpdir(), 'gideon-sender-trust-'))
+  try {
+    return JSON.parse(execFileSync(process.env.GIDEON_TEST_PYTHON || join(process.cwd(), '../../.venv/bin/python'), ['-c', `
+import json
+from gideon.core.config import AppConfig
+from gideon.core.config.document import redact_configuration
+from gideon.stale_write import revision_of
+document = redact_configuration(AppConfig.load().to_dict())
+print(json.dumps({**document, 'revision': revision_of(document)}))
+`], { encoding: 'utf8', env: { ...process.env, GIDEON_HOME: home, PYTHONPATH: join(process.cwd(), '../../runtime') } }))
+  } finally { rmSync(home, { recursive: true, force: true }) }
+}
+const CONFIGURATION = readConfiguration()
 
 function sender(over: Partial<ChannelTrustSender> = {}): ChannelTrustSender {
   return { sender_id: 'u1', name: 'Alice', added_at: '2026-08-01T10:00:00+00:00', via: 'owner', ...over }
@@ -47,6 +66,8 @@ const mount = () => render(<><SenderTrustPanel /><DialogHost /></>)
 
 beforeEach(() => {
   invalidateKeys('settings:sender-trust')
+  vi.spyOn(api, 'channels').mockResolvedValue([])
+  vi.spyOn(api, 'gideonConfig').mockResolvedValue(CONFIGURATION)
 })
 
 afterEach(() => {
@@ -71,7 +92,7 @@ describe('SenderTrustPanel', () => {
     expect(await screen.findByText('Alice')).toBeTruthy()
     expect(screen.getByText(/You allowed them/)).toBeTruthy()
     expect(screen.getByText(/Redeemed a pairing code/)).toBeTruthy()
-    expect(screen.getByText('222')).toBeTruthy()
+    expect(screen.getByText('Telegram id 222')).toBeTruthy()
     expect(screen.getByText(/Strangers must redeem a pairing code/)).toBeTruthy()
   })
 
