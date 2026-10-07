@@ -21,7 +21,9 @@ type Node = { id: string; name?: string; x?: number; y?: number; degree?: number
 type Edge = { source: string; target: string; weight?: number }
 
 function mockGraph(nodes: Node[], edges: Edge[] = []) {
-  globalThis.fetch = vi.fn(async () => ({ json: async () => ({ nodes, edges }) })) as never
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ nodes, edges }), {
+    status: 200, headers: { 'Content-Type': 'application/json' },
+  }))
 }
 const at = (container: HTMLElement, id: string) =>
   container.querySelector(`[data-entity-id="${id}"]`)?.getAttribute('transform')
