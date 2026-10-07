@@ -79,7 +79,14 @@ async def api_rooms(request: web.Request) -> web.Response:
     config = AppConfig.load().rooms
     room_id = request.match_info.get("room_id", "")
     if not config.enabled and not room_id and request.method == "GET":
-        return web.json_response({"enabled": False})
+        return web.json_response(
+            {
+                "rooms": [],
+                "enabled": False,
+                "max_members": config.max_members,
+                "round_budget": config.round_budget,
+            }
+        )
     store = request.app[_STORE]
     action = request.match_info.route.name or ""
     try:
