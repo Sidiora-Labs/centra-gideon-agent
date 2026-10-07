@@ -25,6 +25,8 @@ function widgets(): { id: string; group: string; label: string }[] {
 const EXCLUDED = new Map<string, string>([
 ])
 
+const CARD_DESTINATIONS: Record<string, string> = { workflows: 'runtime-config', 'autonomous-loops': 'runtime-config' }
+
 const GROUPS = new Set(['General', 'AI & Models', 'Workspace', 'System'])
 
 describe('every settings subpage is reachable from the hub', () => {
@@ -51,7 +53,7 @@ describe('every settings subpage is reachable from the hub', () => {
   })
 
   it('no card opens a subpage that does not exist', () => {
-    const dangling = hub.filter((w) => !subs.some((s) => s.id === w.id))
+    const dangling = hub.filter((w) => !subs.some((s) => s.id === (CARD_DESTINATIONS[w.id] ?? w.id)))
     expect(
       dangling.map((w) => `${w.id}  (${w.label})`),
       'These hub cards navigate to a route with no panel — the click lands back on the hub:\n  ' +
@@ -93,7 +95,7 @@ describe('every settings subpage is reachable from the hub', () => {
       const next = hub[hub.indexOf(w) + 1]
       const end = next ? src.indexOf(`id: '${next.id}', group: '${next.group}'`) : src.length
       const body = src.slice(at, end > at ? end : src.length)
-      if (!body.includes(`go('${w.id}')`)) wrong.push(`${w.id}: no go('${w.id}') in its own render`)
+      if (!body.includes(`go('${CARD_DESTINATIONS[w.id] ?? w.id}')`)) wrong.push(`${w.id}: no go('${w.id}') in its own render`)
     }
     expect(wrong, 'a card must navigate to the subpage it names').toEqual([])
   })

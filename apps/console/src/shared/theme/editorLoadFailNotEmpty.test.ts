@@ -18,20 +18,26 @@ function walk(dir: string): string[] {
 const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
 
 const EDITORS = [
-  { file: 'features/settings/MemoryPanel.tsx', load: 'api.memoryDoc', save: 'api.saveMemoryDoc' },
-  { file: 'features/agents/AgentDetail.tsx', load: 'api.agentMetadata', save: 'api.saveAgentMetadata' },
+  { file: 'features/settings/MemoryPanel.tsx', state: 'features/settings/MemoryPanel.tsx', load: 'api.memoryDoc', save: 'api.saveMemoryDoc', baseline: 'baseContent', loadError: 'setLoadErr' },
+  { file: 'features/agents/AgentDetail.tsx', state: 'features/agents/agentEditorState.ts', load: 'api.agentMetadata', save: 'api.saveAgentMetadata', baseline: 'content', loadError: 'setLoadError' },
 ]
 
 describe('a doc editor that can overwrite must not treat a failed read as empty content', () => {
   for (const ed of EDITORS) {
     describe(ed.file, () => {
-      const code = strip(readFileSync(join(SRC, ed.file), 'utf8'))
+      const code = strip(readFileSync(join(SRC, ed.state), 'utf8'))
+      const view = strip(readFileSync(join(SRC, ed.file), 'utf8'))
 
       it('reads and writes the same document — which is what makes this data loss, not a cosmetic bug', () => {
         expect(code, `${ed.file} still performs the read`).toContain(ed.load)
         expect(code, `${ed.file} still performs the write`).toContain(ed.save)
         expect(code, 'save is still gated on the null-vs-empty distinction this rail protects')
-          .toMatch(/const dirty = content !== null && draft !== content/)
+          .toContain(`const dirty = content !== null && draft !== ${ed.baseline}`)
+        if (ed.state !== ed.file) {
+          expect(view).toContain('useAgentRoutingNotes(agentName)')
+          expect(view).toContain('disabled={!notes.dirty || notes.busy}')
+          expect(code).toContain('if (!dirty) return')
+        }
       })
 
       it('the load failure does NOT blank the content or the draft', () => {
@@ -42,14 +48,14 @@ describe('a doc editor that can overwrite must not treat a failed read as empty 
       })
 
       it('the load failure is reported instead, so the state is not inferred from an absence', () => {
-        expect(code, 'a failed read sets a load-error state').toMatch(/catch[\s\S]{0,160}setLoadErr\(/)
-        expect(code, 'and the failure is announced, not just drawn').toMatch(/role="alert"/)
+        expect(code, 'a failed read sets a load-error state').toMatch(new RegExp(`catch[\\s\\S]{0,160}${ed.loadError}\\(`))
+        expect(view, 'and the failure is announced, not just drawn').toMatch(/role="alert"/)
       })
     })
   }
 
   it('the two editors are still the only surfaces that blank LOADED content they can write back', () => {
-    const both = EDITORS.map((e) => strip(readFileSync(join(SRC, e.file), 'utf8')))
+    const both = EDITORS.map((e) => strip(readFileSync(join(SRC, e.state), 'utf8')))
     for (const code of both) {
       expect(code, 'neither editor may reintroduce the empty-string failure path')
         .not.toMatch(/catch[\s\S]{0,120}set(?:Content|Draft|ViewContent)\(''\)/)

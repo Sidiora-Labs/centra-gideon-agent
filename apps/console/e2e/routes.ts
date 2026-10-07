@@ -51,7 +51,7 @@ export const SETTINGS_PANELS = [
   'sender-trust', 'guardrails',
   'external-access', 'audit',
   'doctor', 'diagnostics', 'tool-output', 'feedback', 'usage', 'routing', 'legibility',
-  'ambient', 'companion', 'sources', 'packs', 'archive', 'portability', 'durability', 'updates',
+  'ambient', 'companion', 'sources', 'packs', 'archive', 'portability', 'durability', 'updates', 'runtime-config',
 ] as const
 
 export const SETTINGS_ROUTES: RouteEntry[] = SETTINGS_PANELS.map((id) => ({

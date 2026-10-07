@@ -7,7 +7,12 @@ const WEB = process.cwd()
 
 function shippedPanelIds(): string[] {
   const src = readFileSync(join(WEB, 'src/features/settings/SettingsPage.tsx'), 'utf8')
-  return [...src.matchAll(/^\s*\{ id: '([a-z-]+)',/gm)].map((m) => m[1])
+  const ids = [...src.matchAll(/^\s*\{ id: '([a-z-]+)',/gm)].map((m) => m[1])
+  expect(src).toContain("id === 'hypermid' ? 'hypermid'")
+  expect(src).toContain("else if (nativeHypermid) navigate?.('hypermid', { replace: true })")
+  const routes = readFileSync(join(WEB, 'e2e/routes.ts'), 'utf8')
+  expect(routes).toContain("{ route: 'hypermid', label: 'Hypermid'")
+  return ids.filter(id => id !== 'hypermid')
 }
 
 function manifestPanelIds(): string[] {

@@ -135,6 +135,12 @@ async function mutate(fn: () => Promise<unknown>, ...affects: CacheKeySpec[]) {
 
 export const SETTINGS_WIDGETS: SettingsWidget[] = [
   {
+    id: 'hypermid', group: 'AI & Models', label: 'Hypermid', icon: Database, size: 'sm',
+    description: 'Memory storage, vector indexes, and administration.',
+    useSearchText() { return 'Hypermid memory storage vector indexes administration' },
+    render(query, go) { return <BentoCard icon={Database} title="Hypermid" query={query} onClick={() => go('hypermid')}><div data-type="body-s" className="text-on-surface-low">Memory storage and index administration</div></BentoCard> },
+  },
+  {
     id: 'runtime-config', group: 'System', label: 'Runtime configuration', icon: SlidersHorizontal, size: 'sm',
     description: 'Sandbox, routing, updates, loops, workflows, learning, knowledge, local models, and tool groups.',
     useSearchText() { return 'sandbox routing updates loops workflows learning knowledge local models tool groups runtime configuration' },

@@ -38,7 +38,7 @@ export function LoadError({ what, error, onRetry }: { what: string; error?: unkn
   const message = readableErrText(error) || "The server didn't respond — this is just a load error, and nothing was lost."
   return <CollectionMessage alert title={<>Couldn't load your {what}</>} detail={message}
     emblem={<span className="grid size-12 place-items-center rounded-xl bg-danger/10"><AlertTriangle size={32} className="text-danger" aria-hidden /></span>}
-    action={onRetry && <Button size="sm" onClick={onRetry}><RotateCcw size={15} aria-hidden /> Retry</Button>} />
+    action={onRetry && <Button variant="ghost-accent" size="sm" onClick={onRetry}><RotateCcw size={15} aria-hidden /> Retry</Button>} />
 }
 
 export function EmptyState({ icon: Icon, title, hint, action }: {

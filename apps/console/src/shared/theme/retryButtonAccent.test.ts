@@ -30,13 +30,17 @@ describe('the retry button carries its accent through a variant, not a className
     expect(btn, 'and it is a declared Variant').toMatch(/\| 'ghost-accent'/)
   })
 
-  it('all six sites use it', () => {
-    let n = 0
-    for (const rel of [...RETRY_SITES, 'features/ChatPage.tsx']) {
+  it('all direct retry sites and the shared Chat retry use it', () => {
+    const counts = RETRY_SITES.map(rel => {
       const code = strip(read(rel))
-      n += [...code.matchAll(/<Button variant="ghost-accent"/g)].length
-    }
-    expect(n, 'converged accent-ghost buttons').toBe(6)
+      return [...code.matchAll(/<Button\b[^>]*variant="ghost-accent"[^>]*>[\s\S]*?Try again<\/Button>/g)].length
+    })
+    expect(counts).toEqual([1, 1, 2])
+    const shared = strip(read('shared/ui/ListScaffold.tsx'))
+    expect(shared).toMatch(/action=\{onRetry && <Button variant="ghost-accent"[^>]*onClick=\{onRetry\}/)
+    const chat = strip(read('features/ChatPage.tsx'))
+    expect(chat.match(/<LoadError\b[^>]*onRetry=\{/g)).toHaveLength(3)
+    expect(chat).toContain("from '../shared/ui/ListScaffold'")
   })
 
   it('no Button anywhere pushes the ACCENT through className any more', () => {
@@ -65,11 +69,12 @@ describe('the retry button carries its accent through a variant, not a className
   })
 
   it('the measurement rides with the variant, not just the token', () => {
-    expect(read('shared/ui/Button.tsx')).toMatch(/4\.37:1/)
+    expect(read('shared/ui/Button.doc.ts')).toMatch(/4\.37:1/)
+    expect(read('shared/ui/Button.doc.ts')).toContain('primary-emphasis')
   })
 
   it('Segmented is still deliberately deferred — not silently swept in', () => {
     const seg = read('shared/ui/Segmented.tsx')
-    expect(seg, 'Segmented still tints an option tone').toMatch(/color-mix\(in srgb, \$\{o\.tone\} 20%, transparent\)/)
+    expect(seg, 'Segmented still tints an option tone').toMatch(/color-mix\(in srgb, \$\{option\.tone\} 20%, transparent\)/)
   })
 })
