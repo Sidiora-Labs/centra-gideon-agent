@@ -53,6 +53,7 @@ from gideon.automation.workflows import (
 )
 from gideon.automation.workflows import context as context_mod
 from gideon.automation.workflows import (
+    controller_views,
     execution_hints,
     gate_policy,
 )
@@ -175,8 +176,6 @@ from gideon.automation.workflows.tick import (
 )
 from gideon.cognition import project_context, review_triage
 from gideon.cognition.knowledge import session_brief
-
-from gideon.automation.workflows import controller_views
 
 logger = logging.getLogger(__name__)
 

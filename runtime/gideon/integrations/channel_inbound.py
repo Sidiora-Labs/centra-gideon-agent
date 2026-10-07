@@ -278,7 +278,9 @@ class _SessionIngress:
             refresh()
 
     def dispatch(
-        self, session: Any, runner: Callable[[Any, Any, str], Awaitable[None]] | OriginTurnRunner
+        self,
+        session: Any,
+        runner: Callable[[Any, Any, str], Awaitable[None]] | OriginTurnRunner,
     ) -> None:
         if getattr(session, "running", False):
             from gideon.security.approval_answer import ingress_record, on_channel

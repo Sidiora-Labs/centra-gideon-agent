@@ -9,12 +9,14 @@ from aiohttp import web
 from gideon.interfaces.dashboard.state import ConsoleState
 
 
-
 def _action_dispatcher():
     from gideon.automation.triggers.action_dispatch import TriggerDispatcher
     from gideon.interfaces.dashboard.handlers import triggers
 
-    return TriggerDispatcher(triggers._trigger_store, triggers._runs_store, triggers.logger)
+    return TriggerDispatcher(
+        triggers._trigger_store, triggers._runs_store, triggers.logger
+    )
+
 
 def _accepted_action_origin(request):
     from gideon.security.durable_work import accepted_origin_of_request
@@ -22,28 +24,77 @@ def _accepted_action_origin(request):
     return accepted_origin_of_request(request)
 
 
-async def _dispatch_store_action(trigger: Any, payload: dict[str, Any], *, event: str='manual.run', reentry_note_id: str='', reentry_principal: Any=None, reentry_state: Any=None, admitted_claim: Any=None, accepted_origin: Any=None) -> tuple[bool, str]:
-    return await _action_dispatcher()._dispatch_store_action(trigger, payload, event=event, reentry_note_id=reentry_note_id, reentry_principal=reentry_principal, reentry_state=reentry_state, admitted_claim=admitted_claim, accepted_origin=accepted_origin)
+async def _dispatch_store_action(
+    trigger: Any,
+    payload: dict[str, Any],
+    *,
+    event: str = "manual.run",
+    reentry_note_id: str = "",
+    reentry_principal: Any = None,
+    reentry_state: Any = None,
+    admitted_claim: Any = None,
+    accepted_origin: Any = None,
+) -> tuple[bool, str]:
+    return await _action_dispatcher()._dispatch_store_action(
+        trigger,
+        payload,
+        event=event,
+        reentry_note_id=reentry_note_id,
+        reentry_principal=reentry_principal,
+        reentry_state=reentry_state,
+        admitted_claim=admitted_claim,
+        accepted_origin=accepted_origin,
+    )
 
 
-async def _record_manual_refusal(trigger: Any, reason: str, *, outcome: str='skipped_gate') -> tuple[bool, str]:
-    return await _action_dispatcher()._record_manual_refusal(trigger, reason, outcome=outcome)
+async def _record_manual_refusal(
+    trigger: Any, reason: str, *, outcome: str = "skipped_gate"
+) -> tuple[bool, str]:
+    return await _action_dispatcher()._record_manual_refusal(
+        trigger, reason, outcome=outcome
+    )
 
 
-def _manual_owner(trigger_id: str, *, active: bool, holder: str='', admitted_claim: Any=None) -> str:
-    return _action_dispatcher()._manual_owner(trigger_id, active=active, holder=holder, admitted_claim=admitted_claim)
+def _manual_owner(
+    trigger_id: str, *, active: bool, holder: str = "", admitted_claim: Any = None
+) -> str:
+    return _action_dispatcher()._manual_owner(
+        trigger_id, active=active, holder=holder, admitted_claim=admitted_claim
+    )
 
 
-async def _settle_manual_action(trigger: Any, completion: Any, started: float, payload: dict[str, Any], *, holder: str) -> None:
-    return await _action_dispatcher()._settle_manual_action(trigger, completion, started, payload, holder=holder)
+async def _settle_manual_action(
+    trigger: Any,
+    completion: Any,
+    started: float,
+    payload: dict[str, Any],
+    *,
+    holder: str,
+) -> None:
+    return await _action_dispatcher()._settle_manual_action(
+        trigger, completion, started, payload, holder=holder
+    )
 
 
-async def _finish_manual_review(trigger: Any, payload: dict[str, Any], result: Any, record: dict[str, Any] | None) -> None:
-    return await _action_dispatcher()._finish_manual_review(trigger, payload, result, record)
+async def _finish_manual_review(
+    trigger: Any, payload: dict[str, Any], result: Any, record: dict[str, Any] | None
+) -> None:
+    return await _action_dispatcher()._finish_manual_review(
+        trigger, payload, result, record
+    )
 
 
-async def _record_manual_run(trigger: Any, *, started: float, result: Any=None, exc: BaseException | None=None, run_id: str | None=None) -> dict[str, Any] | None:
-    return await _action_dispatcher()._record_manual_run(trigger, started=started, result=result, exc=exc, run_id=run_id)
+async def _record_manual_run(
+    trigger: Any,
+    *,
+    started: float,
+    result: Any = None,
+    exc: BaseException | None = None,
+    run_id: str | None = None,
+) -> dict[str, Any] | None:
+    return await _action_dispatcher()._record_manual_run(
+        trigger, started=started, result=result, exc=exc, run_id=run_id
+    )
 
 
 async def api_trigger_view_render(request: web.Request) -> web.Response:

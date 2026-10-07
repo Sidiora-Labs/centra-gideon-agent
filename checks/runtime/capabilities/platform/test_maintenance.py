@@ -398,9 +398,9 @@ async def test_real_signed_http_and_native_status_control(project):
 async def test_maintenance_source_refusal_before_child_launch(
     project, authenticated_maintenance, damage
 ):
-    from gideon.security.maintenance_work import seal_acceptance
+    from gideon.security.approval_answer import APP, OWNER, Principal
     from gideon.security.durable_work import accepted_origin_of_request
-    from gideon.security.approval_answer import Principal, OWNER, APP
+    from gideon.security.maintenance_work import seal_acceptance
     from gideon.security.session_credentials import begin_turn, end_turn
 
     watchdog = WorkflowWatchdog()

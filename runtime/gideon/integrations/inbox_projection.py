@@ -3,6 +3,7 @@
 from gideon.integrations.inbox import redact_item
 from gideon.security.security import redact_for_display
 
+
 def owner_item(item, owner: str) -> dict:
     return mask_inbox_projection(redact_item(item.to_owner_dict(owner)))
 
@@ -39,4 +40,3 @@ def mask_inbox_projection(value):
     if isinstance(value, str):
         return redact_for_display(value)
     return value
-

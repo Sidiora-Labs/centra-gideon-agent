@@ -608,14 +608,13 @@ def test_revoke_cli_prefers_the_running_gateway(monkeypatch, _isolated) -> None:
     Clearing `sessions.json` from another process leaves the live gateway's in-memory nonce
     set intact, so it keeps honoring the sessions the user just revoked.
     """
-    from gideon.security.auth import cli as auth_cli
-
     import os
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     from threading import Thread
 
     from gideon.engine import gateway_base
     from gideon.interfaces.dashboard import session_store
+    from gideon.security.auth import cli as auth_cli
 
     health_requests: list[str] = []
 

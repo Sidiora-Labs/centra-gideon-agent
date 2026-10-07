@@ -43,6 +43,7 @@ from gideon.automation.workflows import (
     mutations,
     provisioning,
     secrets,
+    service_views,
     store,
     template_lint,
 )
@@ -62,8 +63,6 @@ from gideon.automation.workflows.models import (
     walk,
 )
 from gideon.automation.workflows.validator import validate_spec
-
-from gideon.automation.workflows import service_views
 
 logger = logging.getLogger(__name__)
 

@@ -13,12 +13,12 @@ from .store import Conflict
 def latest_digest(home):
     if config_dir().resolve() != home.resolve():
         raise Conflict("digest scope differs from registered runtime home")
-    from gideon.cognition.proactive.surface import build_digest_view
-    from gideon.extensions.providers.entity_routes import notification_posture
     from gideon.cognition.proactive.digest_reader import (
         _install_state,
         _latest_digest,
     )
+    from gideon.cognition.proactive.surface import build_digest_view
+    from gideon.extensions.providers.entity_routes import notification_posture
 
     state = _install_state()
     if not state["installed"] or not state["enabled"]:

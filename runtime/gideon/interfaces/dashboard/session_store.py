@@ -58,6 +58,7 @@ from gideon.core.atomic_write import atomic_write, atomic_write_bytes
 from gideon.core.config import loader as config_loader
 from gideon.security import session_signing
 from gideon.security.auth import session_payload
+
 _ensure_owner_only = session_signing._ensure_owner_only
 
 
@@ -282,7 +283,9 @@ def _ended_key(nonce: str) -> str:
 
 
 def _bounded_ended(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return session_payload.bounded_ended(raw, limit=MAX_ENDED_SESSIONS, reasons=END_REASONS)
+    return session_payload.bounded_ended(
+        raw, limit=MAX_ENDED_SESSIONS, reasons=END_REASONS
+    )
 
 
 def ended_session_reason(nonce: str) -> str:

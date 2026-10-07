@@ -18,11 +18,11 @@ import getpass
 import os
 import sys
 
-from gideon.security.auth.lifetimes import parse_config_duration
 from gideon.security.auth import credentials as creds
 from gideon.security.auth.lifetimes import (
     DEFAULT_BROWSER_SESSION_TTL_SECS,
     MAX_SESSION_TTL_SECS,
+    parse_config_duration,
 )
 
 

@@ -35,7 +35,12 @@ def read_payload(path: Path) -> dict[str, Any]:
     }
 
 
-def bounded_ended(raw: dict[str, Any], *, limit: int = MAX_ENDED_SESSIONS, reasons: frozenset[str] = END_REASONS) -> dict[str, dict[str, Any]]:
+def bounded_ended(
+    raw: dict[str, Any],
+    *,
+    limit: int = MAX_ENDED_SESSIONS,
+    reasons: frozenset[str] = END_REASONS,
+) -> dict[str, dict[str, Any]]:
     rows = {
         key: row
         for key, row in raw.items()
@@ -50,7 +55,9 @@ def bounded_ended(raw: dict[str, Any], *, limit: int = MAX_ENDED_SESSIONS, reaso
     )
 
 
-def write_payload(payload: dict[str, Any], path: Path, *, writer: Callable[..., None] = atomic_write) -> None:
+def write_payload(
+    payload: dict[str, Any], path: Path, *, writer: Callable[..., None] = atomic_write
+) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         writer(path, json.dumps(payload, indent=2) + "\n", mode=0o600)

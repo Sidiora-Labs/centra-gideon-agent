@@ -79,12 +79,12 @@ class AmbientDisplay:
                 "ambient projection scope differs from registered runtime home"
             )
         from gideon.automation.triggers.store import TriggerStore
-        from gideon.cognition.proactive.surface import build_digest_view
-        from gideon.engine.tasks.native import NativeTaskProvider
         from gideon.cognition.proactive.digest_reader import (
             _install_state,
             _latest_digest,
         )
+        from gideon.cognition.proactive.surface import build_digest_view
+        from gideon.engine.tasks.native import NativeTaskProvider
         from gideon.workspace.capabilities.platform.compositions import list_views
 
         cards: dict[str, Any] = {}

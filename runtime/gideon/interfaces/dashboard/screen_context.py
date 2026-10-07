@@ -42,8 +42,6 @@ _MAX_SESSIONS = 32
 MAX_FRAME_BYTES = 6 * 1024 * 1024
 
 
-
-
 class FrameRejected(ValueError):
     """A staged frame was malformed, oversized, or of a disallowed type."""
 

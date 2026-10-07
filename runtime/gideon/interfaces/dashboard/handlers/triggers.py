@@ -31,6 +31,7 @@ from aiohttp import web
 from gideon.core.config import loader as config_loader
 from gideon.core.http_request import read_json_body
 from gideon.http_errors import json_error
+from gideon.interfaces.dashboard.handlers import trigger_runs
 from gideon.interfaces.dashboard.state import ConsoleState
 from gideon.security.security import (
     MASK_CONFLICT,
@@ -40,8 +41,6 @@ from gideon.security.security import (
     redact_for_display,
     redact_values_for_display,
 )
-
-from gideon.interfaces.dashboard.handlers import trigger_runs
 
 
 def config_dir():

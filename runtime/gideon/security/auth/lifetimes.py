@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import re
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -44,5 +44,3 @@ def parse_config_duration(s: str, *, default_secs: int) -> int:
         logger.warning("unparseable duration %r in config — using the default", s)
         return default_secs
     return value
-
-

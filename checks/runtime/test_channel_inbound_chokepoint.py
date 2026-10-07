@@ -603,8 +603,8 @@ async def test_alternative_three_argument_runner_needs_no_origin_keyword():
     async def alternate(state_arg, session_arg, text):
         received.append((state_arg, session_arg, text))
 
-    ci._SessionIngress(state, PROVIDER, _msg(sender="friend"), "alternate turn").dispatch(
-        session, alternate
-    )
+    ci._SessionIngress(
+        state, PROVIDER, _msg(sender="friend"), "alternate turn"
+    ).dispatch(session, alternate)
     await asyncio.wait_for(session.task, timeout=5)
     assert received == [(state, session, "alternate turn")]

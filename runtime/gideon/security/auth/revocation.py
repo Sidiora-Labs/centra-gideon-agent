@@ -29,7 +29,9 @@ def revoke_all_sessions(
     if clear_memory is not None:
         clear_memory()
     try:
-        durable_clear = session_payload.clear_sessions if clear_durable is None else clear_durable
+        durable_clear = (
+            session_payload.clear_sessions if clear_durable is None else clear_durable
+        )
         durable_clear()
     except Exception:  # noqa: BLE001
         (logger if log is None else log).warning(

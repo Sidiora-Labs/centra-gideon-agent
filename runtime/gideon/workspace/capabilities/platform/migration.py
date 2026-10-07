@@ -27,7 +27,6 @@ from gideon.workspace.capabilities.knowledge.capture import CaptureInbox
 from gideon.workspace.capabilities.knowledge.reviews import digest as knowledge_digest
 from gideon.workspace.capabilities.knowledge.typed import BoundHierarchy, BoundTasks
 from gideon.workspace.capabilities.music.store import RepertoireStore
-
 from gideon.workspace.capabilities.platform import migration_commits
 
 FORMAT = "legacy_snapshot_v1"

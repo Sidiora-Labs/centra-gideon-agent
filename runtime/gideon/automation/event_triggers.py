@@ -812,12 +812,12 @@ class EventTriggerEngine:
                 if not decision.allowed:
                     self._record_outcome(t.id, status="failure", error=decision.reason)
                     return
+                from gideon.automation.schedule_history import ExecutionJournal
+                from gideon.automation.triggers.action_dispatch import TriggerDispatcher
                 from gideon.automation.triggers.claims import (
                     acquire_claim,
                     release_claim,
                 )
-                from gideon.automation.triggers.action_dispatch import TriggerDispatcher
-                from gideon.automation.schedule_history import ExecutionJournal
 
                 dispatcher = TriggerDispatcher(
                     lambda: store, lambda: ExecutionJournal(store.base_dir), logger
