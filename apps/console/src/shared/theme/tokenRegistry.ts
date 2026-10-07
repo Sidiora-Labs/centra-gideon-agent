@@ -68,9 +68,9 @@ export const TOKENS: Token[] = [
   c('--color-outline', 'Outline', 'Content', '#84848f', '#757582'),
   c('--color-outline-variant', 'Outline subtle', 'Content', '#34343b', '#dddde5'),
 
-  c('--color-ok', 'Success', 'Semantic', '#0ebc5f', '#076e37'),
-  c('--color-warn', 'Warning', 'Semantic', '#ff8d41', '#954c19'),
-  c('--color-danger', 'Danger', 'Semantic', '#f66c66', '#af2f29'),
+  c('--color-ok', 'Success', 'Semantic', '#0ebc5f', '#076c37'),
+  c('--color-warn', 'Warning', 'Semantic', '#ff8d41', '#934a17'),
+  c('--color-danger', 'Danger', 'Semantic', '#fe746e', '#ad2d27'),
   c('--color-info', 'Info', 'Semantic', '#aeb8e6', '#3f5185'),
 
   c('--grad-1', 'Gradient 1', 'Glow & gradient', '#777d9f', '#777d9f'),

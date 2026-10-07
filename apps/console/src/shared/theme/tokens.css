@@ -39,7 +39,7 @@
                              
   --color-ok: #0ebc5f;
   --color-warn: #ff8d41;
-  --color-danger: #f66c66;
+  --color-danger: #fe746e;
   --color-info: #aeb8e6;
                                                                               
                                                                               
@@ -280,9 +280,9 @@
                                                                                                
   --color-on-primary-tint: var(--color-on-primary-container);
                                                                                
-  --color-ok: #076e37;
-  --color-warn: #954c19;
-  --color-danger: #af2f29;
+  --color-ok: #076c37;
+  --color-warn: #934a17;
+  --color-danger: #ad2d27;
                                                                                               
                                                                                               
                                                                                                   

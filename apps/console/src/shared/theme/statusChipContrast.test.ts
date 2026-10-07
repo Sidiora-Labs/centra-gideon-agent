@@ -1,8 +1,9 @@
 
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
-import { SCHEMES } from './schemes'
+import { join, dirname, resolve } from 'node:path'
+import ts from 'typescript'
+import { SCHEMES, DEFAULT_SCHEME } from './schemes'
 
 const WEB = process.cwd()
 const SRC = join(WEB, 'src')
@@ -87,6 +88,30 @@ function chipSites(): Site[] {
   const sites: Site[] = []
   for (const abs of walk(SRC)) {
     const src = readFileSync(abs, 'utf8')
+    const syntax = ts.createSourceFile(abs, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const pillBindings = new Set<string>()
+    for (const node of syntax.statements) {
+      if (!ts.isImportDeclaration(node) || !ts.isStringLiteral(node.moduleSpecifier)) continue
+      if (resolve(dirname(abs), node.moduleSpecifier.text) !== join(SRC, 'shared/ui/StatusPill')) continue
+      const imports = node.importClause?.namedBindings
+      if (imports && ts.isNamedImports(imports)) for (const binding of imports.elements) {
+        if ((binding.propertyName ?? binding.name).text === 'StatusPill') pillBindings.add(binding.name.text)
+      }
+    }
+    const visit = (node: ts.Node) => {
+      if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
+        ts.isIdentifier(node.tagName) && pillBindings.has(node.tagName.text)) {
+        const tone = node.attributes.properties.find(attribute => ts.isJsxAttribute(attribute) && attribute.name.getText(syntax) === 'tone')
+        if (tone && ts.isJsxAttribute(tone)) {
+          const value = tone.initializer
+          const literal = !!value && ts.isStringLiteral(value)
+          sites.push({ file: abs.slice(SRC.length + 1), line: syntax.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+            tone: literal ? `var(--color-${value.text})` : `StatusPill:${value?.getText(syntax)}`, pct: 16, literal })
+        }
+      }
+      ts.forEachChild(node, visit)
+    }
+    visit(syntax)
     for (const m of src.matchAll(TINT)) {
       const tone = m[1].replace(/^\$\{/, '').replace(/\}$/, '').replace(/^['"`]|['"`]$/g, '').trim()
       const obj = enclosingObject(src, m.index!)
@@ -158,11 +183,10 @@ describe('status-chip tone over its own ≤16% tint clears AA on every resting t
 describe('the 18% chip clears AA on every resting tier, every scheme (the retuned token)', () => {
   for (const mode of ['dark', 'light'] as Mode[]) {
     for (const ground of RESTING) {
-      it(`${mode}: info ≥AA on ${ground} at 18%`, () => {
-        for (const s of SCHEMES) {
-          const ink = s.colors['--color-info'][mode]
+      it(`${mode}: all semantic tones ≥AA on ${ground} at 18%`, () => {
+        for (const [name, ink] of inks(mode)) {
           const r = tintedChipRatio(ink, token(ground, mode), 18)
-          expect(r, `info:${s.id} (${ink}) on its own 18% tint over ${ground} ${mode} = ${r.toFixed(4)}`)
+          expect(r, `${name} (${ink}) on its own 18% tint over ${ground} ${mode} = ${r.toFixed(4)}`)
             .toBeGreaterThanOrEqual(aaFloor(13, false))
         }
       })
@@ -200,6 +224,8 @@ describe('the applicable floor is 4.5, derived from the size, not assumed', () =
 
 describe('the tone-as-ink-and-tint family stays inside the swept envelope', () => {
   it('the census is not vacuously empty', () => {
+    expect(readFileSync(join(SRC, 'shared/ui/StatusPill.tsx'), 'utf8')).toContain('background: `color-mix(in srgb, ${ink} 16%, transparent)`, color: ink')
+    expect(SITES.some(site => site.file === 'features/settings/ModelsPanel.tsx' && site.tone === 'var(--color-danger)' && site.pct === 16)).toBe(true)
     expect(SITES.length, 'tone-as-ink-and-background-tint sites').toBeGreaterThanOrEqual(80)
     expect(SITES.filter((s) => s.literal).length, 'literal-tone sites').toBeGreaterThanOrEqual(60)
     expect(SITES.filter((s) => !s.literal).length, 'registry-tone sites').toBeGreaterThanOrEqual(20)
@@ -223,7 +249,7 @@ describe('the tone-as-ink-and-tint family stays inside the swept envelope', () =
     expect(over.length, 'the two recorded exceptions still exist (or this allowance is stale)').toBe(ABOVE_CEILING.size)
   })
 
-  it('the 18% population is exactly the eight sites whose tones were reasoned about', () => {
+  it('the 18% population is exactly the remaining sites whose tones were reasoned about', () => {
     const at18 = SITES.filter((s) => s.pct === 18)
     expect(at18.map(key).sort(), 'a new 18% chip needs its resting tier measured before it can be added here')
       .toEqual([
@@ -231,27 +257,27 @@ describe('the tone-as-ink-and-tint family stays inside the swept envelope', () =
         "features/ChatPage.tsx @18% tagById[tid].color || 'var(--color-primary)",
         'features/artifacts/ArtifactViewer.tsx @18% var(--color-warning)',
         "features/loops/LoopCockpitPage.tsx @18% verdict.done ? 'var(--color-ok)' : 'var(--color-primary)",
-        'features/prompts/VariableRow.tsx @18% var(--color-danger)',
 
         "features/skills/MarketplaceDetail.tsx @18% var(--color-${f.severity === 'dangerous' ? 'danger' : 'warning'})",
         'features/tasks/TaskDetail.tsx @18% sm.tone',
         'shared/ui/UpdateProgressOverlay.tsx @18% var(--color-success)',
       ].sort())
-    expect(at18.length, '18% chip sites').toBe(8)
+    expect(at18.length, 'remaining 18% chip sites').toBe(7)
+    expect(SITES.filter(site => site.file === 'features/prompts/VariableRow.tsx')).toEqual([])
   })
 })
 
 describe('--color-info is declared once, in three places that must agree', () => {
-  const coral = SCHEMES.find((s) => s.id === 'coral')!
-  it('tokens.css matches the coral scheme', () => {
-    expect(token('info', 'dark')).toBe(coral.colors['--color-info'].dark)
-    expect(token('info', 'light')).toBe(coral.colors['--color-info'].light)
+  const defaultScheme = SCHEMES.find((s) => s.id === DEFAULT_SCHEME)!
+  it('tokens.css matches the native default scheme', () => {
+    expect(token('info', 'dark')).toBe(defaultScheme.colors['--color-info'].dark)
+    expect(token('info', 'light')).toBe(defaultScheme.colors['--color-info'].light)
   })
-  it('tokenRegistry matches the coral scheme', () => {
+  it('tokenRegistry matches the native default scheme', () => {
     const reg = readFileSync(join(SRC, 'shared/theme/tokenRegistry.ts'), 'utf8')
     const m = reg.match(/c\('--color-info',[^)]*'(#[0-9a-fA-F]{6})',\s*'(#[0-9a-fA-F]{6})'\)/)
     expect(m, "tokenRegistry declares --color-info with two hex values").toBeTruthy()
-    expect(m![1]).toBe(coral.colors['--color-info'].dark)
-    expect(m![2]).toBe(coral.colors['--color-info'].light)
+    expect(m![1]).toBe(defaultScheme.colors['--color-info'].dark)
+    expect(m![2]).toBe(defaultScheme.colors['--color-info'].light)
   })
 })
