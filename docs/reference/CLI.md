@@ -2,8 +2,8 @@
 
 The `gideon` command is the single entry point (installed by
 `pip install -e .` via the `gideon` console script; source:
-`runtime/gideon/cli.py`). Run `gideon <command> --help` for the live help
-text, which this page mirrors.
+`runtime/gideon/interfaces/cli/main.py`). Run `gideon <command> --help` for the live help
+text. This page summarizes common commands; the parser is authoritative for available flags.
 
 ## Global options
 
@@ -42,7 +42,7 @@ Two fixtures ship:
 | Fixture | Contents |
 |---|---|
 | `empty` | A bare home: just the `fixture.yaml` marker. Everything else is created on first boot. |
-| `demo-home` | A home that looks used, for screenshots and demos: two projects with briefs, three task lists, ten tasks spanning every status (one blocked on a real dependency), markdown memory (preferences, project context, two days of history), five knowledge docs, and one completed loop with a three-phase plan. Onboarding is pre-completed, so it boots straight to the dashboard. Semantic/episodic memory *records* are still not included, because that store is SQLite-only with no text tier, unlike the markdown memory the fixture does carry. **No model provider**, because the fixture is a byte-identical copy on every machine and so cannot carry any one machine's endpoint; `--seed-local-model` is the step that binds one. |
+| `demo-home` | A home that looks used, for screenshots and demos: two projects with briefs, three task lists, ten tasks spanning every status (one blocked on a real dependency), markdown memory (preferences, project context, two days of history), five knowledge docs, and one completed loop with a three-phase plan. Onboarding is pre-completed, so it boots straight to the dashboard. The fixture does not supply live scoped memory authority or provider credentials. **No model provider**, because the fixture is a byte-identical copy on every machine and so cannot carry any one machine's endpoint; `--seed-local-model` is the step that binds one. |
 
 ### Binding a model into a seeded home
 
@@ -75,7 +75,7 @@ To bind a home that already exists (an evals cell home, a research-lab home) wit
 re-seeding it or booting a gateway:
 
 ```
-GIDEON_HOME=… python -m gideon.seed_local_model
+GIDEON_HOME=… python -m gideon.operations.seed_local_model
 ```
 
 ## `gideon chat`
@@ -91,9 +91,9 @@ Chat with the agent from the terminal.
 ## `gideon run`
 
 Run one headless turn against the local gateway and exit. This is the scripting/CI entry
-point. Unlike `chat -m`, which talks to a provider directly with no gateway, session,
-safety profile or tool gate, `run` drives the same `POST /api/chat` + `/api/ws` pair the
-dashboard uses, so a scripted turn is gated exactly like an interactive one.
+point. Both attended `chat` and unattended `run` use the authenticated gateway transport.
+`run` drives `POST /api/chat` plus `/api/ws` with its explicit unattended session and
+task-mode contract; attended chat retains ordinary conversation and approval handling.
 
 | Flag | Effect |
 |---|---|
@@ -158,12 +158,18 @@ Install agent config and configure credentials (interactive wizard).
 | `--clean` | Fresh install: don't merge MCP servers/tools from existing config. |
 | `--mode {docker,service,none}` | Deployment mode: Docker Compose, system service (systemd/launchd), or none. |
 | `--provider NAME` | Set the default chat provider by registry entry name. |
-| `--credential NAME[=VALUE]` | Store a named credential (value from the argument or an env var). |
+| `--credential NAME[=VALUE]` | Store a named credential (value from the argument or an env var). Avoid putting secrets in shell history or shared process listings. |
+| `--app NAME` | Run only the named installed app's declared CLI setup step. |
 
 ## `gideon doctor`
 
-Verify the Gideon setup (credentials, model bindings, channel tokens,
-directories). No flags.
+Report setup diagnostics for credentials, model bindings, channels and directories.
+Diagnostics are not qualification of every live provider or platform.
+
+| Flag | Effect |
+|---|---|
+| `--paths` | Print resolved install/reference/config/skill paths and exit. |
+| `--rebuild-routing-stats` | Rebuild derived routing statistics from the model-call audit log and exit. |
 
 ## Gateway lifecycle
 
@@ -254,11 +260,11 @@ Scaffold a third-party app.
 | Subcommand | What it does |
 |---|---|
 | `app new --list-types` | Print the provider types this build accepts, derived at runtime from the provider registry, plus the SDK contract each type's stub implements and how many providers of that type are registered. A type added upstream shows up here without a scaffold change. |
-| `app new NAME --type TYPE [--dir DIR] [--display-name] [--description] [--author] [--force]` | Generate an installable app: `app.json` (validated against core's own manifest parser, with the plan-32 `cli.*` seams and `loggerRoots`), a provider stub implementing that type's SDK ABC, a passing `test_provider.py`, `README.md`, and an MIT `LICENSE`. Declares no permissions: add only what the provider uses. |
+| `app new NAME --type TYPE [--dir DIR] [--display-name] [--description] [--author] [--force]` | Generate an installable app: `app.json` (validated against core's own manifest parser, with declared `cli.*` integration seams), a provider stub implementing that type's SDK ABC, a passing `test_provider.py`, `README.md`, and an app license. Add only the permissions and execution declarations the provider actually uses. |
 | `app new --from-template [--dir DIR] [--template-url URL] [--template-archive FILE] [--force]` | Import a selected archive into `DIR/app-template`. Provide `--template-archive FILE`, `--template-url URL`, or the operator-configured `GIDEON_APP_TEMPLATE_URL`; there is no built-in remote template source. Takes no NAME and does not rename archive contents; use `--type` to generate a named app. |
 
-Names are kebab-case. `pytest <dir>` passes on the generated bundle as-generated, and
-installing it from that local path registers the provider.
+Names are kebab-case. The generated check covers the scaffold, not a completed provider
+integration. Implement and verify its actual behavior before installing it.
 
 `--from-template` is the only part of `app new` that uses the network, and it fails closed:
 `https` only, to an allowlisted host (`codeload.github.com`), no redirects followed at all, a
@@ -281,6 +287,7 @@ Get or set configuration values (see the [configuration reference](CONFIGURATION
 | `config get [KEY]` | Get a value by dot-separated key, or the whole config with no key. |
 | `config set KEY VALUE` / `config set --file FILE` | Set a value (validated through the loader) or load a full config from JSON. |
 | `config edit` | Open `config.json` in `$EDITOR`. |
+| `config unset KEY` | Remove the stored dot-separated value. |
 
 ## `gideon skills`
 
@@ -319,13 +326,13 @@ Security audit and deny list.
 
 Gideon can expose a **read-only MCP endpoint** at `POST /mcp` so a local MCP
 client (your IDE, an MCP inspector) can ask it questions. It is off by default and
-stays off until you both mint a token and flip the flags, and it only answers
-loopback callers.
+stays off until you both mint a token and flip the flags, and its default admission is local. Remote exposure requires the explicit surface
+configuration and authentication described by the inbound gate.
 
 There are **five** inbound surfaces in the config schema (`openai`, `mcp`, `a2a`,
-`capture`, `bridge`), each with its own token and its own `enabled` flag. Only `mcp`
-has a route today; enabling one of the other four is accepted by config and simply
-has nothing to mount yet.
+`capture`, `bridge`), each with its own token and its own `enabled` flag. The gateway has implemented MCP, compatible chat (`/v1`), capture and A2A route
+registrations plus bridge integration. Availability is conditional on configured
+admission and the actual registration path, not just the schema flag.
 
 | Command | What it does |
 |---|---|
@@ -357,11 +364,23 @@ When a surface refuses to mount, the gateway log carries one line naming the exa
 reason. Every request (allowed or refused) is recorded in `<home>/inbound_audit.jsonl`,
 and refusals also land in the security event log.
 
-Remote access (`external_access.<surface>.allow_remote` + `external_access.public_url`)
-exists but is **discouraged**, and does not work for an MCP client at all: see
-[Use from your IDE](../guides/USE_FROM_YOUR_IDE.md). Neither knob is editable from the
-dashboard; they are config-file-only on purpose, and the PATCH endpoint refuses them
-rather than ignoring them.
+Remote access requires the configured surface's `allow_remote` and the public URL
+contract, plus valid client authentication and origin policy. These are deployment
+choices; enabling them does not supply a reverse proxy, TLS or a public service.
+See [Use from your IDE](../guides/USE_FROM_YOUR_IDE.md) and
+[Security architecture](../architecture/SECURITY.md).
+
+## Project archives, workflow replay and incident mode
+
+| Command | What it does |
+|---|---|
+| `gideon project export PROJECT [-o FILE] [--passphrase VALUE]` | Export one project to a manifest ZIP; an optional passphrase encrypts the archive. Protect the passphrase independently. |
+| `gideon project import ARCHIVE [--dry-run] [--passphrase VALUE]` | Plan or import a project archive. |
+| `gideon workflow replay RUN_ID [--json]` | Replay the recorded decision path and report divergence; not a claim of reproducing every external effect. |
+| `gideon incident on [--reason TEXT]` | Activate the incident stop for unattended work. |
+| `gideon incident off` | Clear incident mode; other grants and refusal rules still apply. |
+| `gideon incident status` | Show current incident state. |
+| `gideon pair PROVIDER` | Create an expiring one-time channel pairing code. |
 
 ## Other commands
 

@@ -12,12 +12,13 @@ Three ways to change it:
    to open the file in `$EDITOR`.
 3. **API.** `GET /api/config/gideon` (full config),
    `PATCH /api/config/gideon {path, value}` (single-field, allowlisted),
-   `GET /api/config/schema` (the machine-readable field registry this document
-   is derived from).
+   `GET /api/config/schema` (the current machine-readable field registry).
 
 A key like `loops.max_cycles_hard_cap` means `{"loops": {"max_cycles_hard_cap": …}}`
 in the file. Fields marked **backend-only** have no dashboard control: set them via
-CLI or file, and most need a gateway restart. Fields with a UI panel are applied live.
+CLI or file, and most need a gateway restart. Some fields are read live, while others are retained by an active run or require a
+restart. Use the actual field metadata and consumer rather than assuming every UI
+write changes an in-progress turn.
 
 Not everything is in `config.json` by design. Stored elsewhere:
 
@@ -27,7 +28,7 @@ Not everything is in `config.json` by design. Stored elsewhere:
 - **Inbox + notification entity settings**: `~/.gideon/entity_settings/*.json`
   (edited via the Inbox / Notifications settings panels).
 - **Per-app config**: each app's `data/config.json` (edited via the app's Configure form).
-- **Provider credentials**: the `.env` credential store (written by `gideon setup`).
+- **Provider credentials**: the configured credential backend (dotenv/keychain), separate from provider settings. Values are not model bindings.
 
 ---
 
@@ -122,7 +123,7 @@ keys tune the automatic skill machinery.
 | `skills.auto_refine_on_deviation` | boolean | `false` | backend-only | Update an auto-created skill when the agent succeeds via a different tool sequence (requires `auto_create_from_sessions`). |
 | `skills.auto_min_tool_calls` | integer (≥2) | `5` | backend-only | Minimum tool calls for a session to qualify for skill extraction. |
 | `skills.auto_similarity_threshold` | number (0 to 1) | `0.85` | backend-only | Skip creation when an existing skill's description overlaps ≥ this fraction. |
-| `skills.progressive_disclosure_threshold` | integer | `8` | backend-only | When more skills than this match a turn, inject only their index (name + description) and let the agent pull bodies on demand via `skill_invoke`. `0` = always inline. |
+| `skills.progressive_disclosure_threshold` | integer | `2` | backend-only | When more skills than this match a turn, inject only their index (name + description) and let the agent pull bodies on demand via `skill_invoke`. `0` = always inline. |
 
 ## After-turn learning (`learning.*`)
 
@@ -232,7 +233,9 @@ off makes the voice loop noisier, never less safe.
 ## Agent definitions (`agents.<name>.*`)
 
 Managed on the **Agents page** (create/edit forms), and stored under `agents` keyed by
-agent name. Every field is optional, and an empty value inherits the global default.
+agent name. Fields have their own inheritance and grant semantics; an empty list must not be
+interpreted as a deny-all policy. Scalars and runtime/provider bindings can inherit
+defaults. Tool/skill lists are enforced separately from app tiers and task modes.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
@@ -246,12 +249,31 @@ agent name. Every field is optional, and an empty value inherits the global defa
 | `agents.*.voice` | string | `""` | who the agent is (tone, opinions, persona), kept separate from the operating rules and injected high-priority so personality survives long prompts. |
 | `agents.*.model` | string | `""` | Default model for this agent. Overridable per-chat. |
 | `agents.*.approval_mode` | string | `""` | `auto`, `interactive`, or empty (inherit global). |
-| `agents.*.skills` | list | `[]` | Skill names loaded for this agent. |
-| `agents.*.tools` | list | `[]` | Allowed tool name patterns for this agent. |
+| `agents.*.skills` | list | `[]` | Empty means no profile skill restriction; a non-empty list restricts to exact skill names. Other app/work scope limits still apply. |
+| `agents.*.tools` | list | `[]` | Empty means no profile tool restriction; a non-empty list narrows tool name patterns. Native result retrieval remains available; app/work and approval limits still apply. |
 | `agents.*.triggers` | list | `[]` | Referenced lifecycle-trigger IDs. A lifecycle trigger fires only for agents that list it. |
 | `agents.*.source` | string | `gideon` | Agent origin: `gideon`, `marketplace`, or `builtin`. |
 
 ---
+
+## Hypermid configuration and live authority
+
+`hypermid` is the core context configuration (`ContextConfig` in
+`runtime/gideon/hypermid/config.py`). Its context mode defaults to `off`; supported
+modes are `off`, `pass_through`, `shadow` and `primary`. Context mode, feature flags,
+daemon connectivity, memory scope and model bindings are distinct controls.
+
+The native revisioned configuration service is
+`runtime/gideon/hypermid/configuration.py`. Dashboard routes include
+`GET/PUT /api/hypermid/config/runtime` and separate model configuration plan/save
+routes. Preserve the offered revision/digest contract; a generic config edit is not
+a substitute for an accepted native configuration transition. Do not put credential
+values in context policy or model configuration payloads.
+
+Agent tool/skill widening is an owner-reviewed change to the actual offered grants.
+Existing native sessions refresh the applicable profile grants before turns; explicit
+loop-intrinsic skills come from canonical selected loop/provider authority and cannot
+widen an outer app scope.
 
 ## Environment variables
 
@@ -265,13 +287,16 @@ Not config-file fields, but part of the same operator surface:
 | `GIDEON_BIND_HOST` | Bind address for the gateway (e.g. `0.0.0.0` for LAN access). |
 | `GIDEON_BYPASS_LOCAL_NETWORKS` | `1` = skip token auth for loopback/RFC1918 clients (dev convenience; public origins still need a token). |
 | `GIDEON_FIRST_PARTY_APPS_DIR` | Point a packaged install at a first-party apps directory. |
+| `GIDEON_AUTH_MODE` | `local_token` (default) or `none`; unsupported modes are refused. None mode forces loopback. |
+| `GIDEON_HYPERMID_DAEMON` | Explicit native daemon executable; packaging uses the separate `GIDEON_PREBUILT_HYPERMID_DAEMON` build variable. |
+| `GIDEON_TEST_PYTHON` | Interpreter selected by compatible native UI test fixtures; point it at a prepared runtime environment rather than a machine-specific temporary path. |
 | `GIDEON_SKIP_APP_BACKENDS` | Don't launch app backend subprocesses (test isolation). |
 | `GIDEON_CREDENTIAL_BACKEND` | Where new credentials are stored: `keychain` (OS secret service, needs the `keychain` extra) or `dotenv` (default, `~/.gideon/.env` at mode 0600). A `keychain` request on a machine with no usable secret service falls back to `.env` 0600 and `gideon doctor` says so. Reads always see both stores, so switching back never hides an existing secret. |
 
 ### How a child finds its gateway
 
 Tool subprocesses (the `gideon-core` MCP server, sandboxed cron scripts, an ACP CLI's
-MCP children) resolve the gateway's API base through **one** owner, `gideon.gateway_base`,
+MCP children) resolve the gateway's API base through **one** owner, `gideon.engine.gateway_base`,
 which answers from the socket the gateway actually bound, in this order:
 
 1. `GIDEON_PORT`, which the gateway overwrites with its bound port after binding;
@@ -286,7 +311,7 @@ or write rather than a degraded local call.
 
 - `GET /api/config/gideon`: full config as JSON (owner-only).
 - `PATCH /api/config/gideon {path, value}`: single-field writes, allowlisted; non-editable paths return 400.
-- `GET /api/config/schema`: the full field registry (labels, help, types, defaults, deprecations) auto-derived from the config dataclasses. This document is generated against it.
+- `GET /api/config/schema`: the full field registry (labels, help, types, defaults, deprecations) auto-derived from the config dataclasses. This hand-maintained document is a selected reference; the live schema and source loader are authoritative.
 - `gideon config get|set <key> [value]`: CLI equivalent; `set` validates through the same loader.
 
 See also: [API overview](API_OVERVIEW.md) · [CLI reference](CLI.md) ·

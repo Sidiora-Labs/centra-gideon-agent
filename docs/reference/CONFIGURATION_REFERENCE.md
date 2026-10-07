@@ -3,8 +3,8 @@
 Most settings live in the dashboard (Settings, then the panel named below). The
 fields on this page are **deliberately backend-only**: operator and deployment
 knobs you edit with `gideon config set <key> <value>` or by editing `config.json`
-directly. The gateway needs a restart for most of them. Everything not listed
-here has a dashboard control. See `GET /api/config/schema` for the full registry
+directly. The gateway needs a restart for most of them. This is a selected operator reference, not a complete division of every field into
+UI and file-only controls. See `GET /api/config/schema` for the full registry
 with labels, help text, types and defaults.
 
 Conventions: a key like `loops.max_cycles_hard_cap` means
@@ -64,7 +64,7 @@ automatic skill machinery:
 | `skills.auto_refine_on_deviation` | `false` | Update an auto-created skill when the agent succeeds via a different tool sequence (requires `auto_create_from_sessions`). |
 | `skills.auto_min_tool_calls` | `5` | Minimum tool calls for a session to qualify for skill extraction. |
 | `skills.auto_similarity_threshold` | `0.85` | Skip creation when an existing skill's description overlaps ≥ this fraction. |
-| `skills.progressive_disclosure_threshold` | `8` | When more skills than this match a turn, inject only their index (name and description) and let the agent pull bodies on demand. `0` = always inline. |
+| `skills.progressive_disclosure_threshold` | `2` | When more skills than this match a turn, inject only their index (name and description) and let the agent pull bodies on demand. `0` = always inline. |
 
 ## After-turn learning (`learning.*`)
 
@@ -99,7 +99,7 @@ panel (entity store). Config-side:
 | `inbox.poll_interval_seconds` | `60` | Poll cadence (min 30). |
 | `inbox.style_rules` | `[]` | Voice/style lines injected into AI reply drafting ("Match this voice/style when replying"). |
 | `inbox.test_mode` | `false` | Ingest your own messages too (demo and testing; also a CLI flag). |
-| `inbox.engagement_half_life_days` | `0` | Engagement-ranking decay half-life; `0` = no decay. The ranking toggle is in the UI. |
+| `inbox.engagement_half_life_days` | `0` | Engagement-ranking decay half-life; `0` = the default approximately 6.6-day half-life. The ranking toggle is in the UI. |
 
 ## Child processes (`sandbox.*`)
 
@@ -127,6 +127,13 @@ children: bash tools, hook and cron-script children, app backends, MCP servers.
 | `dashboard.terminal.enabled` | `true` | Kill switch for the built-in terminal (PTY) feature. Read raw with a 30s cache. `dashboard.terminal.persist` (tmux-backed persistence) is editable in the Terminal page. |
 | `dashboard.mcp_probe_timeout_secs` | `15` | Per-server timeout (5 to 120 s) for MCP tool-discovery probes; the gateway's MCP status sweep budget derives from it (+15 s). PATCH-editable via the config API, and there is no dashboard control. |
 | `memory_stores.<name>.description` | none | Optional description for a named memory store (stores are referenced by agent profiles). |
+
+## Native context configuration
+
+Hypermid context configuration defaults to `off`; `pass_through`, `shadow` and
+`primary` have distinct behavior. It uses a native revisioned configuration service
+and separate model/scope authority. See [Configuration reference](CONFIGURATION.md#hypermid-configuration-and-live-authority)
+and `runtime/gideon/hypermid/configuration.py` before changing these settings.
 
 ## Programmatic surfaces
 
