@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { controlAvailability, activateControl } from './controlState'
+import { unavailableWhen, BUSY_REASON } from './unavailable'
 import { jsxTags } from '../testing/jsxContracts'
 
 
@@ -15,28 +16,35 @@ const walk = (d: string): string[] =>
 
 const BUSY = /\b(busy|saving|sending|loading|installing|retrying|pending|working|submitting|launching|testing|promoting|consolidating|regen\w*|bulkBusy|levelBusy|deleting|creating|running|uploading|importing|exporting|refreshing|syncing|starting|stopping)\b/i
 
-function buttonTags(src: string): Array<{ tag: string; line: number }> {
-  return jsxTags(src, ['Button']).map(({ tag, line }) => ({ tag, line }))
+const tagCache = new Map<string, ReturnType<typeof jsxTags>>()
+function buttonTags(src: string) {
+  let sites = tagCache.get(src)
+  if (!sites) {
+    sites = jsxTags(src, ['Button'])
+    tagCache.set(src, sites)
+  }
+  return sites
 }
 
-const EXEMPT: Record<string, string> = {
-  'features/loops/DesignCockpitPage.tsx': 'the gate is a pass-through `disabled` prop; the reason belongs to the caller',
-  'features/settings/DurabilityPanel.tsx': 'the gate is a pass-through `disabled` prop; the reason belongs to the caller',
-  'features/settings/ProjectionRulesPanel.tsx': 'the gate is a pass-through `disabled` prop; the reason belongs to the caller',
-  'features/schedule/ScheduleDetail.tsx': '`ranFlash` is a transient post-run flash — in-flight, not blocked',
-  'features/skills/SkillInspector.tsx': '`content === null` means still loading',
-}
+// These are forwarding props and one uninitialized editor, not file-wide exceptions.
+const classifiedGate = (rel: string, gate: string) =>
+  (gate === '{disabled}' && ['features/settings/DurabilityPanel.tsx', 'features/settings/ProjectionRulesPanel.tsx'].includes(rel)) ||
+  (rel === 'features/skills/SkillInspector.tsx' && gate === '{busy || content === null}')
+const explained = (site: ReturnType<typeof jsxTags>[number]) =>
+  site.attributes.has('disabledReason') ||
+  (site.attributes.has('aria-description') && site.attributes.has('title'))
 
 const offenders = walk(SRC).flatMap((f) => {
   const rel = f.slice(SRC.length + 1)
-  const src = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
-  return buttonTags(src)
-    .filter(({ tag }) => /\bdisabled=\{/.test(tag) && !/\bdisabledReason=/.test(tag))
-    .filter(({ tag }) => {
-      const gate = /\bdisabled=\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/.exec(tag)?.[1] ?? ''
-      return gate.split(/\|\||&&/).map((s) => s.trim()).filter(Boolean).some((c) => !BUSY.test(c))
+  return buttonTags(readFileSync(f, 'utf8'))
+    .filter(site => site.attributes.has('disabled') && !explained(site))
+    .filter(site => {
+      const gate = site.attributes.get('disabled')!
+      if (classifiedGate(rel, gate) || gate === site.attributes.get('loading')) return false
+      if (rel === 'features/capabilities/experience/AmbientDisplay.tsx' && gate === '{fullscreen}' &&
+        site.element.includes("fullscreen ? 'Fullscreen active' : 'Enter fullscreen'")) return false
+      return gate.slice(1, -1).split(/\|\||&&/).map(s => s.trim()).filter(Boolean).some(c => !BUSY.test(c))
     })
-    .filter(() => !(rel in EXEMPT))
     .map(({ line }) => `${rel}:${line}`)
 })
 
@@ -73,9 +81,15 @@ describe('a disabled Button that a user could unblock says how', () => {
     activateControl(event, state.blocked, () => { called = true })
     expect(prevented).toBe(true)
     expect(called).toBe(false)
-    const un = readFileSync(join(SRC, 'shared/ui/unavailable.ts'), 'utf8')
-    expect(un, "a raw <button> has no click guard, so its busy branch keeps the native attribute")
-      .toMatch(/if \(opts\?\.busy\) return \{ disabled: true, 'aria-busy': true, title: opts\.title \}/)
+    expect(unavailableWhen(true, 'Choose a project', { busy: true }))
+      .toEqual({ disabled: true, 'aria-busy': true, title: undefined })
+    const raw = unavailableWhen(true, 'Choose a project')
+    expect(raw['aria-disabled']).toBe(true)
+    expect(raw.disabled).toBeUndefined()
+    let stopped = false
+    raw.onClickCapture?.({ preventDefault: () => { prevented = true }, stopPropagation: () => { stopped = true } } as React.MouseEvent)
+    expect(stopped).toBe(true)
+
   })
 
   it('the in-flight class now EXPLAINS itself, and shares one sentence to do it', () => {
@@ -86,29 +100,20 @@ describe('a disabled Button that a user could unblock says how', () => {
       busyTags.filter(({ tag }) => !/disabledReason=/.test(tag) && !/\bloading=/.test(tag)),
       'a busy gate owes a reason now: soft-off keeps the tab stop AND refuses the click',
     ).toEqual([])
-    const un = readFileSync(join(SRC, 'shared/ui/unavailable.ts'), 'utf8')
-    expect(un, 'the shared sentence lives in one place').toMatch(/export const BUSY_REASON = /)
-    expect(un.match(/export const BUSY_REASON = '([^']+)'/)?.[1], 'neutral about the owner')
-      .not.toMatch(/\b(another|other|sibling)\b/i)
+    expect(BUSY_REASON).not.toMatch(/\b(another|other|sibling)\b/i)
+
   })
 
   it('🔴 THE RATCHET: no busy-gated Button may go back to explaining nothing', () => {
-    const OVERLOADED_VOCABULARY: Record<string, string> = {
-      'features/knowledge/ReadingView.tsx':
-        '`!pending` is a pending text SELECTION, not an in-flight action — matched by the word, not the meaning',
-    }
     const silent = walk(SRC).flatMap((f) => {
       const rel = f.slice(SRC.length + 1)
-      if (rel in OVERLOADED_VOCABULARY) return []
-      const src = readFileSync(f, 'utf8')
-        .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-        .replace(/\{\/\*[\s\S]*?\*\/\}/g, (m) => m.replace(/[^\n]/g, ' '))
-        .replace(/(^|[^:"'`])\/\/[^\n]*/g, (m, p1) => p1 + ' '.repeat(m.length - p1.length))
-      return buttonTags(src)
-        .filter(({ tag }) => /\bdisabled=\{/.test(tag) && !/\bdisabledReason=/.test(tag) && !/\bloading=/.test(tag))
-        .filter(({ tag }) => {
-          const gate = /(?<!aria-)\bdisabled=\{([^}]*(?:\{[^}]*\}[^}]*)*)\}/.exec(tag)?.[1] ?? ''
-          return !!gate && BUSY.test(gate)
+      return buttonTags(readFileSync(f, 'utf8'))
+        .filter(site => site.attributes.has('disabled') && !explained(site) && !site.attributes.has('loading'))
+        .filter(site => {
+          const gate = site.attributes.get('disabled')!
+          // ReadingView's pending value is the selected text, not an operation.
+          if (rel === 'features/knowledge/ReadingView.tsx' && gate === '{!pending}') return false
+          return BUSY.test(gate)
         })
         .map(({ line }) => `${rel}:${line}`)
     })

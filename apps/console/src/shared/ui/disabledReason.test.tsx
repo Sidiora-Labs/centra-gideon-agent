@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { jsxTags } from '../testing/jsxContracts'
+import { resolveSendButton, sendButtonIsActive } from './composer/sendButtonState'
 import { Button } from './Button'
 
 
@@ -124,7 +125,11 @@ function gatedSubmits(): Array<{ file: string; line: number; tag: string }> {
 
 describe('the unexplained-submit tail only shrinks', () => {
   const gated = gatedSubmits()
-  const unexplained = gated.filter((t) => !/disabledReason|unavailableWhen\(/.test(t.tag))
+  const unexplained = gated.filter((t) => {
+    const site = jsxTags(t.tag)[0]
+    return !site.attributes.has('disabledReason') && !/unavailableWhen\(/.test(t.tag) &&
+      !(site.attributes.has('aria-description') && site.attributes.has('title'))
+  })
 
   it('finds the gated submits (not vacuously green)', () => {
     expect(gated.length, 'the matcher must find validity-gated submits').toBeGreaterThan(30)
@@ -167,7 +172,15 @@ describe('a reason never rides the accessible name', () => {
 
   it('explains both gated composer controls', () => {
     expect(composer).toMatch(/disabledReason="Type something first"/)
-    expect(composer).toMatch(/label="Send message" disabledReason="Type a bit more first"/)
+    const send = jsxTags(composer, ['AssistantComposerSend'])[0]
+    expect(send.attributes.get('aria-description')).toBe('{sendReason}')
+    expect(send.attributes.get('title')).toBe('{sendReason}')
+    expect(send.attributes.get('aria-disabled')).toBe("{action === 'send-disabled' || undefined}")
+    expect(send.attributes.get('onClick')).toBe('{primaryClick}')
+    expect(composer).toMatch(/surface\.action\.canSubmit \? surface\.submit : undefined/)
+    const kind = resolveSendButton({ processing: false, streaming: false, canSend: false, canQueue: false, justSent: false })
+    expect(kind).toBe('send-disabled')
+    expect(sendButtonIsActive(kind)).toBe(false)
   })
 
   it('has no em-dash reason left in any aria-label in the tree', () => {
