@@ -223,8 +223,15 @@ describe('donor ElicitationForm defaults and additive field slot', () => {
     expect(screen.getByText('On')).toBeInTheDocument()
     expect(container.querySelector('input')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull()
-    expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByRole('button', { name: 'Decline' }) as HTMLButtonElement).disabled).toBe(true)
+    for (const name of ['Send', 'Decline']) {
+      const button = screen.getByRole('button', { name })
+      expect(button).toHaveAttribute('aria-disabled', 'true')
+      button.focus()
+      expect(button).toHaveFocus()
+      fireEvent.click(button)
+    }
+    expect(screen.getByText('Read only text')).toBeInTheDocument()
+    expect(container.querySelector('input')).toBeNull()
   })
 
   it('renders a caller live field in place of its read-only display and invokes the optional cancel', async () => {

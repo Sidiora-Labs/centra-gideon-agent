@@ -53,7 +53,9 @@ describe('workflow records', () => {
 
   it('prints actual workflow event time, node, state, and detail', () => {
     render(<WorkflowTimeline rows={[{ ...row, attempt: 2, tokens: 12, cost_usd: 0.02, duration_secs: 8, approved: false }]} />)
-    expect(screen.getByText('2026-09-26T10:00:00Z')).toBeTruthy()
+    const time = screen.getByLabelText('Workflow events').querySelector('time')
+    expect(time).toHaveAttribute('datetime', '2026-09-26T10:00:00Z')
+    expect(time?.textContent?.trim()).not.toBe('')
     expect(screen.getByText('fetch · completed')).toBeTruthy()
     const timeline = screen.getByLabelText('Workflow events')
     for (const fact of ['Fetched the source', 'node', 'attempt 2', 'model-a', '12 tokens', '~$0.0200', '8s', 'rejected']) {

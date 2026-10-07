@@ -241,7 +241,15 @@ describe('a verb whose precondition is missing explains itself', () => {
       })
     })
 
-    expect(screen.getByText(/select a passage in the article first/i)).toBeInTheDocument()
+    expect(screen.getByText('Select a passage in the article first — extract acts on what you highlighted')).toBeInTheDocument()
+    const button = screen.getByRole('button', { name: 'Preview the change' })
+    expect(button).toHaveAttribute('aria-disabled', 'true')
+    expect(button).toHaveAccessibleDescription('Select a passage in the article first')
+    button.focus()
+    expect(button).toHaveFocus()
+    fireEvent.click(button)
+    expect(preview).not.toHaveBeenCalled()
+    expect(apply).not.toHaveBeenCalled()
   })
 
   it('says there is nothing to merge rather than offering an empty picker', async () => {

@@ -27,8 +27,21 @@ describe('static composer primitive contract', () => {
   })
 
   it('disables attachment action when no handler exists', () => {
-    render(<ComposerAttachButton />)
-    expect(screen.getByRole('button', { name: 'Add attachment' })).toBeDisabled()
+    const onClick = vi.fn()
+    const { rerender } = render(<ComposerAttachButton />)
+    const button = screen.getByRole('button', { name: 'Add attachment' })
+    expect(button).toHaveAttribute('aria-disabled', 'true')
+    expect(button).toHaveAttribute('aria-description', 'Attachments are unavailable in this view.')
+    button.focus()
+    expect(button).toHaveFocus()
+    fireEvent.click(button)
+    rerender(<ComposerAttachButton disabled onClick={onClick} />)
+    fireEvent.click(button)
+    expect(onClick).not.toHaveBeenCalled()
+    rerender(<ComposerAttachButton onClick={onClick} />)
+    expect(button).not.toHaveAttribute('aria-disabled')
+    fireEvent.click(button)
+    expect(onClick).toHaveBeenCalledOnce()
   })
 
   it('switches send control to stop during streaming', () => {
