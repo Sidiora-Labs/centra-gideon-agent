@@ -6,8 +6,10 @@ which field is a Gideon extension, so a skill written for another harness
 can be dropped in without guesswork, and one written here can be handed out
 without surprises.
 
-Everything below was **verified against the parser** (`runtime/gideon/skills/loader.py`)
-rather than inferred from it, and is pinned by `checks/runtime/test_skill_format_compat.py`.
+The current parser is `runtime/gideon/extensions/skills/loader.py`; prompt allocation
+is in `runtime/gideon/extensions/skills/allocation.py`. This reference describes those
+source contracts. Existing tests cover format cases, but this documentation refresh
+does not establish a new compatibility or runtime qualification result.
 
 ## The shape
 
@@ -38,14 +40,14 @@ ecosystem, which is the point.
 | `name` | recommended | Display name. Falls back to the directory key when absent. |
 | `description` | recommended | One line, shown in listings and used for surfacing. Falls back to the key. |
 | `triggers` | no, and it is a **Gideon extension** | Phrases that auto-surface the skill. See below. |
-| `always` | no | `true` loads the skill on every turn, bypassing trigger matching. |
+| `always` | no | `true` selects the skill without positive trigger matching, subject to current grants and context allocation. |
 | `status` | no | `active` (default) or a lifecycle value the curator sets. |
 | `resources` | no | Files beside `SKILL.md` an agent may load on demand. See below. |
 | `context_tier` | no | `light` / `standard` (default) / `heavy`: how much prompt this skill may spend. See below. |
 
-Unknown fields are read and kept, not rejected. A foreign harness's extra
-frontmatter is preserved rather than treated as an error, though Gideon
-does nothing with it.
+Unknown fields remain on disk. The flat reader may retain their scalar text, but that
+does not mean the runtime implements their semantics. In particular, foreign
+`allowed-tools` metadata is not a substitute for Gideon's actual tool grants.
 
 ### `triggers`: the auto-surfacing extension
 
@@ -131,8 +133,8 @@ budget, and `context_tier` is how a skill **declares** its share:
 | Tier | Per-skill ceiling | For |
 |---|---|---|
 | `light` | 1,000 tokens | A skill that states one rule or one output format. |
-| `standard` | 3,000 tokens | The default. Clears 16 of the 17 skills Gideon ships. |
-| `heavy` | 8,000 tokens | Nearly twice the largest bundled skill. Spend this only by saying so. |
+| `standard` | 3,000 tokens | The default allocation. |
+| `heavy` | 8,000 tokens | Larger procedures that explicitly request this tier. |
 
 All the skills in one turn additionally share a **16,000-token aggregate**, so no
 combination of skills can take the window from the conversation.
@@ -168,7 +170,7 @@ markdown, the scripts, and the description all still apply.
 **Practical consequence:** write `triggers` for the benefit of Gideon, and
 keep the body self-contained so the skill still reads correctly without it.
 
-### The conformance delta, stated exactly
+### Metadata interoperability
 
 Gideon stays on the shared `SKILL.md` + YAML-frontmatter format rather than
 diverging, and the delta is additive in both directions:
@@ -182,8 +184,8 @@ diverging, and the delta is additive in both directions:
 
 So **a conformant third-party skill installs unmodified**: same directory shape,
 same frontmatter, no conversion pass, and it lists, loads and (if it declares
-`resources`) exposes its catalog straight away. A Gideon skill handed out
-loses `triggers`/`resources` handling and nothing else.
+`resources`) exposes its catalog straight away. Another harness may interpret these extensions differently or ignore them; check its
+actual loader rather than assuming identical surfacing, resources, or budgets.
 
 It buys interoperability and **not** a trust exemption. Every install, foreign or
 local, goes through the one supply-chain gate: quarantine, then scan at the
@@ -195,7 +197,7 @@ holding for that same skill when it ships a destructive script.
 ## The parser, and its limits
 
 Frontmatter is read by a deliberate **line parser**, not a YAML library: a
-~40-line `key: value` reader with no dependency. That choice is intentional,
+`key: value` reader with dedicated handling for selected blocks. That choice is intentional,
 because skills are read on every turn and a YAML parse per skill per turn is not
 free. It does mean the accepted grammar is narrower than YAML. Concretely:
 
@@ -213,7 +215,7 @@ free. It does mean the accepted grammar is narrower than YAML. Concretely:
 
 **Not supported**, and these fail *quietly*, so avoid them:
 
-| Construct | What happens (measured, not assumed) |
+| Construct | Current parser behavior |
 |---|---|
 | Nested mappings | The nested keys are **skipped**, not hoisted: `meta:` with `sub: v` under it yields `meta: ""` and no `sub`. |
 | Flow mappings | Kept as raw text: `meta: {k: v}` yields the string `"{k: v}"`. |
@@ -234,9 +236,25 @@ never wrote triggers for. That silent-failure mode is why the BOM and
 leading-whitespace cases are handled rather than documented as gotchas, and why
 `checks/runtime/test_skill_format_compat.py` pins each one.
 
+## Installation and execution scope
+
+Parsing an existing file is more tolerant than strict authoring validation. The validator
+requires frontmatter with a valid `name` and nonempty `description`; do not rely on parser
+fallbacks as the format for a newly published skill.
+
+A skill can be installed but unavailable to a particular turn. Profile skill grants,
+app-declared skill limits, project/namespace reach, enabled copies, and current runtime
+bindings determine what lists, loads, and resources are available. `always: true` does
+not override those limits. Selecting a skill does not independently authorize a tool,
+program, network request, or persistent memory operation.
+
+Skill update and install review apply to the actual offered bytes and selected copy.
+Preserve the source, project, and namespace identity when updating; another copy with the
+same display name is not the reviewed target.
+
 ## See also
 
-- `runtime/gideon/skills/loader.py`: the parser itself, and this page is its contract.
+- `runtime/gideon/extensions/skills/loader.py`: the parser itself, and this page is its contract.
 - `checks/runtime/test_skill_format_compat.py`: the executable version of this page.
-- The Skills surface in the dashboard (Settings → Skills) lists what is installed,
+- The Skills surface in the dashboard lists installed copies,
   which tier it came from, and its trigger phrases.
