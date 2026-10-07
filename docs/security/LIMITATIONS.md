@@ -1,125 +1,89 @@
-# Security limitations: what we do not enforce yet
+# Security limitations
 
-Gideon's strongest claim is that its controls are enforced at the point of
-execution, not merely requested in a prompt. Honesty requires naming the places
-where that is not yet literally true. These are deliberate, documented tradeoffs
-rather than oversights, and each one is stated here in the same terms the
-internal architecture uses, without softening.
+Gideon's controls have different boundaries. Gateway authentication, operation grants,
+content scanning, scoped memory and child-process policy do not together make arbitrary
+installed code safe. This page describes the limits of the implemented source; it is not
+a penetration-test result or deployment certification.
 
-This page is referenced from the public [threat model](THREAT_MODEL.md) and from
-`SECURITY.md`. It was verified against the codebase at the commit that introduced
-it.
+## 1. External agent permissions depend on the actual provider
 
-## 1. ACP agents under auto-approve (YOLO) rely on system-prompt framing, not rails
+The native runtime checks task modes, tool and skill grants, app work tiers and approval
+policy before invoking tools. Its controls live under `runtime/gideon/engine` and
+`runtime/gideon/security`.
 
-Task modes (`agent` / `ask` / `plan` / `build`) decide which tools may run. For
-the **native runtime**, this gate is hard-enforced: `task_modes.py` is enforced in
-`_guard_and_invoke` **before approval is consulted, so a Trust/YOLO auto-approve
-can never bypass a task-mode restriction**
-(`runtime/gideon/task_modes.py`).
-
-For **ACP agents** (external CLI agents driven over the Agent Client Protocol),
-the same module is applied in the dashboard's permission handler, as
-"belt-and-suspenders for ACP runtimes that gate via their own protocol path"
-(`task_modes.py`). An ACP agent running under YOLO ultimately gates through its
-own protocol path, and the architecture states the tradeoff plainly: task-mode
-tool-gating postures are hard-enforced at the permission prompt for the native
-runtime, while ACP agents under YOLO rely on system-prompt framing, a documented
-tradeoff in `task_modes.py`
-([`docs/architecture/SECURITY.md`](../architecture/SECURITY.md#trust--yolo-state-trust_modepy)).
-
-**What this means for you:** if you enable auto-approve (YOLO) and run an external
-ACP agent, that agent's tool use is bounded by prompt framing rather than by the
-same hard rail the native runtime enforces. Running a trusted native agent, or
-leaving approval prompts on, keeps the hard rail in force.
+ACP permission behavior is provider-dependent. `integrations/acp/permission_authority.py`
+normalizes requested modes: elevated or unknown modes are clamped for attended work;
+unattended work can admit recognized auto-approve modes. The host can gate operations
+that the provider reports through ACP permission requests. It cannot promise equivalent
+coverage for operations a CLI executes without reporting them. The measured residual
+registry and [ACP comparison](../agents/acp-parity.md) describe that distinction.
+Prompt instructions alone are not enforcement.
 
 ## 2. The app `network` permission is declaration-only
 
-An app manifest declares a permission scope (`api` / `events` / `mcpTools` /
-`storage` / `network` / `memory` / `cron`). Most of these are enforced server-side
-by the gateway. `network` is not, by design.
+`runtime/gideon/extensions/apps/permissions.py` exposes `can_use_network` as a declaration.
+It does not contain every network request an app might make. In-process Python can open
+its own sockets, and an app backend is a separate program. Install review therefore
+labels network use as disclosure, rather than treating `network: false` as containment.
 
-The code says so itself: `can_use_network` is declaration-only and unenforced by
-design, and the consent surface says so rather than implying otherwise. There is
-no per-app egress chokepoint to enforce at. An app's provider code is imported
-in-process by the gateway, so its own `httpx`/`requests` calls are the gateway's
-egress, and an app with a backend owns a separate OS process with its own network
-stack. The flag is disclosure, and the Store discloses it as such. Treat
-`network: true` as an honest declaration, not a boundary
-(`runtime/gideon/apps/permissions.py`).
+Gateway-mediated HTTP and command execution have additional egress controls. In
+`runtime/gideon/security/sandbox.py`, restricted command egress requires an actual
+OS no-network wrapper or refuses before launch if the host cannot supply it. A declared
+external program uses a separate wrapping path. These controls do not turn the app
+permission into general socket isolation, nor provide arbitrary per-host filtering for
+all command-line programs.
 
-The consent surface states the non-enforcement outright. The Store shows the
-network claim **outside** the list of permissions the gateway enforces, labelled
-advisory, with the text *"Gideon does not confine an app's outbound traffic: this
-app's code can reach the network either way. The declaration is disclosure, not
-containment."* It is shown whether or not the app declares `network`, so an app
-that declares `network: false` is not presented as one the platform has blocked.
-An app's *gateway-mediated* reach is separately bounded by its `api` permission.
-What is **not** bounded is the app's own outbound traffic.
+## 3. App dependencies share one writable prefix, not an isolated interpreter
 
-**What this means for you:** treat an installed app's `network: true` as a stated
-intent you are consenting to, the same way you would trust any program you choose
-to run. It is not a sandbox that prevents the app from talking to the network. The
-supply-chain scanner (quarantine, scan, consent, install, with `dangerous`
-terminal) is the control that vets what you install. The `network` flag is
-disclosure, not containment.
+App `dependencies.pythonDependencies` are installed into `<GIDEON_HOME>/app-python`
+by `runtime/gideon/extensions/apps/app_python.py`, **not** into the gateway's base
+virtual environment. The prefix is appended after the interpreter's own package paths.
+Resolution considers installed app requirements and constrains distributions already
+provided by the gateway; `app_manager.py` also rejects conflicting core requirements.
 
-## 3. App Python dependencies install into the venv the gateway runs from
+This protects the base environment from ordinary app dependency replacement. It does
+not give each in-process provider its own interpreter or private module namespace for
+third-party dependencies. Apps share one Python import environment and mutually
+incompatible requirements can be refused. Packages and their install process remain
+code you must trust. Rebuilding the derived prefix is distinct from restoring app data.
 
-An app may declare `dependencies.pythonDependencies` in its manifest, and the
-installer pip-installs them into the **shared** virtualenv the gateway itself runs
-out of. There is no per-app site-packages. Core ships lean deliberately (heavy
-provider and ML libraries are not core dependencies), so this is how an app brings
-what it needs.
+## 4. App UI shares the host origin
 
-**What is enforced:** an app may not re-pin a dependency core owns. Before
-anything is installed, `app_manager._reject_core_dependency_conflicts` refuses any
-declared requirement that names a core-declared dependency unless the version
-already installed satisfies it. Pip is therefore never in a position to move a
-core dependency under the running gateway. The check is fail-closed: an
-unparseable requirement, or a core-owned name whose installed version cannot be
-read, denies rather than installs. Requirements for libraries core does not own
-are unaffected. That is 20 of the 22 first-party apps that declare dependencies,
-so the check has something to say about **two** of them: `design-critique` pins
-`Pillow` and `diarization-onnx` pins `numpy`, both core-declared, and both are
-admitted only while the installed version already satisfies the pin. The provider
-SDKs like `openai` and `anthropic` are *extras*, not core dependencies, so every
-app declaring one of those is unaffected. (The ratio was measured 2026-09-07
-against `GideonApps` `f623b66`, over the 22 manifests declaring
-`dependencies.pythonDependencies`, compared against core's `pyproject.toml`
-`[project].dependencies`. It is a claim about another repository at a moment in
-time: re-derive it, do not trust it.)
+A contributed UI mounts in the console's React tree. It has access to the host DOM and
+same-origin requests. Browser access to an HttpOnly cookie's raw value is restricted,
+but the cookie can still authorize same-origin requests from that page. The SDK's
+path checks constrain cooperating clients; they do not contain arbitrary JavaScript.
+Server app permissions apply when the request carries a verified app-scoped identity.
 
-**What is not enforced:** the packages an app adds are still importable by
-everything in the process, and pip may still move a *transitive* dependency that
-core does not declare directly. Isolating app dependencies properly requires
-out-of-process providers. Today an app's provider code is imported in-process, so
-there is no import boundary to scope a path to. That is a platform-seam change,
-recorded as such rather than approximated here.
+`uiCapabilities` controls supported SDK imports and discloses host integrations. It is
+not an iframe, separate origin or JavaScript sandbox. Trust a UI-bearing app with that
+browser authority before installing it.
 
-**What this means for you:** an installed app can add libraries to the gateway's
-environment, so install apps you trust. The supply-chain scanner (quarantine,
-scan, consent, install, with `dangerous` terminal) is the control that vets them.
-What an app cannot do is silently change the version of a library the gateway
-depends on.
+## 5. Sandboxing and local authority have platform limits
 
-## 4. App UI runs in the host origin
+Child environment filtering and credential-path hiding are not a general filesystem
+jail. Available OS wrappers, configured sandbox mode and execution site determine
+what is applied. Network-off command wrapping is a separate restriction; unrestricted
+execution does not gain it merely because a sandbox function was called. An installed
+in-process provider is not contained by those child wrappers.
 
-An app's frontend bundle is loaded into Gideon's page, not into a separate
-security origin. It can access the host DOM, the session cookie, and same-origin
-gateway APIs. `createAppApi` checks declared paths for well-behaved SDK clients,
-but it does not contain arbitrary bundle code; server permission middleware
-only narrows requests that carry an app-scoped identity.
+The owner or a process with the owner's file access can change installed code,
+configuration and credentials. Audit chains and packaged baseline checks detect certain
+changes inside the expected trust model; they do not defend against a compromised OS
+or an attacker who controls both state and the verification keys.
 
-**What this means for you:** UI access is an advisory install disclosure, not a
-sandbox guarantee. Install UI-bearing apps only when you trust their frontend
-code with the same browser authority as Gideon's own page.
+## 6. Privacy requires the actual work scope and lifetime
 
-## Why these are listed, not fixed
+Temporary work suppresses persistent memory reads and writes. Incognito permits
+otherwise authorized reads but suppresses writes. Session labels alone do not establish
+scope: `runtime/gideon/security/session_credentials.py` and native Hypermid scope issuers
+validate current origin and authority. Private workflow resources require the live native
+receipt and lifecycle cleanup. A missing issuer or unavailable proof must not be replaced
+with a guessed workspace or a different privacy mode.
 
-Per the project's lifecycle discipline, a control gap discovered while writing
-documentation is recorded as a candidate for the security-hardening track, never
-patched inline in a docs change. Every item above has a named future direction:
-extending the hard rail to ACP protocol paths for the first one, OS-level app
-isolation for the second, and out-of-process providers for the residual half of
-the third. This page will shrink as those land.
+Privacy controls do not prevent configured model or channel providers from receiving
+requests needed to perform the work, and they do not erase provider-side logs. Review
+the actual integration's data handling separately.
+
+See [Threat model](THREAT_MODEL.md), [Security architecture](../architecture/SECURITY.md)
+and [App platform](../architecture/APP_PLATFORM.md).

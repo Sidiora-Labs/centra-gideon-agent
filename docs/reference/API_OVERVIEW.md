@@ -1,14 +1,21 @@
 # API overview
 
-The gateway serves a REST + WebSocket API on the dashboard port (default `10000`).
-All routes live under `/api/*` and require authentication (token or local-network
-bypass, depending on your auth mode). `gideon token` prints a tokenized URL.
+The gateway serves REST and WebSocket routes on the dashboard port (default `10000`).
+Most console routes use `/api/*`; app UI/proxy and configured inbound surfaces have
+other prefixes. Authentication, origin/CSRF checks and operation-specific owner/app/work
+rules are distinct. `gideon token` prints an access URL; treat it as a credential.
 
-Route registrations live in `runtime/gideon/dashboard/server.py` plus per-domain
-handler modules (`dashboard/handlers/`, `tasks/handlers.py`, `workflows/handlers.py`,
-`artifacts/handlers.py`, `lexicon/handlers.py`, `providers/*_routes.py`). The tables
-below list every route with a one-liner. The handler docstrings are the authoritative
-per-route contract.
+Route assembly lives in `runtime/gideon/interfaces/dashboard/server.py`, feature handlers
+under `interfaces/dashboard/handlers`, and domain registration modules under
+`automation`, `workspace` and `extensions/providers`. The tables below are a navigation
+summary, not an exhaustive generated route schema. Registration, handler validation and
+current permission middleware are authoritative.
+
+For revisioned mutations, retain the revision returned with the original read and supply
+its required `If-Match`; do not fetch a fresh revision to authorize an older draft. An HTTP
+response alone is not always acceptance: consumers must inspect the route's application
+result and accepted snapshot. Owner-only operations cannot be acquired through an app
+manifest's broad API prefix.
 
 ## System & auth
 
@@ -209,9 +216,10 @@ per-route contract.
 | Method + path | What it does |
 |---|---|
 | `GET /api/apps` · `POST /api/apps` · `GET/DELETE /api/apps/{name}` | Installed apps; install from a source; detail; uninstall. |
+| `POST /api/apps/preview` | Stage and scan an install/update offer; return execution disclosure and staged review digest. |
 | `GET /api/apps/catalog` | The Store catalog (native + first-party + registered sources). |
 | `GET/POST/DELETE /api/apps/sources` · `GET/POST/DELETE /api/apps/local-sources` | Third-party app sources (git URLs / local dirs). |
-| `POST /api/apps/{name}/enable` · `.../disable` · `.../update` | Enable/disable; update (atomic with rollback). |
+| `POST /api/apps/{name}/enable` · `.../disable` · `.../update` | Enable/disable; digest-bound reviewed update with rollback. Changed disclosure requires renewed consent. |
 | `GET /api/apps/{name}/uninstall-preview` | What an uninstall would remove. |
 | `GET/PUT /api/apps/{name}/config` | App config (schema-driven Configure form). |
 | `POST /api/apps/{name}/agent-run` · `GET .../agent-run/{run_id}` | App-initiated agent runs (permission-gated). |
@@ -319,6 +327,35 @@ per-route contract.
 
 All four portability routes refuse an app-scoped token: exporting or overwriting the whole
 home is the owner's operation, never an installed app's.
+
+## Native capability surfaces
+
+The console also serves native capability routes below `/api/capabilities`. These are
+registered by `runtime/gideon/interfaces/dashboard/handlers/capabilities.py` and its
+feature modules. They include workspace projects, processes, ports, Git, storage,
+external/provider terminals and desktops, alongside knowledge, work, identity, personal,
+communications and creative surfaces. Availability, required programs, platform support
+and operation permissions differ; a collection entry is not authority to execute a write.
+
+Workspace storage diagnosis counts logical file sizes from the native filesystem scan,
+excludes symlinks and reports scan completeness. Its compact display is a presentation
+of the reported byte count, not an allocated-disk-size measurement.
+
+## Configured inbound surfaces
+
+These use their own configured admission and client tokens, rather than implicitly
+inheriting dashboard owner authority. Master and per-surface enablement plus incident
+state apply. Source lives in `runtime/gideon/integrations/inbound`.
+
+| Surface | Registration source | Purpose |
+|---|---|---|
+| `POST /mcp` | `mcp_http.py` | POST-only inbound MCP; GET does not supply an SSE stream |
+| `/v1` | `openai_dialect.py` | Compatible chat API using native turn/session handling |
+| `/capture` | `capture_proxy.py` | Configured capture proxy and import routes |
+| `/a2a` | `a2a.py` | Agent card and workflow-backed task interface |
+
+A disabled/unmounted surface is unavailable even when its implementation is packaged.
+See [Security architecture](../architecture/SECURITY.md) for boundary distinctions.
 
 ## Core update state
 

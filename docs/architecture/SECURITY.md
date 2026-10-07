@@ -1,296 +1,148 @@
-# Security model
+# Security architecture
 
-Defense in depth for a system that runs an autonomous agent on your machine:
-authentication modes, command screening, an OS sandbox, one egress chokepoint,
-scoped tokens, supply-chain gates, untrusted-content fencing, and a
-tamper-evident audit log. Paths are relative to `Gideon/src/gideon/`.
-
-> This is the internal architecture reference. For the externally-facing view,
-> meaning trust boundaries, the OWASP Agentic Top-10 (ASI) mapping and an honest
-> statement of limitations, see the public
-> [threat model](../security/THREAT_MODEL.md) and
-> [limitations](../security/LIMITATIONS.md). To report a vulnerability, see
-> [`SECURITY.md`](../../SECURITY.md).
+Gideon is a single-owner runtime that can act on the host and configured services.
+Controls apply at different seams: HTTP admission, tool invocation, app lifecycle,
+work lineage, network dispatch, memory scope and persistence. Paths below are relative
+to the repository root; they identify implementation, not a claim of universal coverage.
 
 ## Auth modes
 
-`auth/modes.py` defines four modes, but **only two are selectable today**.
-`AuthConfig.from_env()` recognises `GIDEON_AUTH_MODE=none` and otherwise returns
-the `local_token` default, so `api_key` and `oauth2` cannot be reached from
-configuration even though their request-side halves are built.
+`runtime/gideon/security/auth/modes.py` supports **`local_token`** (default) and
+**`none`**. Unsupported spellings, including `api_key` and `oauth2`, raise during
+configuration parsing; they do not silently select another mode. None mode forces the
+bind to loopback through `effective_bind`.
 
-| Mode | Selectable | Behavior |
-|---|---|---|
-| `none` | yes | No token auth, and **the bind is forced to loopback** by `effective_bind`, because an unauthenticated gateway must never leave the host. Dev convenience. |
-| `local_token` | yes | The default: token auth with a login page; static assets bypass the check (the real asset surface only, in `dashboard/token_auth.py`). An opt-in, IP-gated local-network bypass exists. |
-| `api_key` | no, **not selectable** | Header key auth. Validation is implemented (`dashboard/token_auth.py` checks `Authorization: Bearer` against the configured key) but no env value reaches it. |
-| `oauth2` | no, **not selectable** | OIDC JWT verification is implemented (`auth/oidc.py`, imported lazily only in this mode) but no env value reaches it. |
+`runtime/gideon/interfaces/dashboard/token_auth.py` implements gateway token admission,
+owner login/session behavior and app identity adoption. Owner login credentials and
+second-factor helpers live under `runtime/gideon/security/auth`. These are single-owner
+authentication mechanisms, not a hosted multi-tenant user/role system. An opt-in
+local-network bypass is a separate exposure choice. It must not be assumed safe behind
+a public reverse proxy.
 
-**What that means in practice.** Setting `GIDEON_AUTH_MODE=api_key` leaves the
-gateway on `local_token` and silently ignores `GIDEON_API_KEY`. It fails
-**closed**: a client presenting `Authorization: Bearer <that key>` is refused,
-not admitted, so the cost is lost access rather than weakened auth. But it is a
-configuration that reads as working and is not, which is why it is stated here
-rather than left to be discovered.
+App-scoped identity must survive every supported auth mode. The dashboard server's
+none-mode middleware still validates app credentials and adopts their narrowing claim.
+App access also consults `extensions/apps/permissions.py`, which retains owner-only
+operation rules even when an app lists a broad API prefix.
 
-Wiring the selector is tracked as roadmap scope, and it carries one design
-question worth settling deliberately rather than in passing: whether an
-unhonourable mode should **refuse at startup** or fall back. Refusing is the
-honest posture for a security control, but `from_env()` is also called as a
-fallback inside a request path (`dashboard/origin.py`), so a naive raise would
-turn a misconfiguration into a 500 rather than a clean boot failure. The fix
-belongs with that atom, not in a doc change.
+## Tokens, proxying and inbound surfaces
 
-### The `AUTH_MODE=none` sandbox fix
+Dashboard tokens grant real gateway access. Do not put tokenized URLs in screenshots,
+logs or public reports. Token TTL, nonce revocation, origin and CSRF controls are
+implemented in the dashboard auth modules.
 
-Skipping the token-auth middleware in none-mode used to silently disable the
-**entire app permission sandbox**: the middleware is what adopts the `app` claim
-from an app-scoped token, and without it an app-scoped request could reach any
-`/api` path. The fix (`dashboard/server.py`, the `_dev_user_middleware`)
-re-implements claim adoption in none-mode: it extracts the Bearer or
-`?app_token=` token, validates it (`validate_token_with_app`), and sets
-`request["app"]` so `app_permission_middleware` and the WS event filter scope the
-request. The app token only *narrows* the dev owner's reach, so the permission
-model holds in every auth mode.
+The app reverse proxy strips owner cookies and authorization, supplies app-scoped
+credentials, and signs forwarded requests. The backend SDK signature verifier is
+required to reject direct unsigned requests. See [App platform](APP_PLATFORM.md).
 
-## Token scoping
+The dedicated agent webhook verifies its configured hook token separately.
+`runtime/gideon/integrations/inbound` contains MCP, capture, compatible chat and A2A
+surfaces. They have separate admission, tokens/client permissions and master/per-surface
+switches. `inbound/gate.py` checks current enablement and incident state; unreadable
+admission state refuses work. Disabled or unmounted surfaces must not be treated as
+available merely because their modules exist. These are configured local gateway
+integrations, not a default public service.
 
-`dashboard/token_auth.py`:
+## Tool authority and approvals
 
-- `generate_token(user_id, ttl_seconds, app=...)` mints tokens with an optional
-  **`app` claim**; app-scoped tokens bound a request to that app's declared
-  permissions.
-- App backends never see the owner's credential: the reverse proxy strips the
-  cookie and Authorization and injects a fresh 1-hour app-scoped token (see
-  [APP_PLATFORM.md](APP_PLATFORM.md#the-reverse-proxy--token-model)).
-- Session TTLs are capped (`MAX_SESSION_TTL_SECS`), and nonces are registered and
-  evicted.
+`runtime/gideon/engine/task_modes.py` classifies actual invocations for task-mode
+admission. Native runtime dispatch intersects current agent tool/skill selections,
+app work tiers, safety profile and approval policy. Profile grant widening uses an
+owner-reviewed offered change; a metadata write does not grant capability.
 
-### Webhook auth
+`runtime/gideon/security/approval_answer.py` distinguishes the actual approving
+principal, and `approval_grants.py` stores applicable reviewed grants. Approval of
+one call is not automatically standing authorization. Caller-supplied labels, headers
+or session keys cannot substitute for an authenticated principal.
 
-`POST /api/hooks/agent` (`dashboard/handlers/hooks.py`) is middleware-exempt, and
-its **only** gate is `_verify_hook_token`: a constant-time (`hmac.compare_digest`)
-check of the Bearer or `x-gideon-token` header against `hooks.webhook_token` in
-config. No configured token means every request is refused. Denials are logged to
-the Security Event Log.
+ACP coverage depends on the provider's permission events. The host normalizes permission
+modes through `integrations/acp/permission_authority.py` and handles reported calls.
+An external CLI's unreported operations remain outside that protocol gate. Recognized
+unattended auto-approve modes and measured provider residuals need explicit consideration;
+see [Limitations](../security/LIMITATIONS.md).
 
-## Command screening (`security.py`)
+## Work origin, descendants and memory
 
-- **Deny list**: `BUILTIN_DENIED_COMMAND_PATTERNS` (112 shell patterns) is merged
-  with the user-configured `security.denied_commands` **at read time**
-  (`denied_command_patterns()`), so config edits apply immediately. This one
-  source feeds both the native bash tool and the Security panel.
-- **Suspicious-pattern watchers**: `SUSPICIOUS_BASH_PATTERNS` (52 patterns) flag
-  rather than block.
-- **Tool-name denies**: `BUILTIN_DENY_PATTERNS` (fnmatch over tool names) with a
-  documented `_DENY_EXCEPTIONS` escape hatch.
-- **Redaction**: sensitive-path and credential redaction, including
-  vendor-token detection patterns such as `xox[bpas]-`. These vendor-shaped
-  patterns are deliberate keeps: they are secret-*detection* data, and renaming
-  them would break the control (see
-  [PROVIDER_BOUNDARY.md](PROVIDER_BOUNDARY.md)).
+`runtime/gideon/security/session_credentials.py` binds live work to actual sessions and
+execution lineage. `durable_work.py` validates accepted durable workflow and trigger
+origins. Original initiator and effective narrowed app actor are distinct, so delegation
+must preserve attribution while intersecting capabilities. Mutable run metadata or an
+app-shaped trigger name alone is not an authority receipt.
 
-## Sandbox (`sandbox.py`)
+App tier enforcement lives in `runtime/gideon/extensions/apps/app_work.py`: current enabled
+permissions can narrow an already-held grant, and descendants cannot widen it. Text work
+receives task text without tools or persistent-memory context. Read work still consults
+actual invocation classification. Tool-capable work retains approval and scope checks.
 
-Credential-hiding child-process isolation for tool execution, including an
-environment-variable denylist, so credential env vars like `SLACK_BOT_TOKEN`
-never reach a sandboxed child.
+Memory reach is resolved from verified work, privacy mode and current app consent.
+Hypermid issues typed scopes under `runtime/gideon/hypermid`, including app namespaces
+and private-work resources. Temporary forbids persistent reads and writes; Incognito
+forbids writes. Private workflows validate the live receipt before execution and retire
+private resources through actual terminal lifecycle. They do not gain a persistent scope
+by changing a mode label or supplying a workspace identifier.
 
-Child **environments** are built by allowlist, not inherited. `build_child_env`
-gives a hook, cron-script or bash-action child a minimal base (`PATH`, locale,
-home-equivalents, proxy/CA settings, and the three `GIDEON_*` vars) plus whatever
-names the operator declared in `sandbox.env_passthrough`. Nothing else from the
-gateway environment reaches them, so a credential the gateway holds is not
-readable by `printenv`. The sensitive-prefix list is the floor: a declaration
-cannot pass `AWS_SECRET*`, `AWS_SESSION*`, `SSH_AUTH_SOCK`, `GNUPGHOME` or
-`GIT_ASKPASS`. Withheld names are listed in the debug log at each spawn, so a
-script that needs one more variable is diagnosable rather than mysteriously
-broken.
+## Commands and child processes
 
-### What the sandbox does and does not do
+`runtime/gideon/security/security.py` supplies command screening, protected-path checks,
+redaction and untrusted-content fencing. The packaged `baseline_denylist.json` has a
+verified digest; runtime reads reassert the baseline while incorporating configured
+restrictions. This detects certain drift and tamper attempts. It cannot authenticate an
+installation an attacker replaced before startup.
 
-This is a **credential-hiding sandbox, not a confinement sandbox**, a precise
-distinction that the rest of this section, and any public claim, must respect. The
-macOS Seatbelt profile is allow-by-default (`(version 1)\n(allow default)`) with
-targeted `deny file-read*` rules over credential paths (`~/.aws`, `~/.gnupg`,
-`~/.config/gcloud`, `~/.azure`, `~/.docker`, `~/.kube`, `.npmrc`, `.pypirc`,
-`.netrc`, `.git-credentials`, `.gideon/.env`, plus `~/.ssh` in `strict`). The Linux
-path is equivalent: bind-mount empty dirs over those paths. It raises the cost of
-credential theft; it does not stop an agent from doing anything else.
+`security/sandbox.py` builds child environments from an allowlist, with sensitive-name
+restrictions and explicitly configured passthrough. Credential-path hiding depends on
+OS and sandbox mode. It is not a general filesystem-write jail or resource limiter.
 
-| It **does** | It does **not** |
-|---|---|
-| Hide credential dirs/files from the agent child (macOS Seatbelt deny-reads; Linux bind-mounts) | Confine filesystem **writes** (except `~/.ssh` on macOS `strict`) |
-| Scrub credential env vars from the child, every mode | Restrict **network / egress** from the child |
-| Deny `~/.ssh` writes (macOS `strict` only) | Limit processes, CPU, or memory (no rlimits) |
-| Path-allowlist a subagent's cwd (advisory: the prompt tells the agent its scope) | Provide a filesystem **jail** or a real execution boundary |
-| Enforce app `api`/`storage`/`memory`/`cron` permissions server-side | Enforce the app `network` permission (declaration-only: see `docs/security/LIMITATIONS.md`) |
+Command egress narrowed to a no-network posture must use an OS no-network wrapper,
+or be refused before spawn if that cannot be enforced. `wrap_program_argv` is a separate
+path for declared programs; `network=False` also requires actual enforcement. Other
+sandbox-provider specifications must be evaluated against the provider implementation;
+no whole-spec guarantee follows from the existence of a wrapper interface.
 
-The honest, complete statement of limitations lives in
-[`../security/THREAT_MODEL.md`](../security/THREAT_MODEL.md) and
-[`../security/LIMITATIONS.md`](../security/LIMITATIONS.md); this section is the
-architectural summary, not a substitute for them.
+## HTTP egress
 
-## Governance ceiling (`guardrails/ceiling.py`)
+`runtime/gideon/security/net/{client,guard,policy}.py` provides guarded HTTP dispatch,
+destination checks, named policies and run-profile narrowing. Some policies are exclusive
+allowlists: an empty allowed set means no destination. Checks of private and metadata
+addresses and resolved destinations belong to this guarded path.
 
-Two levels, one rule: **tightest wins**. Level 1 is the operator's `Ceiling`, read
-once at boot. Level 2 is the run's `SafetyProfile` (`guardrails/policy.py`), which
-may only **narrow**. The effective posture is `resolve(ceiling, profile)`,
-composed inside `profile_for_session`, the single object every dispatch seam
-already consults (rung routing, the action denylist, the tool-approval pick,
-spawn, egress), so there is no seam that reads a profile the ceiling did not
-bound.
+This is the gateway-mediated HTTP seam, not an interception layer for every socket opened
+by an imported library, app or external browser. Library/download hooks and child command
+policy have their own consumers. A real user browser controls its own DNS/socket behavior;
+preflight checks do not give it the same resolved-IP pinning as the native HTTP client.
 
-- **Where it lives.** `$GIDEON_HOME/governance/ceiling.json`, or an absolute path
-  in `GIDEON_CEILING_FILE`. Schema:
-  `{"version": 1, "scopes": {...}}` over six governed scopes: `approval`, `scan`,
-  `egress` (ordinal), `paths` (ruleset), `tools` (capability gate) and `budget`
-  (scoped map).
-- **Four archetypes, one compose function each** (`compose_ordinal`,
-  `compose_ruleset`, `compose_gate`, `compose_map`). The evaluator dispatches on
-  **archetype, never on scope name**, so adding a governed scope is one
-  `ScopeSpec` row of data.
-- **Enforcer-owned registries** (`guardrails/registries.py`): matchers and ordinal
-  scales live in code and are never sourced from the governed file. A rule that
-  could name its own matcher or reorder a scale could widen itself while reading
-  as narrower. An unknown matcher, scale, scope or value, a corrupt or unreadable
-  file, or a scope naming an unknown archetype **aborts governance boot** with
-  WHAT/WHY/FIX. Fail-closed: "governance could not be established" is a stop, not
-  a degraded mode.
-- **Path matching** normalizes only the queried item (`~`/`$VAR`, then `abspath`)
-  and **never** runs a pattern through `normpath`, which would collapse
-  `/a/**/../b` to `/a/b` and silently drop the `**`
-  (`checks/runtime/test_guardrails_path_matcher.py` is the table).
-- **What the layer buys**: no HTTP write surface (it is absent from the
-  `_EDITABLE_CONFIG` PATCH allowlist and has no PUT of its own); agent write paths
-  refuse it (`governance/` is in the built-in sensitive-path denylist); no mid-run
-  widening (read once and cached, so a tamper needs a restart an operator can
-  see); and tamper evidence, since boot SEL-audits the source and digest. Every
-  clamp is logged and SEL-audited (`guardrails.ceiling_clamp`).
-- **What it does not buy**: OS-level immutability against a process running as the
-  operator. On a single-user machine that requires the file to live outside
-  `$HOME`, owned by another uid and mode `0444`, which is what
-  `GIDEON_CEILING_FILE` is for.
+## Governance, budgets and incidents
 
-## Egress chokepoint (`net/`)
+`runtime/gideon/security/guardrails/ceiling.py` composes the operator ceiling with run
+profiles: the tighter policy wins. Ceiling files and matcher/ordinal registries are
+validated; run policy cannot define a looser scale for itself. The owner controls the
+host and can replace files before startup, so this is not OS immutability.
 
-`net/client.py` + `net/guard.py` + `net/policy.py` form the one outbound-HTTP
-chokepoint:
+The guardrails package includes provider and loop breakers, budgets, model-call admission,
+autonomy routing and incident state. Their consumers determine actual coverage; a spend
+estimate is not a bill from a provider. Incident admission suspends relevant unattended
+and inbound work. Existing user approvals do not override an active refusal at another
+seam.
 
-- Named policies: `STRICT`, `CONNECTOR` (knowledge scraping), `WEBHOOK`
-  (user-configured POSTs), `LOOPBACK_INTERNAL` (loopback only, **never widened**
-  by config), `REGISTRY`/`LISTED` (exclusive allow-lists), and `FETCH_ACTION`
-  (the `net-fetch` action provider, exclusive over an empty base list, so an
-  unconfigured instance reaches nowhere).
-- The **exclusive** profiles, meaning `LISTED`, `SYNC`, `FETCH_ACTION` and the
-  derived `capture`/`a2a-outbound`, are the ones where a caller rather than a
-  person picks the URL. Each is `allow_only=True` over an empty base, so "nothing
-  named yet" means "nowhere to go". `METADATA_SERVICE_HOSTS` is denied on the two
-  that can be pointed at an operator-named host (`SYNC`, `FETCH_ACTION`): a deny
-  is evaluated before the allow-list and before DNS, so it survives an operator
-  who lists the cloud metadata service by hand.
-- `egress_policy_for(base)` is the single config-layering seam: the Security
-  panel's allow/deny hosts and `allow_private` are layered onto a base policy at
-  the `web_fetch`/`web_extract`/render entry (`apps/console/fetch.py`) and at
-  webhook and knowledge-connector call sites
-  (`knowledge/connectors/web_url.py`). Raw `net.fetch` stays config-free for
-  fixed-posture internal callers.
-- `allow_only` inverts `allow_hosts` from additive (waive the private-range block)
-  to exclusive (only a listed host is reachable), checked before DNS resolution.
-  It is what makes an egress tier able to narrow anything.
-- `egress_policy_for_profile(base, tier)` narrows a surface policy by the run's
-  `SafetyProfile.egress_tier`: tightest wins, and caps only tighten. `off` returns
-  `None` and the caller refuses. It is live at
-  `apps/console/fetch.py::web_fetch` (the agent's primary fetch surface) and
-  `triggers/web_poll.py` (watched-source polls, plain and headless tier).
+## Install and dependency boundary
 
-## Browsing on the user's behalf (`browse/`)
+`runtime/gideon/security/supply_chain.py` scans staged app/skill content. Dangerous
+verdicts are terminal; warning verdicts need consent. App review compares the offered
+staged digest and execution disclosure. A scanner result does not prove arbitrary code
+safe or make it isolated.
 
-The `browse` action provider has two execution targets. `gateway` drives the
-gateway's own Chrome profile under the egress chokepoint above. `user_browser`
-drives the operator's own, already-logged-in browser through a paired loopback
-extension (`browse/target.py`, `dashboard/handlers/browse_connector.py`). Because
-that target acts as the fully authenticated user, its authorization is not the
-earned-autonomy ladder but a **per-task grant**, and these rules are load-bearing
-controls rather than UX:
+App Python dependencies use the shared writable `<GIDEON_HOME>/app-python` prefix and
+base-environment constraints, not direct installation into the gateway's virtualenv.
+In-process providers still share one interpreter. UI bundles run in the host origin.
+App `network` is declaration-only. See [Limitations](../security/LIMITATIONS.md).
 
-- **Per-task grant, fail-closed.** Every `user_browser` task requires a fresh,
-  explicit human grant naming the site scope it will touch, routed through the
-  shipped `ApprovalGate` (`agents/native/approval.py`) before the browser is
-  touched. No answer within 300s, no approval channel, or any gate error counts as
-  a rejection: the run never starts, never falls open, and never silently
-  retargets the gateway profile (`browse/grant.py`).
-- **No-credential-access invariant.** The agent drives an already-authenticated
-  browser; it never reads, stores, or transmits a password field's value, a 2FA
-  code, or a cookie jar. The grant and revoke audit rows (`browser_grant`,
-  `browser_revoked` in the SEL) carry only the task label, the host scope and a
-  reason, never a credential, cookie or token.
-- **Close-to-kill.** The task runs in a tab group named after the task, and the
-  user closing it is a hard stop the run observes within one step. This is
-  distinct from the browse kill switch (`browse/killswitch.py`), which stops *all*
-  unattended browse via a flag.
-- **Honest limit: no IP pinning on a real browser.** A real browser does its own
-  DNS and opens its own sockets, so `net.fetch`'s resolved-IP pinning does **not**
-  apply to `user_browser`. Every navigation is still pre-flighted through the
-  egress guard, but that is validation only and stays rebind-vulnerable. This is
-  inherent to driving any real browser and is stated here rather than implied
-  away.
-- **Not an anti-bot surface.** This target exists to let the agent act in the
-  user's browser under explicit per-task permission. Gideon does **not** describe,
-  design, or expose anti-bot or CAPTCHA avoidance as a capability; any such effect
-  is an incidental consequence of legitimate traffic from the user's own machine,
-  never a feature.
+## Audit and portability
 
-## Untrusted-content fencing
+`runtime/gideon/security/sel.py` stores HMAC-chained security events. This is tamper
+evidence under the key's trust boundary, not protection against someone who controls
+the host and key. Redaction and write-only credential API contracts are separate controls.
+`runtime/gideon/operations/durability` defines export inventory, archive handling and
+restore plans. Review the selected domain and actual archive policy; exports are not a
+mechanism for transferring live credential authority.
 
-`security.py::fence_untrusted` wraps third-party text in `<untrusted_content>`
-markers, escaping any embedded marker so content cannot break out. It is paired
-with a system-prompt note that fenced spans are data, not instructions, and it is
-applied to web-search results, inbox content and third-party payloads. Memory
-recall applies the same data-not-instructions framing to recalled episodes
-(`dashboard/handlers/memory.py`; see
-[KNOWLEDGE_MEMORY.md](KNOWLEDGE_MEMORY.md#recall--the-privacy-guard)).
-
-## Supply chain (`supply_chain.py`)
-
-`SkillScanner` gates both app installs and skill installs through
-`install_guarded`:
-
-- verdicts: clean, warning (consent required, 409), or **dangerous (terminal
-  refusal, non-overridable)**;
-- the integrity invariant: **scanned bytes == installed bytes**, so there is no
-  time-of-check/time-of-use window between scan and install;
-- source trust tiers modulate strictness, because a bundled skill's `curl` is not
-  the same risk as a random repository's.
-
-## Trust / YOLO state (`trust_mode.py`)
-
-One process-global YOLO (auto-approve) state: config-permanent versus TTL'd
-surface activation (`YOLO_CHANNEL_TTL_SECS`), with `on_disable` callbacks.
-Dashboard and channel apps delegate to it, and there is deliberately no second
-implementation. Task-mode tool-gating postures are hard-enforced at the permission
-prompt for the native runtime, while ACP agents under YOLO rely on system-prompt
-framing, a documented tradeoff (`task_modes.py`).
-
-## Audit: the Security Event Log (`sel.py`)
-
-`SecurityEventLog` writes HMAC-chained events (key file `sel_hmac.key`), so the
-log is tamper-evident and append-only. Events carry caller, operation, outcome and
-`downstream_service` labels, where the generic value is `"channel"` and no vendor
-names appear. API denials, webhook auth failures, and app lifecycle events all log
-here. The dashboard Security panel reads it.
-
-## Data-leaving-the-system rules
-
-- Session-archive reads are redacted (`history.py` via `redact_credentials` /
-  `redact_exfiltration_urls`).
-- Portability export (`portability.py`) always excludes credentials: `.env`,
-  `sel_hmac.key` and `session_map.json` are on the exclusion list.
-
-## Memory privacy
-
-Restricted sessions (temporary and incognito) gate memory reads, writes and lesson
-capture, enforced in the after-turn path, session listing and search, and the
-recall API. Details are in
-[CHAT_SESSIONS.md](CHAT_SESSIONS.md#session-model) and
-[KNOWLEDGE_MEMORY.md](KNOWLEDGE_MEMORY.md#recall--the-privacy-guard).
+For trust assumptions and exclusions, see [Threat model](../security/THREAT_MODEL.md).
+Report vulnerabilities using the repository [security policy](../../SECURITY.md).
