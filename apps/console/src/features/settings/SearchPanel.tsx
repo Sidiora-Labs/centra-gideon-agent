@@ -32,7 +32,7 @@ export function SearchPanel() {
   const reloadActive = () => { invalidateKeys('settings:search'); refresh() }
 
   if (loadErr) return <LoadError what="search settings" error={loadErr} onRetry={refresh} />
-  if (!providers) return <ListSkeleton rows={4} />
+  if (!providers) return <ListSkeleton rows={4} what="search settings" />
 
   return (
     <div>

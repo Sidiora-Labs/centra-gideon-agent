@@ -880,7 +880,7 @@ function ConflictsSection({ read, surface, onSurface, onChanged }: {
                     onClick={() => resolve(c, 'accept_proposal')}>
                     {CHOICE_LABELS.accept_proposal}
                   </Button>
-                  <Button variant="secondary" size="xs" onClick={() => setExpanded(expanded === c.id ? '' : c.id)}>
+                  <Button variant="secondary" size="xs" ariaExpanded={expanded === c.id} onClick={() => setExpanded(expanded === c.id ? '' : c.id)}>
                     {expanded === c.id ? 'Hide both versions' : 'Compare both versions'}
                   </Button>
                 </div>

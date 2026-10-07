@@ -24,7 +24,7 @@ export function PromptsPanel() {
     <div>
       <PanelHeader title="Prompts" hint="Bind which prompt serves each runtime context. Edit the prompts themselves on the Prompts page; unset uses each context's bundled default." />
       {loadErr ? <LoadError what="prompt bindings" error={loadErr} onRetry={refresh} /> : !data ? (
-        <ListSkeleton rows={4} />
+        <ListSkeleton rows={4} what="prompt bindings" />
       ) : (
         data.categories.map((c) => {
           const rows = data.bindings.filter((b) => b.category === c.key)

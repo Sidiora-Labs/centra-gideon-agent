@@ -15,7 +15,7 @@ export function ApprovalChannelSection() {
   const [busy, setBusy] = useState(false)
   if (channels.error) return <LoadError what="approval channels" error={channels.error} onRetry={channels.refresh} />
   if (config.error) return <LoadError what="approval preference" error={config.error} onRetry={config.refresh} />
-  if (!channels.data || !config.data) return <FormSkeleton sections={1} what="approval channel" />
+  if (!channels.data || !config.data) return <FormSkeleton sections={1} what="approval channels and preference" />
 
   const selected = String(config.data.agent?.approval_channel || '')
   const options = channels.data.filter(channel => channel.name !== 'webui')

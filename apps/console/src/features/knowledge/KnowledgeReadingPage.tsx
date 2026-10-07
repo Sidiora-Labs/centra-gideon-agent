@@ -69,7 +69,7 @@ export function KnowledgeReadingPage({ id, onBack }: { id: string; onBack: () =>
         ) : missing ? (
           <EmptyState icon={BookOpen} title="Knowledge item not found" hint="It may have been removed from your library." />
         ) : item == null ? (
-          <ListSkeleton rows={6} what="article" />
+          <ListSkeleton rows={6} what="reading view" />
         ) : !(item.content || '').trim() ? (
           <EmptyState icon={BookOpen} title="Nothing to read yet" hint="This item does not have a text body." />
         ) : (

@@ -95,7 +95,7 @@ function ProposalRow({ proposal }: { proposal: SkillProposal }) {
       </div>
       {open && (
         <div className="mt-3 border-t border-outline-variant/30 pt-3">
-          {loadError ? <LoadError what="skill proposal" error={loadError} onRetry={retry} /> : !detail ? <ListSkeleton rows={2} /> : (
+          {loadError ? <LoadError what="skill proposal" error={loadError} onRetry={retry} /> : !detail ? <ListSkeleton rows={2} what="skill proposal" /> : (
             <>
 
               {detail.kind === 'refine' && detail.diff ? (

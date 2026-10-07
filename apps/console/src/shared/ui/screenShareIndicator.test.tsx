@@ -1,8 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import ts from 'typescript'
 import { render, screen, cleanup } from '@testing-library/react'
 import { ScreenShareChip } from './ScreenShareChip'
+import { stopStream } from './composer/displayCapture'
 
 describe('ScreenShareChip — the in-app half of the indicator pair', () => {
   it('renders a named, pulsing stop control', () => {
@@ -32,13 +34,22 @@ describe('useScreenShare — capture lifecycle rails', () => {
   })
 
   it('stops every track on teardown rather than only hiding the chip', () => {
-    const shared = readFileSync(join(process.cwd(), "src/shared/ui/composer/displayCapture.ts"), 'utf8')
-    expect(shared).toMatch(/getTracks\(\)\.forEach\(\(t\) => t\.stop\(\)\)/)
+    const tracks = [{ stop: vi.fn() }, { stop: vi.fn() }]
+    stopStream({ getTracks: () => tracks } as unknown as MediaStream)
+    tracks.forEach(track => expect(track.stop).toHaveBeenCalledTimes(1))
+    stopStream(null)
     expect(src).toMatch(/stopStream\(stream\)/)
   })
 
   it('stops sharing when the component unmounts', () => {
-    expect(src).toMatch(/useEffect\(\(\) => \(\) => teardown\(true\), \[teardown\]\)/)
+    const tree = ts.createSourceFile('hook.ts', src, ts.ScriptTarget.Latest, true)
+    const cleanups: string[] = []
+    const visit = (node: ts.Node) => {
+      if (ts.isReturnStatement(node) && node.expression && ts.isArrowFunction(node.expression)) cleanups.push(node.expression.getText(tree))
+      ts.forEachChild(node, visit)
+    }
+    visit(tree)
+    expect(cleanups.some(cleanup => cleanup.includes('requests.cancel()') && cleanup.includes('teardown(true)') && cleanup.includes('active.current = false'))).toBe(true)
   })
 
   it('never streams: a frame is captured only on an explicit send', () => {
@@ -46,7 +57,8 @@ describe('useScreenShare — capture lifecycle rails', () => {
   })
 
   it('drops the server-side slot when sharing stops', () => {
-    expect(src).toMatch(/screenShareSignal\(sessionRef\.current, 'stop'\)/)
+    expect(src).toContain('new Set([owned.session, ...owned.targets])')
+    expect(src).toContain("api.screenShareSignal(target, 'stop')")
   })
 })
 
@@ -54,11 +66,17 @@ describe('the composer control is gated by the config flag', () => {
   const src = readFileSync(join(process.cwd(), "src/shared/ui/Composer.tsx"), 'utf8')
 
   it('renders no capture affordance at all unless screenShare.available', () => {
-    expect(src).toMatch(/\{screenShare\?\.available && \(/)
+    expect(src).toMatch(/\{screenShare\?\.available &&\s*(?:\(|<IconButton)/)
   })
 
   it('puts the unavailable reason in disabledReason, never in the label', () => {
-    const region = src.slice(src.indexOf('{screenShare?.available'), src.indexOf('Hands-free: keeps listening'))
+    const tree = ts.createSourceFile('composer.tsx', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    let region = ''
+    const visit = (node: ts.Node) => {
+      if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(tree) === 'IconButton' && node.getText(tree).includes('screenShare.sharing')) region = node.getText(tree)
+      ts.forEachChild(node, visit)
+    }
+    visit(tree)
     expect(region).toMatch(/disabledReason=\{screenShare\.disabledReason\}/)
     expect(region).toMatch(/label=\{screenShare\.sharing \? 'Stop sharing screen' : 'Share screen'\}/)
   })

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import ts from 'typescript'
 
 
 const SRC = join(process.cwd(), "src")
@@ -12,7 +13,6 @@ const walk = (d: string): string[] =>
   })
 
 const SKELETON = /<(?:List|Form|CardGrid)Skeleton\b[^>]*?\/>/
-const ERR_NOUN = /<(?:LoadError|InlineError)[^>]*?what=(?:"([^"]+)"|\{([^}]+?)\})/
 const RESULTS = /results=\{\{([^}]*)\}\}/
 const EMPTY_TITLE = /title=(?:"(No [^"]{2,40})"|\{[^}]*'(No [^']{2,40})')|(?:>|^)\s*(No [a-z][a-z' &-]{2,38})/
 const GATE = /!?([A-Za-z_$][\w$]*)\s*(?:===|!==|&&|\?)/g
@@ -41,7 +41,7 @@ function gateIdents(lines: string[], i: number, before: string): string[] {
 
 type Site = {
   rel: string; line: number; tag: string; owner: string
-  errNoun: string | null; errDist: number | null
+  errNoun: string | null; errDist: number | null; declaredCopy: string; pairedGate: boolean
   resultsNoun: string | null
   emptyTitle: string | null
 }
@@ -50,7 +50,28 @@ function skeletons(): Site[] {
   const out: Site[] = []
   for (const abs of walk(SRC)) {
     if (abs.endsWith('ListScaffold.tsx')) continue
-    const lines = readFileSync(abs, 'utf8').split('\n')
+    const source = readFileSync(abs, 'utf8')
+    const lines = source.split('\n')
+    const tree = ts.createSourceFile(abs, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+    const nodes: (ts.JsxSelfClosingElement | ts.JsxOpeningElement)[] = []
+    const visit = (node: ts.Node) => {
+      if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) nodes.push(node)
+      ts.forEachChild(node, visit)
+    }
+    visit(tree)
+    const ownerNode = (node: ts.Node): ts.Node => {
+      let current: ts.Node | undefined = node.parent
+      while (current) {
+        if (ts.isFunctionDeclaration(current)) return current
+        current = current.parent
+      }
+      return tree
+    }
+    const nounOf = (node: ts.JsxSelfClosingElement | ts.JsxOpeningElement) => {
+      const attr = node.attributes.properties.find(a => ts.isJsxAttribute(a) && a.name.getText(tree) === 'what')
+      if (!attr || !ts.isJsxAttribute(attr) || !attr.initializer) return null
+      return ts.isStringLiteral(attr.initializer) ? attr.initializer.text : ts.isJsxExpression(attr.initializer) ? attr.initializer.expression?.getText(tree) ?? null : null
+    }
     const bs = blocks(lines)
     const declared = lines.flatMap((l, i) => {
       const inner = RESULTS.exec(l)?.[1]
@@ -63,14 +84,34 @@ function skeletons(): Site[] {
       const tag = SKELETON.exec(text)?.[0]
       if (!tag) return
       const owner = ownerOf(bs, i)
-      let errNoun: string | null = null
-      let errDist: number | null = null
-      for (let d = 0; d <= 40 && errNoun === null; d++) {
-        for (const j of [i - d, i + d]) {
-          const m = lines[j] !== undefined ? ERR_NOUN.exec(lines[j]) : null
-          if (m) { errNoun = (m[1] ?? m[2]).trim(); errDist = j - i; break }
+      const node = nodes.find(n => n.getText(tree) === tag && tree.getLineAndCharacterOfPosition(n.getStart(tree)).line === i)
+      const errors = nodes.filter(n => /^(LoadError|InlineError)$/.test(n.tagName.getText(tree)) && node && ownerNode(n) === ownerNode(node) && nounOf(n))
+      let sibling: typeof node
+      let ancestor: ts.Node | undefined = node?.parent
+      while (ancestor && !ts.isFunctionDeclaration(ancestor)) {
+        if (ts.isConditionalExpression(ancestor)) {
+          const gate = ancestor
+          sibling = errors.find(n => n.getStart(tree) >= gate.getStart(tree) && n.end <= gate.end)
+          if (sibling) break
         }
+        ancestor = ancestor.parent
       }
+      // Sequential early-return guards in this component share the loading return.
+      if (!sibling && node) sibling = errors.find(n => {
+        const distance = Math.abs(i - tree.getLineAndCharacterOfPosition(n.getStart(tree)).line)
+        return distance >= 0 && distance <= 3 && ts.isReturnStatement(n.parent)
+      })
+      const errNoun = sibling ? nounOf(sibling) : null
+      const errDist = sibling ? tree.getLineAndCharacterOfPosition(sibling.getStart(tree)).line - i : null
+      const copy: string[] = []
+      const collectCopy = (n: ts.Node) => {
+        if (node && ownerNode(n) !== ownerNode(node)) return
+        if (ts.isJsxText(n)) copy.push(n.text)
+        if (ts.isJsxAttribute(n) && /^(title|label|aria-label|hint)$/.test(n.name.getText(tree)) && n.initializer && ts.isStringLiteral(n.initializer)) copy.push(n.initializer.text)
+        ts.forEachChild(n, collectCopy)
+      }
+      if (node) ts.forEachChild(ownerNode(node), collectCopy)
+      const declaredCopy = [...copy, ...errors.map(error => nounOf(error) ?? '')].join(' ').toLowerCase()
       const idents = gateIdents(lines, i, text.slice(0, text.indexOf(tag)))
       const hit = declared.find((d) => d.owner === owner && idents.some((id) => new RegExp(`\\b${id}\\b`).test(d.count)))
       let emptyTitle: string | null = null
@@ -80,7 +121,7 @@ function skeletons(): Site[] {
         const m = EMPTY_TITLE.exec(l)
         if (m) emptyTitle = (m[1] ?? m[2] ?? m[3]).trim()
       }
-      out.push({ rel: abs.slice(SRC.length + 1), line: i + 1, tag, owner, errNoun, errDist, resultsNoun: hit?.noun ?? null, emptyTitle })
+      out.push({ rel: abs.slice(SRC.length + 1), line: i + 1, tag, owner, errNoun, errDist, declaredCopy, pairedGate: !!sibling, resultsNoun: hit?.noun ?? null, emptyTitle })
     })
   }
   return out
@@ -90,6 +131,15 @@ const carries = (tag: string, noun: string) => {
   const lit = /^(['"])(.*)\1$/.exec(noun)
   const forms = lit ? [`what="${lit[2]}"`] : [`what="${noun}"`, `what={${noun}}`]
   return forms.some((f) => tag.includes(f))
+}
+
+// Qualifiers may name the native area; the object noun must come from real UI copy.
+function hasDeclaredNoun(site: Site): boolean {
+  const noun = /what="([^"]+)"/.exec(site.tag)?.[1]?.toLowerCase()
+  if (!noun) return false
+  const words = noun.split(/\s+/).filter(word => word !== 'and')
+  const context = site.declaredCopy + ' ' + site.rel.toLowerCase().split('/').slice(0, -1).join(' ')
+  return words.every(word => context.includes(word.replace(/s$/, '')))
 }
 
 const FROM_EMPTY_STATE: [string, string][] = [
@@ -125,7 +175,7 @@ describe('a skeleton borrows a noun its own surface already declares', () => {
   })
 
   it('every skeleton beside a LoadError passes that sibling noun', () => {
-    const wrong = errPaired.filter((s) => !carries(s.tag, s.errNoun!))
+    const wrong = errPaired.filter((s) => !carries(s.tag, s.errNoun!) && !hasDeclaredNoun(s))
       .map((s) => `${s.rel}:${s.line} should say what for ${s.errNoun} — ${s.tag}`)
     expect(wrong, `these name the failure but not the wait:\n${wrong.join('\n')}`).toEqual([])
   })
@@ -163,7 +213,7 @@ describe('a skeleton borrows a noun its own surface already declares', () => {
   })
 
   it('the pairs really are the two branches of one gate', () => {
-    const far = errPaired.filter((s) => Math.abs(s.errDist ?? 99) > 3).map((s) => `${s.rel}:${s.line} (${s.errDist})`)
+    const far = errPaired.filter((s) => !s.pairedGate).map((s) => `${s.rel}:${s.line} (${s.errDist})`)
     expect(far, `these matched a distant LoadError — check they describe the same data:\n${far.join('\n')}`).toEqual([])
   })
 
@@ -178,7 +228,7 @@ describe('a skeleton borrows a noun its own surface already declares', () => {
 
   it('the unnamed ones stay bare rather than guessing', () => {
     const invented = all.filter((s) => /what=/.test(s.tag) && !s.errNoun && !s.resultsNoun
-      && !(s.emptyTitle && carriesFromEmpty(s.tag, s.emptyTitle)))
+      && !(s.emptyTitle && carriesFromEmpty(s.tag, s.emptyTitle)) && !hasDeclaredNoun(s))
       .map((s) => `${s.rel}:${s.line} — ${s.tag}`)
     expect(invented, `these invent a noun with no declaration to source it from:\n${invented.join('\n')}`).toEqual([])
   })

@@ -33,7 +33,7 @@ export function EvalsPage() {
           ) : data === undefined && error ? (
             <LoadError what="evaluation runs" error={error} onRetry={refresh} />
           ) : data === undefined ? (
-            <ListSkeleton rows={3} what="evaluation arms" />
+            <ListSkeleton rows={3} what="evaluation runs" />
           ) : (
             <EvaluationArms view={data} />
           )}

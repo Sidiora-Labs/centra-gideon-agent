@@ -110,7 +110,7 @@ export function InboxPage({ query, setQuery, navigate }: Pick<RouteProps, 'query
                 <HeaderControl icon={RotateCcw} label="Restart sources" priority="low" onClick={restart} disabled={busy} />
 
                 <HeaderControl icon={StickyNote} label="Capture a note" priority="primary" onClick={() => setCaptureOpen(true)} />
-                <HeaderControl icon={SettingsIcon} label="Inbox settings" active={settingsOpen} priority="low" onClick={() => setSettingsOpen(!settingsOpen)} />
+                <HeaderControl icon={SettingsIcon} label="Inbox settings" active={settingsOpen} ariaExpanded={settingsOpen} priority="low" onClick={() => setSettingsOpen(!settingsOpen)} />
               </HeaderActions>
             </div>
           }
@@ -263,7 +263,7 @@ export function InboxQueueRow({ item, index, onOpen, navigate, owner }: {
   const confidence = confMeta(item.confidence)
   const status = statusMeta(item.status)
   const visual = channel ? classification : kind
-  const title = channel ? item.sender_name || 'Unknown sender' : kind.label
+  const title = channel ? item.sender_name || item.sender_id || 'Unknown sender' : kind.label
   const target = refTarget(item)
   const pending = item.status === 'pending'
   const unresolved = isOpen(item.status)

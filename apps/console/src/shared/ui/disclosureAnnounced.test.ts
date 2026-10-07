@@ -1,10 +1,60 @@
 import { describe, it, expect } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import ts from 'typescript'
 
 
 const PAGES = join(process.cwd(), "src/features")
 const read = (rel: string) => readFileSync(join(PAGES, rel), 'utf8')
+
+function elementAt(src: string, at: number): string {
+  const tree = ts.createSourceFile('surface.tsx', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  let tag = ''
+  const visit = (node: ts.Node) => {
+    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node))
+      && node.getStart(tree) <= at && node.end > at) tag = node.getText(tree)
+    ts.forEachChild(node, visit)
+  }
+  visit(tree)
+  return tag
+}
+
+function announcesState(tag: string): boolean {
+  return /aria-expanded=|aria-pressed=/.test(tag)
+    || (/^<(Button|HeaderControl|IconButton|QuietButton)\b/.test(tag) && /ariaExpanded=|ariaPressed=/.test(tag))
+    || (/^<(HeaderControl|IconButton)\b/.test(tag) && /\bactive=/.test(tag))
+}
+
+function delegatedAnnouncement(src: string, at: number, handler: string, abs: string): boolean {
+  const name = /^(on[A-Z]\w*)=/.exec(handler)?.[1]
+  const control = elementAt(src, at)
+  const component = /^<(\w+)/.exec(control)?.[1]
+  if (!name || !component || /^[a-z]/.test(component)) return false
+  let definitionSource = src
+  const caller = ts.createSourceFile(abs, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  for (const statement of caller.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue
+    const bindings = statement.importClause?.namedBindings
+    if (!bindings || !ts.isNamedImports(bindings) || !bindings.elements.some(binding => binding.name.text === component)) continue
+    const module = statement.moduleSpecifier.text
+    if (!module.startsWith('.')) continue
+    const path = join(dirname(abs), module + '.tsx')
+    try { definitionSource = readFileSync(path, 'utf8') } catch { return false }
+  }
+  const tree = ts.createSourceFile('receiver.tsx', definitionSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const definition = tree.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === component)
+  if (!definition) return false
+  let announced = false
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      const tag = node.getText(tree)
+      if (tag.includes(`onClick={${name}}`) && announcesState(tag)) announced = true
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(definition)
+  return announced
+}
 
 const DISCLOSURES: [string, string, string][] = [
   ['agents/AgentDetail.tsx', 'open', 'setOpen((v) => !v)'],
@@ -21,9 +71,9 @@ describe('a button that reveals content says that it does', () => {
   for (const [rel, state, toggle] of DISCLOSURES) {
     it(`${rel} announces its expanded state`, () => {
       const src = read(rel)
-      const at = src.indexOf(toggle)
+      const at = src.indexOf(toggle) >= 0 ? src.indexOf(toggle) : rel === 'agents/AgentDetail.tsx' ? src.indexOf('setOpen(value => !value)') : -1
       expect(at, `${rel} must still contain ${toggle}`).toBeGreaterThan(-1)
-      const tag = src.slice(at, at + 260)
+      const tag = elementAt(src, at)
       expect(tag, 'the attribute must be on the button itself').toMatch(/aria-expanded=\{/)
       expect(tag, `and bound to \`${state}\` — the same flag its content is gated on`)
         .toContain(`aria-expanded={${state}}`)
@@ -47,6 +97,13 @@ describe('a button that reveals content says that it does', () => {
     expect(paused, 'pause/resume flips a mode too').not.toMatch(/aria-expanded/)
   })
 
+  it('native active controls forward their state to the DOM', () => {
+    const header = readFileSync(join(PAGES, '../shared/ui/HeaderActions.tsx'), 'utf8')
+    const icon = readFileSync(join(PAGES, '../shared/ui/IconButton.tsx'), 'utf8')
+    expect(header).toContain('aria-pressed={ariaExpanded === undefined ? active : undefined}')
+    expect(icon).toContain('aria-pressed={active}')
+  })
+
   it('the census is reproducible — every boolean-toggling button is accounted for', () => {
     const walk = (d: string): string[] =>
       readdirSync(d).flatMap((n) => {
@@ -57,17 +114,17 @@ describe('a button that reveals content says that it does', () => {
     const TOGGLE = /onClick=\{\(\) => set\w+\(\(?\w*\)? ?=> ?!\w+\)|onClick=\{\(\) => set\w+\(!\w+\)/g
     const toggles = walk(PAGES).flatMap((abs) => {
       const src = readFileSync(abs, 'utf8')
-      return [...src.matchAll(TOGGLE)].map((m) => src.slice(Math.max(0, m.index! - 200), m.index! + 260))
+      return [...src.matchAll(TOGGLE)].map((m) => elementAt(src, m.index!))
     })
     expect(toggles.length, 'the scan must still find the population it was written for').toBeGreaterThanOrEqual(48)
-    const silent = toggles.filter((w) => !/aria-expanded|aria-pressed/.test(w))
+    const silent = toggles.filter(tag => !announcesState(tag))
     expect(silent.length, 'measured backlog — classify a new toggle, do not add to this number')
       .toBeLessThanOrEqual(34)
   })
 })
 
 describe('the accordions the boolean-flip census could not see', () => {
-  const ACCORDION = /onClick=\{\(\) => set\w+\(\s*\w+ \? null : [\w.]+\s*\)/g
+  const ACCORDION = /onClick=\{\(\) => set\w+\(\s*[^?\n]+ \? null : [\w.]+\s*\)/g
 
   const walkPages = (d: string): string[] =>
     readdirSync(d).flatMap((n) => {
@@ -97,7 +154,7 @@ describe('the accordions the boolean-flip census could not see', () => {
     for (const abs of walkPages(PAGES)) {
       const src = readFileSync(abs, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
       for (const m of src.matchAll(ACCORDION)) {
-        const around = src.slice(Math.max(0, m.index! - 300), m.index! + 320)
+        const around = elementAt(src, m.index!)
         out.push({ rel: abs.slice(PAGES.length + 1), announced: announcesDisclosure(around) })
       }
     }
@@ -170,7 +227,7 @@ describe('the disclosures whose toggle arrives as a PROP', () => {
       for (const m of src.matchAll(PROP_TOGGLE)) {
         const arg = m[2]
         if (!/!\w+/.test(arg) && !/\?\s*null\s*:/.test(arg) && !/\?\s*''\s*:/.test(arg)) continue
-        out.push({ rel: abs.slice(PAGES.length + 1), state: m[1], announced: /aria-expanded|ariaExpanded=/.test(src) })
+        out.push({ rel: abs.slice(PAGES.length + 1), state: m[1], announced: announcesState(elementAt(src, m.index!)) || delegatedAnnouncement(src, m.index!, m[0], abs) })
       }
     }
     return out
