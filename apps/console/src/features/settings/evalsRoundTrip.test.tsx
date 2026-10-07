@@ -109,8 +109,10 @@ describe('the derivation reads the real files', () => {
   it('the capture flag is IN the dataclass and OUT of the allowlist', () => {
     expect(META.bakeoff_capture_enabled, 'the field must still exist').toBeTruthy()
     expect(ALLOW.bakeoff_capture_enabled, 'and must NOT be one-click PATCHable').toBeUndefined()
-    expect(py('interfaces/dashboard/handlers/core.py'), 'the exclusion must stay stated, not incidental')
-      .toContain('`evals.bakeoff_capture_enabled`')
+    expect(py('interfaces/dashboard/handlers/core.py'), 'the write handler must refuse fields absent from the allowlist')
+      .toMatch(/spec = _EDITABLE_CONFIG\.get\(path_key\)[\s\S]*?if not spec:[\s\S]*?return _deny\(f"field not editable:/)
+    expect(py('core/config/editable.py'), 'the imported editable fields must not enable capture either')
+      .not.toContain('evals.bakeoff_capture_enabled')
   })
 })
 

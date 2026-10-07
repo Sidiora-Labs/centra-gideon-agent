@@ -205,7 +205,7 @@ describe('the row states its OWN size — the number its verdict was judged on',
 
   it('renders both numbers on the row, with the quote attributed to the family', () => {
     mount([{ ...ROWS[2], quoted_size_mb: 6000, host_fit: { ...HOST_MEASURED, hide_unrunnable: false } }])
-    expect(screen.getByText(/· 8000 MB · family median ~6000 MB/)).toBeTruthy()
+    expect(screen.getByText(/· 8000 MiB · family median ~6000 MiB/)).toBeTruthy()
   })
 })
 

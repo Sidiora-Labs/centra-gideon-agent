@@ -5,7 +5,8 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { toDraft, draftToPayload } from './AgentForm'
 import { providerMeta } from './agentMeta'
-import type { SavedAgent } from '../../shared/data/api'
+import type { SavedAgent, ScheduleJob } from '../../shared/data/api'
+import { toDraft as scheduleToDraft, draftToPayload as scheduleDraftToPayload } from '../schedule/ScheduleForm'
 
 const ACP: SavedAgent = {
   name: 'kiro', provider: 'acp:claude-code', provider_agent: 'sonnet', acp_mode: 'acceptEdits',
@@ -213,8 +214,18 @@ describe('VACUITY: the server contract and the field semantics this fix relies o
       .toMatch(/prof = \(cfg\.agents or \{\}\)\.get\(agent\) if agent else None/)
   })
 
-  it('the sibling precedent this fix follows is still on disk and still says why', () => {
-    const sib = readFileSync(join(process.cwd(), "src/features/schedule/renameKeepsItsAction.test.ts"), 'utf8')
-    expect(sib.replace(/\n\s*\*/g, '')).toMatch(/stop describing an\s+action the form cannot edit/)
+  it('the sibling schedule rename also preserves an action the form cannot edit', () => {
+    const job = {
+      id: 'notify-preserved', name: 'Original', enabled: true, message: '',
+      schedule: 'At 10:00 on Wednesday', cron_expr: '0 10 * * 3',
+      action: { provider: 'notify', config: { title_template: 'Reminder' } },
+    } as ScheduleJob
+    const body = scheduleDraftToPayload({ ...scheduleToDraft(job), name: 'Renamed' })
+    expect(body.name).toBe('Renamed')
+    expect(body.cron).toBe(job.cron_expr)
+    expect(body).not.toHaveProperty('action')
+    expect(body).not.toHaveProperty('message')
+    expect(body).not.toHaveProperty('agent')
+    expect(body).not.toHaveProperty('model')
   })
 })
