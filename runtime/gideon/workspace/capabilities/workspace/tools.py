@@ -1,6 +1,7 @@
 """Workspace tool consumers over the same records and process owner as the console."""
 
 import json
+from typing import Any
 
 from gideon.core.config.loader import config_dir
 from gideon.integrations.tool_providers.base import (
@@ -384,5 +385,5 @@ class WorkspaceToolProvider(ToolProvider):
             return ToolResult(success=False, error=str(error))
 
 
-def create_provider():
+def create_provider(config: dict[str, Any] | None = None) -> WorkspaceToolProvider:
     return WorkspaceToolProvider()

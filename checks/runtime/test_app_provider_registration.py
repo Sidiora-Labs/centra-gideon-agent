@@ -368,3 +368,60 @@ async def test_app_registers_multiple_providers(tmp_path):
     assert get_provider("multi-secondary") is None
     unregister_provider("multi-primary")
     unregister_provider("multi-secondary")
+
+
+def test_native_tool_and_action_factories_accept_stored_config(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    names = [
+        "gideon-integration-apps",
+        "gideon-music-assemblies",
+        "gideon-music-decks",
+        "gideon-music-generation",
+        "gideon-music-listening",
+        "gideon-music-midi",
+        "gideon-music-models3d",
+        "gideon-music-rounds",
+        "gideon-music-tools",
+        "gideon-music-video",
+        "gideon-workspace",
+        "heartbeat-tasks-action",
+        "run-workflow-action",
+    ]
+    script = """
+import json
+from pathlib import Path
+from gideon.extensions.apps.manifest import AppManifest
+from gideon.extensions.apps.native_contract import NATIVE_DIR
+from gideon.extensions.providers.loader import load_factory
+from gideon.extensions.providers.registry import ActionTypeHandler, RegisteredProvider, ToolTypeHandler
+from gideon.extensions.providers.settings import ProviderSettings
+from gideon.integrations.action_providers.base import ActionProvider
+from gideon.integrations.tool_providers.base import ToolProvider
+names = json.loads(__import__('sys').argv[1])
+for name in names:
+    manifest = AppManifest.from_json_file(NATIVE_DIR / name / 'app.json')
+    ext = RegisteredProvider(name, manifest, manifest.provider)
+    ProviderSettings.save(name, {'home': '/untrusted-factory-home', 'model': 'untrusted-model'})
+    handler = ToolTypeHandler() if manifest.provider.type == 'tool' else ActionTypeHandler()
+    instance = handler.create(ext)
+    expected = ToolProvider if manifest.provider.type == 'tool' else ActionProvider
+    assert isinstance(instance, expected), name
+    assert isinstance(load_factory(ext)(), expected), name
+    if name == 'heartbeat-tasks-action':
+        assert instance.hook_eligible is False
+print(json.dumps(names))
+"""
+    env = {**os.environ, "GIDEON_HOME": str(tmp_path / "home")}
+    result = subprocess.run(
+        [sys.executable, "-c", script, json.dumps(names)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == names

@@ -1,6 +1,7 @@
 """Native music generation controls; secrets resolve from canonical credentials."""
 
 import json
+from typing import Any
 
 from gideon.core.config.loader import config_dir
 from gideon.integrations.tool_providers.base import (
@@ -101,5 +102,7 @@ class MusicGenerationTools(ToolProvider):
             )
 
 
-def create_provider(**kwargs):
+def create_provider(
+    config: dict[str, Any] | None = None, **kwargs: Any
+) -> MusicGenerationTools:
     return MusicGenerationTools()

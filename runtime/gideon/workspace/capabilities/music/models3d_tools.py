@@ -2,6 +2,7 @@
 
 import inspect
 import json
+from typing import Any
 
 from gideon.core.config.loader import config_dir
 from gideon.integrations.tool_providers.base import (
@@ -95,5 +96,7 @@ class Image3DTools(ToolProvider):
             )
 
 
-def create_provider(**kwargs):
+def create_provider(
+    config: dict[str, Any] | None = None, **kwargs: Any
+) -> Image3DTools:
     return Image3DTools()

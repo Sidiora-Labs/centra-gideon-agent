@@ -420,3 +420,7 @@ async def _launch(run: Any, spec: dict[str, Any]) -> bool:
         return False
     else:
         return True
+
+
+def create_provider(config: dict[str, Any] | None = None) -> RunWorkflowActionProvider:
+    return RunWorkflowActionProvider()

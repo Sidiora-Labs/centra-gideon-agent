@@ -518,6 +518,7 @@ class WorkerSupervisor:
         extra: dict[str, str] = {
             "GIDEON_APP_NAME": rec.app,
             WORKER_ID_ENV: rec.worker,
+            WORKER_GRANT_ENV: BACKGROUND_TASKS_PERMISSION,
         }
         if storage_ok:
             extra["GIDEON_APP_DATA_DIR"] = str(app_data_dir(rec.app))

@@ -1,6 +1,7 @@
 """Native approval-gated tools for persistent integration application receipts."""
 
 import json
+from typing import Any
 
 from gideon.core.config.loader import config_dir
 from gideon.integrations.tool_providers.base import (
@@ -117,5 +118,7 @@ class IntegrationAppTools(ToolProvider):
             )
 
 
-def create_provider(**kwargs):
+def create_provider(
+    config: dict[str, Any] | None = None, **kwargs: Any
+) -> IntegrationAppTools:
     return IntegrationAppTools()

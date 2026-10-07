@@ -144,5 +144,7 @@ class MusicToolProvider(ToolProvider):
             )
 
 
-def create_provider(**kwargs):
+def create_provider(
+    config: dict[str, Any] | None = None, **kwargs: Any
+) -> MusicToolProvider:
     return MusicToolProvider()

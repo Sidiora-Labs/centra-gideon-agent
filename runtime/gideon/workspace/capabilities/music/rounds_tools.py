@@ -1,6 +1,7 @@
 """Native authored canon and multi-part practice operations."""
 
 import json
+from typing import Any
 
 from gideon.core.config.loader import config_dir
 from gideon.integrations.tool_providers.base import (
@@ -88,5 +89,5 @@ class RoundTools(ToolProvider):
             )
 
 
-def create_provider(**kwargs):
+def create_provider(config: dict[str, Any] | None = None, **kwargs: Any) -> RoundTools:
     return RoundTools()

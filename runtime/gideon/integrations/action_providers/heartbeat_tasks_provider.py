@@ -55,7 +55,9 @@ class HeartbeatTasksActionProvider(ActionProvider):
         )
 
 
-def create_provider() -> HeartbeatTasksActionProvider:
+def create_provider(
+    config: dict[str, Any] | None = None,
+) -> HeartbeatTasksActionProvider:
     return HeartbeatTasksActionProvider()
 
 

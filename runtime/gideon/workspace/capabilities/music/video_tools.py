@@ -2,6 +2,7 @@
 
 import inspect
 import json
+from typing import Any
 
 from gideon.integrations.tool_providers.base import (
     RiskLevel,
@@ -93,5 +94,5 @@ class VideoTools(ToolProvider):
             )
 
 
-def create_provider(**kwargs):
+def create_provider(config: dict[str, Any] | None = None, **kwargs: Any) -> VideoTools:
     return VideoTools()

@@ -748,9 +748,14 @@ def test_the_worker_child_gets_its_name_and_not_the_gateway_environment(
     Same posture as an app backend, minus `PORT` — a portless child has no use for one.
     """
     monkeypatch.setenv("ACME_CLOUD_API_KEY", "planted-value-9e12")
+    monkeypatch.setenv("GIDEON_APP_WORKER_GRANT", "untrusted-parent-value")
     dump = tmp_path / "env.json"
     body = (
         "import json, os, pathlib\n"
+        "from gideon.sdk.background import WorkerContext\n"
+        "context = WorkerContext.from_env()\n"
+        "assert context.app_name == 'envprobe'\n"
+        "assert context.worker_id == 'probe'\n"
         f"pathlib.Path({str(dump)!r}).write_text(json.dumps(dict(os.environ)))\n"
     )
     from gideon.extensions.apps import worker_runtime as module
@@ -769,6 +774,7 @@ def test_the_worker_child_gets_its_name_and_not_the_gateway_environment(
 
     assert env.get("GIDEON_APP_NAME") == "envprobe"
     assert env.get("GIDEON_APP_WORKER") == "probe"
+    assert env.get("GIDEON_APP_WORKER_GRANT") == "backgroundTasks"
     assert "PORT" not in env, "a portless worker was handed a port"
     assert "GIDEON_APP_SECRET" not in env, (
         "a worker was handed the proxy-signature secret it has no inbound surface to "
