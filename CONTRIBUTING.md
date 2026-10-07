@@ -58,11 +58,19 @@ Run it once. If it fails, fix the cause and run it again. We do not re-run a che
 
 Tests that write state use a temporary directory or an isolated `GIDEON_HOME`, never real credentials, tokens or conversations. See [SECURITY.md](SECURITY.md).
 
-## The model
+## Changelog formatting
 
-The user's requested scope decides what work is authorized. Stay inside it. One task in progress at a time. If you spot an unrelated problem, write it down and leave it alone: no neighbouring refactors, no cleanup, no extra docs.
+The formatter previews output by default and does not replace the changelog:
 
-Finish the implementation before you run its checks, then run the declared command once. A green check on a stubbed path is not progress.
+```sh
+python3 tooling/scripts/format_changelog.py --output /tmp/gideon-changelog-preview.md
+python3 tooling/scripts/format_changelog.py --check
+```
+
+Writing requires `--write --backup <path>` with a new backup path outside the
+Git worktree. Use `--expected-sha256 <reviewed-hash>` to refuse an unexpected
+source change. Review the preview first. The formatter preserves release
+sections and existing prose; formatting is not evidence of a published release.
 
 ## Breaking changes
 

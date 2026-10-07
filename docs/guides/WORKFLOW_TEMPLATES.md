@@ -29,15 +29,16 @@ survives the next person who edits it. The engine itself is documented in
 Four things are worth getting right before the graph:
 
 **The description is the picker.** It is the only line a user sees when choosing,
-so it has to distinguish this template from its neighbours. Under about 40
-characters, and the lint says so.
+so it has to distinguish this template from its neighbours. Descriptions shorter than 40
+characters receive a thin-description warning.
 
 **Every input needs `help`.** The run dialog builds its fields from these. An
 input with no help shows a bare snake_case field name, and the user has to read
 the spec to learn what it wants.
 
-**A required input has no default.** The two contradict each other, because a
-default means the input can be omitted. The lint treats this as an error.
+**Avoid meaningful defaults on required inputs.** The lint reports a required
+input whose default is neither null nor an empty string, because that default
+allows the caller to omit it.
 
 **Steering examples are not decoration.** The widget surfaces them and
 `workflow_plan` uses them as few-shot. Two kinds matter: a `kickoff` example of
@@ -112,7 +113,8 @@ reasoning-tier branch doubles the cost of the decision for nothing.
  "config": {"prompt": "Audit this.\n\nReturn JSON: {\"findings\": [Finding]}.\n\n{{block:finding-record}}"}}
 ```
 
-Three blocks ship in `bundled/shared/`:
+The shared blocks live under
+`runtime/gideon/automation/workflows/bundled/shared/`:
 
 | Block | What it defines |
 |---|---|
@@ -120,8 +122,7 @@ Three blocks ship in `bundled/shared/`:
 | `safety-tiers` | the read-only → additive → reversible → destructive ladder |
 | `gap-honesty` | say what you could not establish, do not fill it |
 
-Cite them rather than writing the text again. Six templates once defined the
-Finding record three separate times, and copies do not stay identical: a gate
+Cite them rather than writing the text again. Copies can drift: a gate
 predicate like "no open Critical" stops meaning the same thing once one stage
 grades on a different ladder. An unknown block name is an **error**, never a
 passthrough, because a literal `{{block:…}}` reaching a model is a convention
@@ -159,7 +160,7 @@ be specific enough to act on. `why` is the consequence, not a restatement.
 finding to look thorough makes gates fire on noise, makes an until-dry loop run
 forever, and teaches the reader to ignore the output.
 
-## Long-horizon templates: hand off, do not compact
+## Long-horizon templates: pass explicit handoffs
 
 For a `loop` or `foreach` body that runs many iterations, have the node return a
 handoff and let the next iteration start from it:
@@ -219,12 +220,11 @@ Validate without saving. Every save path attaches the lint's findings, and
 `save: false` is a real dry run: it validates and returns the issues without
 writing, so you can iterate before committing anything.
 
-```bash
-# HTTP
-curl -X POST localhost:10000/api/workflows \
-  -H 'content-type: application/json' \
-  -d '{"name": "my-template", "root": {…}, "save": false}'
-```
+Use the authenticated console or an authenticated API client against
+`POST /api/workflows`, with `save: false` and a valid definition. HTTP mutations
+also require the configured origin checks; an unauthenticated localhost curl is
+not a valid authoring example. See [API authentication](../reference/API_OVERVIEW.md).
+
 
 From chat, `workflow_author` with `save=false` does the same thing, and
 `workflow_plan` with `template: "<name>"` hands you an existing template's
@@ -242,6 +242,10 @@ expanded tree to start from.
 A user's own workflow is only *advised*. The bundled library is held to zero
 findings including warnings, because a warning that ships propagates to every
 template copied from it.
+
+Version acceptance, action consent, current app tiers and run privacy still apply
+to execution; successful definition validation does not confer those permissions.
+See [workflow execution](../architecture/WORKFLOWS.md).
 
 Then validate strictly (`strict: true` rejects on warnings too) and drive it
 once for real. A template that validates and has never run is a template with an
