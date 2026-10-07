@@ -17,6 +17,8 @@ from gideon.interfaces.dashboard.handlers.capabilities_knowledge_types import (
 )
 from gideon.interfaces.dashboard.state import ConsoleState
 
+from gideon.interfaces.dashboard.token_auth import generate_token, token_auth_middleware
+
 
 async def main():
     home = Path(os.environ["GIDEON_HOME"])
@@ -25,7 +27,7 @@ async def main():
     store = KnowledgeStore(str(home / "knowledge.db"))
     state = ConsoleState(ConversationDirectory(AppConfig()), start_time=0)
     state._knowledge_store = store
-    app = web.Application()
+    app = web.Application(middlewares=[token_auth_middleware()])
     app["state"] = state
     register(app)
     register_types(app)
@@ -34,7 +36,13 @@ async def main():
     listener = web.TCPSite(runner, "127.0.0.1", 0)
     await listener.start()
     print(
-        json.dumps({"port": listener._server.sockets[0].getsockname()[1]}), flush=True
+        json.dumps(
+            {
+                "url": f"http://127.0.0.1:{runner.addresses[0][1]}",
+                "token": generate_token("types-owner"),
+            }
+        ),
+        flush=True,
     )
     try:
         await asyncio.Event().wait()

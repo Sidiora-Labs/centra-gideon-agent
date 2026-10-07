@@ -10,27 +10,47 @@ let server: ChildProcess
 let endpoint = ''
 let directory = ''
 const root = resolve(process.cwd(), '../..')
+const originalFetch = globalThis.fetch
 beforeAll(async () => {
   directory = await mkdtemp(resolve(tmpdir(), 'gideon-stories-ui-'))
-  server = spawn('/tmp/gideon-runtime-venv/bin/python', [
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: directory }
+  delete childEnv.GIDEON_DEV_NO_AUTH
+  server = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', [
     resolve(root, 'checks/runtime/capabilities/identity/twin_ui_server.py'), resolve(directory, 'stories.sqlite3'),
-  ], { env: { ...process.env, PYTHONPATH: resolve(root, 'runtime') } })
-  endpoint = await new Promise<string>((resolveEndpoint, reject) => {
+  ], { cwd: root, env: childEnv })
+  const ready = await new Promise<{ url: string; token: string }>((resolveEndpoint, reject) => {
     let output = ''
     let errors = ''
     const timer = setTimeout(() => reject(new Error('HTTP server startup timed out: ' + errors)), 10000)
     server.stderr?.on('data', chunk => { errors += String(chunk) })
     server.stdout?.on('data', chunk => {
       output += String(chunk)
-      const line = output.split('\n').find(value => value.startsWith('http://'))
-      if (line) { clearTimeout(timer); resolveEndpoint(line.trim()) }
+      const line = output.split('\n').find(value => value.startsWith('{"url":'))
+      if (line) {
+        try {
+          const value = JSON.parse(line) as { url: string; token: string }
+          if (typeof value.url !== 'string' || typeof value.token !== 'string') return
+          clearTimeout(timer); resolveEndpoint(value)
+        } catch { /* Wait for complete native readiness. */ }
+      }
     })
     server.once('error', error => { clearTimeout(timer); reject(error) })
     server.once('exit', code => { clearTimeout(timer); reject(new Error('HTTP server exited ' + code + ': ' + errors)) })
   })
+  endpoint = ready.url + '/api/capabilities/identity/twin'
+  expect((await originalFetch(endpoint)).status).toBe(403)
+  globalThis.fetch = (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), ready.url)
+    if (url.origin !== ready.url) return originalFetch(input, init)
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+    headers.set('Authorization', `Bearer ${ready.token}`)
+    headers.set('Origin', ready.url)
+    return originalFetch(url, { ...init, headers })
+  }
 })
 afterEach(() => { cleanup(); window.location.hash = '' })
 afterAll(async () => {
+  globalThis.fetch = originalFetch
   if (server && server.exitCode === null) {
     await new Promise<void>(resolveExit => { server.once('exit', () => resolveExit()); server.kill('SIGTERM') })
   }
@@ -45,7 +65,11 @@ test('edit durable sources, privacy, traits and selected overlay through actual 
   fireEvent.change(screen.getByLabelText('Source text'), { target: { value: 'I study astronomy.' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save source' }))
   await screen.findByRole('button', { name: 'Background' })
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Save identity settings' })).toBeEnabled())
+  await waitFor(() => {
+    const control = screen.getByRole('button', { name: 'Save identity settings' })
+    expect(control).toBeEnabled()
+    expect(control).not.toHaveAttribute('aria-disabled', 'true')
+  })
   fireEvent.click(screen.getByLabelText('Use identity in private conversations'))
   fireEvent.change(screen.getByLabelText('Traits (JSON object)'), { target: { value: '{"curiosity":9}' } })
   fireEvent.change(screen.getByLabelText('Persona overlays (JSON list)'), { target: { value: JSON.stringify([
@@ -53,7 +77,11 @@ test('edit durable sources, privacy, traits and selected overlay through actual 
   ]) } })
   fireEvent.change(screen.getByLabelText('Active overlay ID'), { target: { value: 'work' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save identity settings' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Preview shared context' })).toBeEnabled())
+  await waitFor(() => {
+    const control = screen.getByRole('button', { name: 'Preview shared context' })
+    expect(control).toBeEnabled()
+    expect(control).not.toHaveAttribute('aria-disabled', 'true')
+  })
   fireEvent.click(screen.getByRole('button', { name: 'Preview shared context' }))
   const preview = await screen.findByRole('region', { name: 'Identity preview' })
   expect(preview).toHaveTextContent('I study astronomy.')
@@ -64,7 +92,11 @@ test('edit durable sources, privacy, traits and selected overlay through actual 
   expect(screen.getByLabelText('Source text')).toHaveValue('I study astronomy.')
   fireEvent.click(screen.getByLabelText('Private source'))
   fireEvent.click(screen.getByRole('button', { name: 'Save source' }))
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Preview shared context' })).toBeEnabled())
+  await waitFor(() => {
+    const control = screen.getByRole('button', { name: 'Preview shared context' })
+    expect(control).toBeEnabled()
+    expect(control).not.toHaveAttribute('aria-disabled', 'true')
+  })
   fireEvent.click(screen.getByRole('button', { name: 'Preview shared context' }))
   await waitFor(() => expect(screen.getByRole('region', { name: 'Identity preview' })).not.toHaveTextContent('I study astronomy.'))
   expect(screen.getByRole('button', { name: 'Suggest questions' })).toBeDisabled()

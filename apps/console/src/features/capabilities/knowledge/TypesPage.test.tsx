@@ -11,24 +11,35 @@ const home = mkdtempSync(resolve(tmpdir(), 'capture-console-'))
 let child: ChildProcess
 beforeAll(async () => {
   const root = resolve(process.cwd(), '../..')
-  child = spawn(process.env.GIDEON_TEST_PYTHON || '/tmp/gideon-runtime-venv/bin/python', [resolve(root, 'checks/runtime/capabilities/knowledge/types_ui_server.py')], {
-    cwd: root, env: { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'],
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, PYTHONPATH: resolve(root, 'runtime'), GIDEON_HOME: home }
+  delete childEnv.GIDEON_DEV_NO_AUTH
+  child = spawn(process.env.GIDEON_TEST_PYTHON || 'python3', [resolve(root, 'checks/runtime/capabilities/knowledge/types_ui_server.py')], {
+    cwd: root, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'],
   })
   let errors = ''
   child.stderr?.on('data', chunk => { errors += String(chunk) })
-  const origin = await new Promise<string>((done, fail) => {
+  const ready = await new Promise<{ url: string; token: string }>((done, fail) => {
     let buffer = ''
     const timeout = setTimeout(() => fail(new Error(errors || 'Capture application startup timed out')), 15000)
     child.on('exit', code => { clearTimeout(timeout); fail(new Error(`Capture application exited ${code}: ${errors}`)) })
     child.stdout?.on('data', chunk => {
       buffer += String(chunk)
       for (const line of buffer.split('\n')) {
-        if (!line.startsWith('{"port":')) continue
-        try { const { port } = JSON.parse(line); clearTimeout(timeout); done(`http://127.0.0.1:${port}`) } catch { /* Wait for complete address. */ }
+        if (!line.startsWith('{"url":')) continue
+        try { const value = JSON.parse(line) as { url: string; token: string }; if (typeof value.url !== 'string' || typeof value.token !== 'string') continue; clearTimeout(timeout); done(value) } catch { /* Wait for complete address. */ }
       }
     })
   })
-  globalThis.fetch = (input, init) => originalFetch(typeof input === 'string' && input.startsWith('/') ? origin + input : input, init)
+  const origin = ready.url
+  expect((await originalFetch(`${origin}/api/capabilities/knowledge/types`)).status).toBe(403)
+  globalThis.fetch = (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), origin)
+    if (url.origin !== origin) return originalFetch(input, init)
+    const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+    headers.set('Authorization', `Bearer ${ready.token}`)
+    headers.set('Origin', origin)
+    return originalFetch(url, { ...init, headers })
+  }
 }, 20000)
 afterEach(cleanup)
 afterAll(async () => {
