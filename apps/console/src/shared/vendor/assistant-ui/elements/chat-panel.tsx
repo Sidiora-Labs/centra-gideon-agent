@@ -117,10 +117,13 @@ export function ChatPanelComposer({
         type="button"
         aria-label="Send"
         onClick={onSend}
-        disabled={!onSend}
+        aria-disabled={(!onSend) || undefined}
+        aria-description={(!onSend) ? "Sending is unavailable in this view." : undefined}
+        title={(!onSend) ? "Sending is unavailable in this view." : undefined}
         className={cn(
+          "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
           inkButton,
-          "flex size-7 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-30",
+          "flex size-7 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-40",
         )}
       >
         <ArrowUpIcon className="size-3.5" />

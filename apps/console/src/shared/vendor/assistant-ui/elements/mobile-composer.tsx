@@ -77,8 +77,11 @@ export function MobileComposer({
               key={action}
               type="button"
               onClick={() => onAction?.(action)}
-              disabled={!onAction}
+              aria-disabled={(!onAction) || undefined}
+              aria-description={(!onAction) ? "This action is unavailable in this view." : undefined}
+              title={(!onAction) ? "This action is unavailable in this view." : undefined}
               className={cn(
+                "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
                 "disabled:pointer-events-none",
                 field,
                 "text-foreground/60 shrink-0 rounded-full px-3 py-1.5 text-xs whitespace-nowrap",
@@ -95,11 +98,14 @@ export function MobileComposer({
           type="button"
           aria-label="Add an attachment"
           onClick={onAttach}
-          disabled={!onAttach}
+          aria-disabled={(!onAttach) || undefined}
+          aria-description={(!onAttach) ? "Attachments are unavailable in this view." : undefined}
+          title={(!onAttach) ? "Attachments are unavailable in this view." : undefined}
           className={cn(
+            "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
             ghostButton,
             field,
-            "size-9 shrink-0 disabled:pointer-events-none disabled:opacity-30",
+            "size-9 shrink-0 disabled:pointer-events-none disabled:opacity-40",
           )}
         >
           <PlusIcon className="size-4" />
@@ -136,11 +142,14 @@ export function MobileComposer({
           <button
             type="button"
             aria-label={running ? "Stop" : "Send"}
-            onClick={running ? onStop : onSend}
-            disabled={running ? !onStop : !onSend || value === ""}
+            onClick={running ? onStop : value !== "" ? onSend : undefined}
+            aria-disabled={(running ? !onStop : !onSend || value === "") || undefined}
+            aria-description={(running ? !onStop : !onSend || value === "") ? running ? "Stopping is unavailable for this run." : !onSend ? "Sending is unavailable in this view." : "Enter a message before sending." : undefined}
+            title={(running ? !onStop : !onSend || value === "") ? running ? "Stopping is unavailable for this run." : !onSend ? "Sending is unavailable in this view." : "Enter a message before sending." : undefined}
             className={cn(
+              "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
               inkButton,
-              "flex size-9 shrink-0 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-25",
+              "flex size-9 shrink-0 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-40",
             )}
           >
             {running ? (

@@ -59,6 +59,7 @@ export function EmptyStateSuggestion({
       data-slot="empty-state-suggestion"
       style={{ animationDelay: `${120 + index * 70}ms`, ...style }}
       className={cn(
+        "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
         paper,
         "fade-in slide-in-from-bottom-2 animate-in fill-mode-both focus-visible:ring-foreground/20 rounded-full px-4 py-2 text-[13px] transition-transform duration-500 outline-none hover:-translate-y-px focus-visible:ring-1 active:scale-[0.96] motion-reduce:animate-none",
         className,
@@ -94,10 +95,12 @@ export function EmptyStateComposer({
         type="button"
         aria-label="Send"
         onClick={onSend}
-        disabled={!onSend}
+        aria-disabled={(!onSend) || undefined}
+        aria-description={(!onSend) ? "Sending is unavailable in this view." : undefined}
+        title={(!onSend) ? "Sending is unavailable in this view." : undefined}
         className={cn(
           inkButton,
-          "flex size-8 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-30",
+          "flex size-8 items-center justify-center rounded-full disabled:pointer-events-none disabled:opacity-40",
         )}
       >
         <ArrowUpIcon className="size-4" />

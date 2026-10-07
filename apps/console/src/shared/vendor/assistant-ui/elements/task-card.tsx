@@ -124,9 +124,11 @@ export function TaskCard({
       <button
         type="button"
         aria-expanded={hasTranscript ? isOpen : undefined}
-        disabled={!hasTranscript || inert}
-        onClick={toggle}
-        className="hover:enabled:bg-foreground/[0.03] flex items-center gap-2.5 px-3.5 py-2.5 text-start transition-colors disabled:cursor-default"
+        aria-disabled={(!hasTranscript || inert) || undefined}
+        aria-description={(!hasTranscript || inert) ? !hasTranscript ? "No task transcript is available." : "Transcript visibility cannot be changed in this view." : undefined}
+        title={(!hasTranscript || inert) ? !hasTranscript ? "No task transcript is available." : "Transcript visibility cannot be changed in this view." : undefined}
+        onClick={hasTranscript && !inert ? toggle : undefined}
+        className="aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100 hover:enabled:bg-foreground/[0.03] flex items-center gap-2.5 px-3.5 py-2.5 text-start transition-colors disabled:cursor-default"
       >
         <TaskStateIcon state={state} />
         <span className="sr-only">{state}</span>

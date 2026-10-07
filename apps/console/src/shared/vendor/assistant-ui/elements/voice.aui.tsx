@@ -97,6 +97,7 @@ export const VoiceStatusDot: FC = () => {
 
 export const VoiceConnectButton: FC = () => {
   const { connect } = useVoiceControls();
+  const running = useAuiState((s) => s.thread.isRunning);
   const runOwnsThread = useAuiState(
     (s) =>
       s.thread.isRunning ||
@@ -105,9 +106,12 @@ export const VoiceConnectButton: FC = () => {
   return (
     <button
       type="button"
-      className="aui-voice-connect gap-1.5 rounded-lg"
-      disabled={runOwnsThread}
-      onClick={() => connect()}
+      className="aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100 aui-voice-connect gap-1.5 rounded-lg"
+      disabled={running}
+      aria-disabled={(runOwnsThread) || undefined}
+      aria-description={(runOwnsThread) ? "Finish the current run or answer its request before starting voice." : undefined}
+      title={(runOwnsThread) ? "Finish the current run or answer its request before starting voice." : undefined}
+      onClick={runOwnsThread ? undefined : () => connect()}
     >
       <PhoneIcon className="size-4" />
       Connect

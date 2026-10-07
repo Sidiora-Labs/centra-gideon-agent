@@ -422,21 +422,24 @@ export function ComposerActions({
 }
 
 export function ComposerAttachButton({
-  className,
-  ...props
-}: Omit<ComponentProps<"button">, "children">) {
+  className, disabled = false, disabledReason, onClick, title, ...props
+}: Omit<ComponentProps<"button">, "children"> & { disabledReason?: string }) {
+  const blocked = disabled || !onClick;
+  const reason = !onClick ? "Attachments are unavailable in this view." : disabledReason || "Adding attachments is unavailable.";
   return (
     <button
-      type="button"
-      aria-label="Add attachment"
-      data-slot="composer-attach"
-      disabled={!props.onClick}
-      className={cn(
-        ghostButton,
-        "size-8 disabled:pointer-events-none disabled:opacity-30",
-        className,
-      )}
       {...props}
+      type={props.type ?? "button"}
+      aria-label={props["aria-label"] ?? "Add attachment"}
+      data-slot="composer-attach"
+      aria-disabled={blocked || undefined}
+      aria-description={blocked ? reason : props["aria-description"]}
+      title={blocked ? reason : title}
+      onClick={blocked ? undefined : onClick}
+      className={cn(
+        "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
+        ghostButton, "size-8", className,
+      )}
     >
       <PlusIcon className="size-4" />
     </button>

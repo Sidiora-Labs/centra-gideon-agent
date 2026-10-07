@@ -94,9 +94,13 @@ export function MessageActions({
         aria-label={labels?.helpful ?? "Mark response helpful"}
         aria-pressed={reaction === "up"}
         aria-busy={reactionBusy}
-        disabled={reactionBusy || (!allowClearReaction && reaction === "up")}
-        onClick={() => onReactionChange(reaction === "up" && allowClearReaction ? null : "up")}
+        disabled={reactionBusy}
+        aria-disabled={(!allowClearReaction && reaction === "up") || undefined}
+        aria-description={(!allowClearReaction && reaction === "up") ? "This reaction is already selected and cannot be cleared." : undefined}
+        title={(!allowClearReaction && reaction === "up") ? "This reaction is already selected and cannot be cleared." : undefined}
+        onClick={reactionBusy || (!allowClearReaction && reaction === "up") ? undefined : () => onReactionChange(reaction === "up" && allowClearReaction ? null : "up")}
         className={cn(
+          "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
           buttonClassName,
           reaction === "up" &&
             "bg-foreground/[0.06] text-foreground/90 dark:bg-foreground/[0.09]",
@@ -109,9 +113,13 @@ export function MessageActions({
         aria-label={labels?.unhelpful ?? "Mark response unhelpful"}
         aria-pressed={reaction === "down"}
         aria-busy={reactionBusy}
-        disabled={reactionBusy || (!allowClearReaction && reaction === "down")}
-        onClick={() => onReactionChange(reaction === "down" && allowClearReaction ? null : "down")}
+        disabled={reactionBusy}
+        aria-disabled={(!allowClearReaction && reaction === "down") || undefined}
+        aria-description={(!allowClearReaction && reaction === "down") ? "This reaction is already selected and cannot be cleared." : undefined}
+        title={(!allowClearReaction && reaction === "down") ? "This reaction is already selected and cannot be cleared." : undefined}
+        onClick={reactionBusy || (!allowClearReaction && reaction === "down") ? undefined : () => onReactionChange(reaction === "down" && allowClearReaction ? null : "down")}
         className={cn(
+          "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
           buttonClassName,
           reaction === "down" &&
             "bg-foreground/[0.06] text-foreground/90 dark:bg-foreground/[0.09]",

@@ -109,9 +109,12 @@ export function AgentCard({
 
       {(onConnect || connected) && <button
         type="button"
-        onClick={onConnect}
-        disabled={connected}
+        onClick={connected ? undefined : onConnect}
+        aria-disabled={(connected) || undefined}
+        aria-description={(connected) ? "Already connected." : undefined}
+        title={(connected) ? "Already connected." : undefined}
         className={cn(
+          "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
           connected
             ? cn(field, "text-foreground/55")
             : cn(inkButton, "justify-center"),

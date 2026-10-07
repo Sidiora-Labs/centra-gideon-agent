@@ -53,8 +53,12 @@ export function CodeRunner({
           type="button"
           aria-label="Run this snippet"
           onClick={onRun}
-          disabled={state === "running" || !onRun}
+          disabled={state === "running"}
+          aria-disabled={(!onRun) || undefined}
+          aria-description={(!onRun) ? "Running snippets is unavailable in this view." : undefined}
+          title={(!onRun) ? "Running snippets is unavailable in this view." : undefined}
           className={cn(
+            "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
             ghostButton,
             "size-7 shrink-0 disabled:pointer-events-none",
           )}

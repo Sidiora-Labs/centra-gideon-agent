@@ -60,9 +60,12 @@ export function MessageBranches({
         <button
           type="button"
           aria-label={labels?.previous ?? "Show previous response"}
-          disabled={!hasNavigation}
-          onClick={goPrevious}
-          className={cn(ghostButton, "size-6")}
+          aria-disabled={(!hasNavigation) || undefined}
+          aria-description={(!hasNavigation) ? total <= 1 ? "There are no other responses to show." : "Response navigation is unavailable." : undefined}
+          title={(!hasNavigation) ? total <= 1 ? "There are no other responses to show." : "Response navigation is unavailable." : undefined}
+          onClick={hasNavigation ? goPrevious : undefined}
+          className={cn(
+            "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",ghostButton, "size-6")}
         >
           <ChevronLeftIcon className="size-3.5" />
         </button>
@@ -74,9 +77,12 @@ export function MessageBranches({
         <button
           type="button"
           aria-label={labels?.next ?? "Show next response"}
-          disabled={!hasNavigation}
-          onClick={goNext}
-          className={cn(ghostButton, "size-6")}
+          aria-disabled={(!hasNavigation) || undefined}
+          aria-description={(!hasNavigation) ? total <= 1 ? "There are no other responses to show." : "Response navigation is unavailable." : undefined}
+          title={(!hasNavigation) ? total <= 1 ? "There are no other responses to show." : "Response navigation is unavailable." : undefined}
+          onClick={hasNavigation ? goNext : undefined}
+          className={cn(
+            "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",ghostButton, "size-6")}
         >
           <ChevronRightIcon className="size-3.5" />
         </button>

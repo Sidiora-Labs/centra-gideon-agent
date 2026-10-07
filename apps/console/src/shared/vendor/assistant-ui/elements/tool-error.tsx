@@ -74,16 +74,21 @@ export function ToolError({
         <button
           type="button"
           onClick={onSkip}
-          disabled={!onSkip}
-          className="text-foreground/45 hover:bg-foreground/[0.06] hover:text-foreground/90 h-7 rounded-full px-2.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96] disabled:pointer-events-none disabled:opacity-30"
+          aria-disabled={(!onSkip) || undefined}
+          aria-description={(!onSkip) ? "Skipping this error is unavailable." : undefined}
+          title={(!onSkip) ? "Skipping this error is unavailable." : undefined}
+          className="aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100 text-foreground/45 hover:bg-foreground/[0.06] hover:text-foreground/90 h-7 rounded-full px-2.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96] disabled:pointer-events-none disabled:opacity-40"
         >
           Skip
         </button>
         <button
           type="button"
           onClick={onRetry}
-          disabled={retrying || !onRetry}
-          className="text-foreground/70 hover:bg-foreground/[0.06] hover:text-foreground/95 flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96] disabled:pointer-events-none"
+          disabled={retrying}
+          aria-disabled={(!onRetry) || undefined}
+          aria-description={(!onRetry) ? "Retrying this action is unavailable." : undefined}
+          title={(!onRetry) ? "Retrying this action is unavailable." : undefined}
+          className="aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100 text-foreground/70 hover:bg-foreground/[0.06] hover:text-foreground/95 flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96] disabled:pointer-events-none"
         >
           {retrying ? (
             <Loader2Icon className="size-3 animate-spin motion-reduce:animate-none" />

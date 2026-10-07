@@ -144,16 +144,21 @@ export function ElicitationForm({
             <button
               type="button"
               onClick={onDecline}
-              disabled={!onDecline}
-              className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
+              aria-disabled={(!onDecline) || undefined}
+              aria-description={(!onDecline) ? "Declining this request is unavailable." : undefined}
+              title={(!onDecline) ? "Declining this request is unavailable." : undefined}
+              className="aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100 text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
             >
               Decline
             </button>
             <button
               type="button"
               onClick={onAccept}
-              disabled={!onAccept}
+              aria-disabled={(!onAccept) || undefined}
+              aria-description={(!onAccept) ? "Accepting this request is unavailable." : undefined}
+              title={(!onAccept) ? "Accepting this request is unavailable." : undefined}
               className={cn(
+                "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
                 inkButton,
                 "flex h-8 items-center rounded-full px-3.5 text-xs font-medium",
               )}

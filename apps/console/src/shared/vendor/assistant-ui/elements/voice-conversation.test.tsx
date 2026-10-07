@@ -39,7 +39,14 @@ describe("VoiceConversation measured amplitude", () => {
       expect(rings().every((ring) => ring.style.transform === "")).toBe(true);
     };
     expectNeutral("connecting");
-    expect(screen.getByRole("button", { name: "Interrupt the assistant" })).toBeDisabled();
+    const blocked = screen.getByRole("button", { name: "Interrupt the assistant" });
+    expect(blocked).toHaveAttribute("aria-disabled", "true");
+    expect(blocked).not.toBeDisabled();
+    expect(blocked).toHaveAttribute("aria-description", "The assistant is not speaking.");
+    blocked.focus();
+    expect(blocked).toHaveFocus();
+    fireEvent.click(blocked);
+    expect(onInterrupt).not.toHaveBeenCalled();
 
     rerender(<VoiceConversation mode="listening" transcript={turns} onInterrupt={onInterrupt} onToggleMute={onToggleMute} onEnd={onEnd} />);
     expectNeutral("listening");
@@ -48,6 +55,7 @@ describe("VoiceConversation measured amplitude", () => {
     rerender(<VoiceConversation mode="speaking" transcript={turns} onInterrupt={onInterrupt} onToggleMute={onToggleMute} onEnd={onEnd} />);
     expectNeutral("speaking");
     expect(screen.getByText("Tap to interrupt")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Interrupt the assistant" })).not.toHaveAttribute("aria-disabled");
     fireEvent.click(screen.getByRole("button", { name: "Interrupt the assistant" }));
     expect(onInterrupt).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Turn the microphone off" }));
@@ -60,8 +68,8 @@ describe("VoiceConversation measured amplitude", () => {
     const { rerender } = render(<VoiceConversation mode="speaking" amplitude={Number.NaN} transcript={[]} muted />);
     expect(rings().every((ring) => ring.style.transform === "")).toBe(true);
     expect(screen.getByText("Mic off")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Turn the microphone on" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "End the call" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Turn the microphone on" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "End the call" })).toHaveAttribute("aria-disabled", "true");
     rerender(<VoiceConversation mode="listening" amplitude={Number.POSITIVE_INFINITY} transcript={[]} />);
     expect(rings().every((ring) => ring.style.transform === "")).toBe(true);
     expect(within(screen.getByRole("button", { name: "Interrupt the assistant" })).queryAllByRole("progressbar")).toHaveLength(0);

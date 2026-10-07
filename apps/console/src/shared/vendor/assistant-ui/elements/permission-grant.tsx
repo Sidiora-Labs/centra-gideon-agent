@@ -12,6 +12,7 @@ export type PermissionChoice = {
   label: string;
   name?: string;
   disabled?: boolean;
+  disabledReason?: string;
   tone?: "danger" | "neutral";
 };
 
@@ -97,15 +98,17 @@ export function PermissionGrant({
         {scope === "pending" ? (
           choices !== undefined ? (
             choices.length > 0 ? (
-              choices.map(({ id, label, name, disabled, tone }) => (
+              choices.map(({ id, label, name, disabled, disabledReason, tone }) => (
                 <button
                   key={id}
                   type="button"
                   aria-label={name}
-                  title={name}
-                  disabled={!onChoice || disabled}
-                  onClick={onChoice ? () => onChoice(id) : undefined}
+                  aria-disabled={(!onChoice || disabled) || undefined}
+                  aria-description={(!onChoice || disabled) ? !onChoice ? "Answering this request is unavailable." : disabledReason || "This answer is unavailable." : undefined}
+                  title={(!onChoice || disabled) ? !onChoice ? "Answering this request is unavailable." : disabledReason || "This answer is unavailable." : name}
+                  onClick={onChoice && !disabled ? () => onChoice(id) : undefined}
                   className={cn(
+                    "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
                     "h-8 rounded-full px-3 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-50",
                     tone === "danger"
                       ? "text-red-600 hover:bg-red-500/10 hover:text-red-700"

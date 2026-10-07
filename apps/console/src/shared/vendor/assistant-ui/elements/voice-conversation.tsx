@@ -76,10 +76,12 @@ export function VoiceConversation({
     >
       <button
         type="button"
-        onClick={onInterrupt}
-        disabled={!canInterrupt}
+        onClick={canInterrupt ? onInterrupt : undefined}
+        aria-disabled={(!canInterrupt) || undefined}
+        aria-description={(!canInterrupt) ? mode !== "speaking" ? "The assistant is not speaking." : "Interruption is unavailable for this call." : undefined}
+        title={(!canInterrupt) ? mode !== "speaking" ? "The assistant is not speaking." : "Interruption is unavailable for this call." : undefined}
         aria-label="Interrupt the assistant"
-        className="focus-visible:ring-foreground/20 relative flex size-24 items-center justify-center rounded-full outline-none focus-visible:ring-1 disabled:cursor-default"
+        className="aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100 focus-visible:ring-foreground/20 relative flex size-24 items-center justify-center rounded-full outline-none focus-visible:ring-1 disabled:cursor-default"
       >
         <span
           aria-hidden
@@ -169,10 +171,13 @@ export function VoiceConversation({
           }
           aria-pressed={muted}
           onClick={onToggleMute}
-          disabled={!onToggleMute}
+          aria-disabled={(!onToggleMute) || undefined}
+          aria-description={(!onToggleMute) ? "Microphone controls are unavailable for this call." : undefined}
+          title={(!onToggleMute) ? "Microphone controls are unavailable for this call." : undefined}
           className={cn(
+            "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
             ghostButton,
-            "size-10 disabled:pointer-events-none disabled:opacity-30",
+            "size-10 disabled:pointer-events-none disabled:opacity-40",
             muted && "bg-foreground/[0.08] text-foreground/90",
           )}
         >
@@ -186,8 +191,10 @@ export function VoiceConversation({
           type="button"
           aria-label="End the call"
           onClick={onEnd}
-          disabled={!onEnd}
-          className="flex size-10 items-center justify-center rounded-full bg-red-500/90 text-white transition-[opacity,scale] duration-150 hover:opacity-90 active:scale-[0.96] disabled:pointer-events-none disabled:opacity-30 motion-reduce:transition-none"
+          aria-disabled={(!onEnd) || undefined}
+          aria-description={(!onEnd) ? "Ending this call is unavailable in this view." : undefined}
+          title={(!onEnd) ? "Ending this call is unavailable in this view." : undefined}
+          className="aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100 flex size-10 items-center justify-center rounded-full bg-red-500/90 text-white transition-[opacity,scale] duration-150 hover:opacity-90 active:scale-[0.96] disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-none"
         >
           <PhoneOffIcon className="size-4" />
         </button>

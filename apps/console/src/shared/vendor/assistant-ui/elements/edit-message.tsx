@@ -54,8 +54,11 @@ export function EditMessage({
         <button
           type="button"
           onClick={onStartEdit}
-          disabled={!onStartEdit}
+          aria-disabled={(!onStartEdit) || undefined}
+          aria-description={(!onStartEdit) ? "Editing is unavailable for this message." : undefined}
+          title={(!onStartEdit) ? "Editing is unavailable for this message." : undefined}
           className={cn(
+            "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
             field,
             "hover:bg-foreground/[0.07] max-w-[85%] rounded-2xl px-3.5 py-2.5 text-start text-[13.5px] transition-colors",
           )}
@@ -103,16 +106,21 @@ export function EditMessage({
         <button
           type="button"
           onClick={onCancel}
-          disabled={!onCancel}
-          className="text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
+          aria-disabled={(!onCancel) || undefined}
+          aria-description={(!onCancel) ? "Canceling this edit is unavailable." : undefined}
+          title={(!onCancel) ? "Canceling this edit is unavailable." : undefined}
+          className="aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100 text-foreground/55 hover:bg-foreground/[0.06] hover:text-foreground/90 h-8 rounded-full px-3.5 text-xs font-medium transition-[background-color,color,scale] duration-150 active:scale-[0.96]"
         >
           {labels?.cancel ?? "Cancel"}
         </button>
         <button
           type="button"
           onClick={onSave}
-          disabled={!onSave}
+          aria-disabled={(!onSave) || undefined}
+          aria-description={(!onSave) ? "Saving this edit is unavailable." : undefined}
+          title={(!onSave) ? "Saving this edit is unavailable." : undefined}
           className={cn(
+            "aria-disabled:opacity-40 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:active:scale-100",
             inkButton,
             "flex h-8 items-center rounded-full px-3.5 text-xs font-medium",
           )}
