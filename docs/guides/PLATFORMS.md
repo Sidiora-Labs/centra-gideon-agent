@@ -78,7 +78,7 @@ Use the repo-root `.env` and the persistent named volume as described in
 
 ```powershell
 copy .env.example .env
-docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build gideon-gateway gideon-web
+docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.build.yaml up -d --build gideon-gateway gideon-web
 ```
 
 Default published ports bind host loopback. A named volume keeps runtime state inside

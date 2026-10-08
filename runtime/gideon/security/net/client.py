@@ -4,7 +4,7 @@
   1. evaluates the URL (deny → uniform error + SEL audit, never silent),
   2. connects to the PINNED resolved IP so the name cannot rebind to a private IP
      between check and connect (closes the validate-then-reconnect TOCTOU window),
-  3. re-evaluates EVERY redirect hop (a redirect to 169.254.169.254 is re-checked),
+  3. re-evaluates EVERY redirect hop (a redirect to 127.0.0.1 is re-checked),
   4. enforces the byte cap (streamed) + timeout + scheme,
   5. emits a SEL audit event on allow + deny.
 

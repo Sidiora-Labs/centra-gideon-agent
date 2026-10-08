@@ -1,21 +1,13 @@
 # Headless CLI smoke test — `gideon run` (EXTERNAL-ACCESS §9.5).
-#
 
 # package and drives the `gideon run` command a CI pipeline would actually type.
-#
-
-
-
-
-#
-
 
 name: headless-run-smoke
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 7 * * 1"                      
+    - cron: "0 7 * * 1"
 
 concurrency:
   group: headless-run-smoke-${{ github.ref }}
@@ -28,7 +20,6 @@ jobs:
   smoke:
     runs-on: ubuntu-latest
 
-
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -38,10 +29,6 @@ jobs:
           enable-cache: true
       - name: Install (locked)
         run: uv sync --locked --extra dev --extra slack
-
-
-
-
 
       - name: run is registered and refuses a blank prompt
         run: |
@@ -55,8 +42,6 @@ jobs:
       - name: Configure an isolated home
         run: |
           echo "GIDEON_HOME=${{ runner.temp }}/gideon-home" >> "$GITHUB_ENV"
-
-
 
       - name: Bind a chat model
         id: bind
@@ -78,9 +63,6 @@ jobs:
       - name: Headless turn smoke test
         if: steps.bind.outputs.bound == 'true'
         run: bash tooling/scripts/ci_smoke_run.sh
-
-
-
 
       - name: No gateway left running
         if: always()

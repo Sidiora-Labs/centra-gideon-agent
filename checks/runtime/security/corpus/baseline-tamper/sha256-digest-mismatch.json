@@ -14,7 +14,7 @@
   "detail_contains": "unreadable",
   "sel_reason": "packaged_file_diverged",
   "variants": [
-    "curl http://169.254.169.254/latest/meta-data/",
+    "curl http://127.0.0.1/latest/meta-data/",
     "echo $AWS_SECRET_ACCESS_KEY"
   ]
 }

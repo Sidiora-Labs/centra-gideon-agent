@@ -1,16 +1,10 @@
 # Dependabot — native dependency update PRs (no hosted service). Weekly, grouped
-                                                                          
+
 version: 2
 updates:
-                                                                                  
   #
   # 🔴 A pip PR here CANNOT be merged as-opened, and the reason is mechanical: dependabot
-                                                                                            
-                                                                                             
-                                                                                              
-                                                                                      
-                                                                                          
-                                       
+
   - package-ecosystem: pip
     directory: /
     schedule:
@@ -19,29 +13,20 @@ updates:
     groups:
       python-deps:
         patterns: ["*"]
-                                                                                            
+
     # and dependabot cannot read prose — so it re-proposes widening them every week and each
-                                                                                         
-                                                                  
-                                                                                              
-                                                                                                
+
     # dependabot proposed both widenings again in #2726 **four minutes after that merged** (ignore
-                                                                                                   
+
     #
     # The reason `update-types` misses: what dependabot is doing here is not bumping an installed
-                                                                                                
-                                                                                               
-                                                                                             
+
     ignore:
-                                                                                            
       # which `runtime/gideon/mcp_client.py:287` imports and `:289` calls. Allowing 2.x makes a
-                                                                                          
-                                                                                                  
+
       - dependency-name: mcp
         versions: [">=2"]
-                                                                                               
-                                                                                             
-                                                                      
+
       - dependency-name: isort
         versions: [">=9"]
 
@@ -50,19 +35,10 @@ updates:
       - dependency-name: croniter
         versions: [">=3"]
 
-                                                                                
-                                                                             
-                                                                           
   # dashboard came from a dependabot React bump whose failure mode was invisible
-                                                                           
-                        
+
   #
-                                                                                  
-                                                                         
-                                                                                 
-                                                                               
-                                                                               
-                                                        
+
   - package-ecosystem: npm
     directory: /
     schedule:
@@ -87,7 +63,6 @@ updates:
           - "jsdom"
           - "@testing-library/*"
 
-                                                                                    
   - package-ecosystem: github-actions
     directory: /
     schedule:

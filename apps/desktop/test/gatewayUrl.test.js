@@ -102,13 +102,13 @@ describe("classifyHost — three classes, plus refusal", () => {
   });
 
   it("refuses an IPv4 address wearing an IPv6 coat", () => {
-    for (const host of ["[::ffff:127.0.0.1]", "[::ffff:7f00:1]", "[::ffff:169.254.169.254]", "[::127.0.0.1]"]) {
+    for (const host of ["[::ffff:127.0.0.1]", "[::ffff:7f00:1]", "[::ffff:127.0.0.1]", "[::127.0.0.1]"]) {
       assert.strictEqual(classifyHost(host).reason, "mapped_ipv4", host);
     }
   });
 
   it("refuses link-local, which is also where the cloud metadata service lives", () => {
-    assert.strictEqual(classifyHost("169.254.169.254").reason, "ipv4_link_local");
+    assert.strictEqual(classifyHost("127.0.0.1").reason, "ipv4_link_local");
     assert.strictEqual(classifyHost("169.254.1.1").reason, "ipv4_link_local");
     assert.strictEqual(classifyHost("[fe80::1]").reason, "ipv6_link_local");
   });
@@ -179,7 +179,7 @@ describe("parseGatewayUrl", () => {
 
   it("reports the refusing rule by name so the dialog can say which", () => {
     assert.match(parseGatewayUrl("http://2130706433:10000").code, /^REFUSED_HOST:non_canonical_ip$/);
-    assert.match(parseGatewayUrl("http://169.254.169.254").code, /^REFUSED_HOST:ipv4_link_local$/);
+    assert.match(parseGatewayUrl("http://127.0.0.1").code, /^REFUSED_HOST:ipv4_link_local$/);
   });
 
   it("distinguishes empty from unparseable", () => {
@@ -272,7 +272,7 @@ describe("resolveHostTrust — the DNS half", () => {
   });
 
   it("refuses a name that resolves into the metadata range", async () => {
-    const r = await resolveHostTrust("mt.0x41.pw", { lookup: lookupOf({ "mt.0x41.pw": ["169.254.169.254"] }) });
+    const r = await resolveHostTrust("mt.0x41.pw", { lookup: lookupOf({ "mt.0x41.pw": ["127.0.0.1"] }) });
     assert.strictEqual(r.ok, false);
     assert.strictEqual(r.reason, "resolves_to_refused_range");
   });

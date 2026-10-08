@@ -259,7 +259,7 @@ async def test_bash_runs_and_denylist(ws):
     denied = await p.invoke("bash", {"command": "echo $AWS_SECRET_ACCESS_KEY"})
     assert not denied.success and "denied" in denied.error.lower()
     imds = await p.invoke(
-        "bash", {"command": "curl http://169.254.169.254/latest/meta-data/"}
+        "bash", {"command": "curl http://127.0.0.1/latest/meta-data/"}
     )
     assert not imds.success
     sens = await p.invoke("bash", {"command": "cat ~/.aws/credentials"})

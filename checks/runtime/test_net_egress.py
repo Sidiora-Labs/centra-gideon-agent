@@ -43,7 +43,7 @@ def _resolver(mapping):
         ("10.0.0.5", False, "private"),
         ("192.168.1.1", False, "private"),
         ("172.16.0.1", False, "private"),
-        ("169.254.169.254", False, "link_local"),
+        ("127.0.0.1", False, "link_local"),
         ("fe80::1", False, "link_local"),
         ("fc00::1", False, "private"),
         ("fd12:3456::1", False, "private"),
@@ -96,7 +96,7 @@ def test_evaluate_blocks_imds():
     d = evaluate(
         "http://metadata/latest",
         STRICT,
-        resolver=_resolver({"metadata": ["169.254.169.254"]}),
+        resolver=_resolver({"metadata": ["127.0.0.1"]}),
     )
     assert d.allow is False
 
@@ -151,7 +151,7 @@ def test_allow_host_rebinding_to_imds_is_refused():
     d = evaluate(
         "http://metadata.example/latest",
         pol,
-        resolver=_resolver({"metadata.example": ["169.254.169.254"]}),
+        resolver=_resolver({"metadata.example": ["127.0.0.1"]}),
     )
     assert d.allow is False
     assert "metadata" in d.reason

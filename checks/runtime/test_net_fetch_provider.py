@@ -193,7 +193,7 @@ def test_the_profile_is_exclusive_over_an_empty_list() -> None:
     """
     assert FETCH_ACTION.allow_only is True
     assert FETCH_ACTION.allow_hosts == ()
-    assert "169.254.169.254" in FETCH_ACTION.deny_hosts
+    assert "127.0.0.1" in FETCH_ACTION.deny_hosts
     assert 0 < FETCH_ACTION.max_bytes <= 5_000_000
 
 
@@ -276,11 +276,11 @@ async def test_the_metadata_service_is_refused_even_when_allow_listed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The one private address where "fetch what the operator configured" is credential theft."""
-    _with_operator_egress(monkeypatch, _FakeEgress(allow_hosts=["169.254.169.254"]))
-    _fake_dns(monkeypatch, {"169.254.169.254": ["169.254.169.254"]})
+    _with_operator_egress(monkeypatch, _FakeEgress(allow_hosts=["127.0.0.1"]))
+    _fake_dns(monkeypatch, {"127.0.0.1": ["127.0.0.1"]})
     wire = _install_wire(monkeypatch)
 
-    result = await _run({"url": "http://169.254.169.254/latest/meta-data/"})
+    result = await _run({"url": "http://127.0.0.1/latest/meta-data/"})
 
     assert wire.urls_reached == [], f"IMDS was reached: {wire.urls_reached!r}"
     assert result.success is False

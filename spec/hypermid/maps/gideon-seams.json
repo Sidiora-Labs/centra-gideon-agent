@@ -377,11 +377,11 @@
     },
     {
       "id": "seam-container-package",
-      "current_path": "infrastructure/docker/Dockerfile.backend",
+      "current_path": "deploy/docker/Dockerfile.backend",
       "current_symbol": "single",
       "current_behavior": "Builds the backend and console into an unprivileged single-container OSS runtime.",
       "disposition": "extend",
-      "target_path": "infrastructure/docker/Dockerfile.backend",
+      "target_path": "deploy/docker/Dockerfile.backend",
       "requirement": "int-08",
       "task": "int-08",
       "acceptance": "ac_1: include the daemon binary, use local transport and storage, remain unprivileged and keep Hypermid off by default."

@@ -2,19 +2,19 @@ services:
   gideon-gateway:
     build:
       context: ../..
-      dockerfile: infrastructure/docker/Dockerfile.backend
+      dockerfile: deploy/docker/Dockerfile.backend
       target: runtime
     image: gideon-gateway:local
 
   gideon-web:
     build:
       context: ../..
-      dockerfile: infrastructure/docker/Dockerfile.web
+      dockerfile: deploy/docker/Dockerfile.web
     image: gideon-web:local
 
   gideon-slack:
     build:
       context: ../..
-      dockerfile: infrastructure/docker/Dockerfile.backend
+      dockerfile: deploy/docker/Dockerfile.backend
       target: runtime
     image: gideon-gateway:local

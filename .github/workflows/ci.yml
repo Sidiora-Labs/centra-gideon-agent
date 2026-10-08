@@ -1,47 +1,19 @@
-
-
-
 #
 
-
-
-
-
-
 #
-
-
-
 
 name: CI
 
 on:
   pull_request:
   push:
-    branches-ignore: [main]                                                 
-
-
-
+    branches-ignore: [main]
 
 #
 
-
-
-
-
-
-
-
 #
 
-
-
-
-
 #
-
-
-
 
 concurrency:
   group: ci-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name }}
@@ -54,12 +26,9 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     permissions:
-      contents: read                                                                     
+      contents: read
 
-
-      pull-requests: read                                                                  
-
-
+      pull-requests: read
 
     steps:
       - uses: actions/checkout@v7
@@ -70,12 +39,6 @@ jobs:
       - name: Install (locked)
         run: uv sync --locked --extra dev --extra slack
       # `checks/harness/` is repo-inner dev infra beside src/ (SELF-VERIFICATION). `make lint`
-
-
-
-      #
-
-
 
       - name: lint (black --check · isort --check · flake8 · mypy)
         id: lint
@@ -107,29 +70,6 @@ jobs:
           fi
           exit "$status"
 
-      #
-
-
-
-
-
-
-      #
-
-
-
-      #
-
-
-
-
-
-
-
-
-      #
-
-
       - name: Resolve the PR number for the feedback relay
         id: prnum
         if: failure() && steps.lint.outputs.violations != ''
@@ -152,12 +92,6 @@ jobs:
           echo "feedback relay target: PR ${number:-<none — nothing will be posted>}"
       - name: Hand the violations to the feedback workflow
         if: failure() && steps.lint.outputs.violations != '' && steps.prnum.outputs.number != ''
-
-
-
-
-
-
 
         env:
           VIOLATIONS: ${{ steps.lint.outputs.violations }}
@@ -182,20 +116,8 @@ jobs:
 
       # .github/workflows/ for `website/install`, `install.sh` or `the configured installer endpoint`
 
-
-      #
-
-
-
-
-      #
-
-
       # shellcheck must red HERE rather than turn the cases below into quiet skips — which is
       # precisely what GIDEON_REQUIRE_INSTALL_PROOF converts a missing linter into.
-      #
-
-
 
       - name: install one-liner — shellcheck · sh -n · dash -n · offline contract
         if: ${{ !cancelled() }}
@@ -226,35 +148,13 @@ jobs:
           retention-days: 7
 
   test-shard:
-
-
-
-
-
-
-
-
-    #
-
-
-
-    #
-
-
-
-
-
     runs-on: ubuntu-latest
     strategy:
-
-
-
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
     env:
       # NOTE: do NOT set GIDEON_HOME here. The suite runs under the documented
-
 
       # ~/.gideon resolution or patch Path.home(), and config_dir() gives
       # GIDEON_HOME precedence over Path.home(), so a global value defeats those
@@ -268,18 +168,6 @@ jobs:
           enable-cache: true
       - name: Install (locked)
         run: uv sync --locked --extra dev --extra slack
-
-
-
-
-
-
-      #
-
-
-
-      #
-
 
       - uses: actions/setup-node@v7
         with:
@@ -303,13 +191,8 @@ jobs:
           tmux -V
       - name: pytest (shard ${{ matrix.shard }} of 4 — xdist within the shard, no coverage)
 
-
-
-
-
-
-
-        run: uv run pytest --no-cov -q --splits 4 --group ${{ matrix.shard }} --splitting-algorithm least_duration
+        run:
+          uv run pytest --no-cov -q --splits 4 --group ${{ matrix.shard }} --splitting-algorithm least_duration
           --junitxml=reports/ci-test-shard-${{ matrix.shard }}.junit.xml
       - name: Upload the shard test report
         if: always()
@@ -321,12 +204,6 @@ jobs:
           retention-days: 7
 
   test:
-
-
-
-
-
-
     needs: [test-shard]
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -357,7 +234,6 @@ jobs:
         with:
           node-version: "24"
           cache: npm
-
 
       - name: npm ci (root)
         run: npm ci
@@ -396,43 +272,18 @@ jobs:
         env:
           VITEST_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-web-vitest.junit.xml
 
-
-
-
-
-
-
-
-
-
         run: npm run test:web
       - name: test (desktop, node --test)
         # apps/desktop/ is the OTHER member of this single root workspace, so the `npm ci`
-
-
-
-
-
-
-
-
-
-
 
         run: npm run test:desktop
       - name: test (mobile, node --test)
         # apps/mobile/ is the THIRD member of this single root workspace (the Capacitor shell that
 
-
-
-
         # and the Android SDK, so they are a maintainer step documented in apps/mobile/README.md.
         run: npm run test:mobile
       - name: build (tsc + vite)
         run: npm run build
-
-
-
 
       # caught it. Same script as the local pre-push gate (tooling/scripts/run_prepush.sh).
       - name: render smoke (built SPA mounts in a real browser)
@@ -447,24 +298,6 @@ jobs:
           retention-days: 7
 
   e2e-pwa:
-
-
-
-
-
-
-
-
-    #
-
-
-
-    #
-
-
-
-
-
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -507,20 +340,9 @@ jobs:
           retention-days: 7
 
   e2e-a11y:
-
-
-
-
-
-
-
-    #
-
     # (GIDEON_HOME under $TMPDIR, never a real home) and captures its token from the
     # GIDEON_READY line, then builds and previews the SPA against it. So this job needs both
 
-
-    #
     # Auth stays ON — no GIDEON_AUTH_MODE=none, which would swap the csrf middleware for the
 
     runs-on: ubuntu-latest
@@ -543,7 +365,6 @@ jobs:
       - name: install chromium
         run: npx playwright install --with-deps chromium
 
-
       - name: axe per route, both themes (apps/console/e2e/a11y.spec.ts)
         working-directory: apps/console
         env:
@@ -551,18 +372,9 @@ jobs:
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-e2e-a11y-axe.junit.xml
         run: npx playwright test e2e/a11y.spec.ts --project=chromium --reporter=github,json,junit
 
-
-
-
-
       - name: every authenticated route was actually SCANNED (not skipped)
         working-directory: apps/console
         run: node e2e/assert-no-route-skips.mjs a11y-report.json
-
-
-
-
-
 
       - name: non-axe a11y detectors still recognise their defects (apps/console/e2e/nonAxeA11yChecks.spec.ts)
         working-directory: apps/console
@@ -570,30 +382,17 @@ jobs:
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-e2e-a11y-nonaxe.junit.xml
         run: npx playwright test e2e/nonAxeA11yChecks.spec.ts --project=chromium
 
-
-
-
-
       - name: app-authored DOM is really mounted and swept (apps/console/e2e/appSurface.spec.ts)
         working-directory: apps/console
         env:
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-e2e-a11y-appsurface.junit.xml
         run: npx playwright test e2e/appSurface.spec.ts --project=chromium
 
-
-
-
       - name: V3 walkthrough — keyboard / reduced-motion / phone (apps/console/e2e/walkthrough.spec.ts)
         working-directory: apps/console
         env:
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: ${{ github.workspace }}/reports/ci-e2e-a11y-walkthrough.junit.xml
         run: npx playwright test e2e/walkthrough.spec.ts --project=chromium
-
-
-
-
-
-
 
       - name: offline scripted chat turn (apps/console/e2e/chat.spec.ts)
         working-directory: apps/console
@@ -623,42 +422,10 @@ jobs:
           retention-days: 7
 
   browse-live:
-
-
-
-
-
-
-    #
-
-
-
-
-    #
-
-
-
-
-
-
-
-
-
-
-
-
     runs-on: ubuntu-latest
-
 
     timeout-minutes: 15
     env:
-
-
-
-
-
-
-
       GIDEON_REQUIRE_BROWSE_PROOF: "1"
       # Same reason as the `test` job: no GIDEON_HOME (the no-global-home contract), and
 
@@ -676,22 +443,14 @@ jobs:
       - name: Install (locked)
         run: uv sync --locked --extra dev --extra slack
 
-
-
-
-
-
       - name: npm ci (root)
         run: npm ci
       - name: install chromium
         run: npx playwright install --with-deps chromium
 
-
-
-
-
       - name: BA-2 behavioural proof in a REAL browser (safety script · redirect re-eval)
-        run: uv run pytest checks/runtime/test_browse_safety_script.py checks/runtime/test_browse_cdp_live.py checks/runtime/test_browse_behavioural_proof_is_reachable.py -n0
+        run:
+          uv run pytest checks/runtime/test_browse_safety_script.py checks/runtime/test_browse_cdp_live.py checks/runtime/test_browse_behavioural_proof_is_reachable.py -n0
           --junitxml=reports/ci-browse-live.junit.xml
       - name: Upload the browse-live test report
         if: always()
@@ -703,8 +462,6 @@ jobs:
           retention-days: 7
 
   rails:
-
-
     runs-on: ubuntu-latest
     # No GIDEON_HOME (see the test job) — the residue sweep is a static
 
@@ -717,19 +474,11 @@ jobs:
       - name: Install (locked)
         run: uv sync --locked --extra dev --extra slack
 
-
-
       - name: provider-boundary residue sweep (plan 32)
         run: uv run pytest checks/runtime/test_provider_boundary_residue.py -n0
           --junitxml=reports/ci-rails.junit.xml
 
       # `make gates` (tooling/scripts/gate_report.py) is the one surface that reports all six ratchets
-
-
-
-
-      #
-
 
       # for machine-checked invariants. It imports only `tooling/scripts/*` + stdlib, so it needs no
       # GIDEON_HOME — consistent with this job's no-global-home contract.
@@ -747,18 +496,12 @@ jobs:
   harness:
     # Self-verification gate (SELF-VERIFICATION SV-7): the repo-inner checks/harness/ package
 
-
-
-
     # (WARNINGs stay advisory). The checks/harness/ unit tests themselves ride the `test` job
 
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-
-
-
           fetch-depth: 0
       - name: Install uv
         uses: astral-sh/setup-uv@v7
@@ -788,8 +531,6 @@ jobs:
   client:
     # gideon-client (packages/python-client) is versioned + published
 
-
-
     # (plan 34 T2.3). No GIDEON_HOME — the runner's $HOME is ephemeral, so the
     # data-dir test resolves ~/.gideon as intended.
     runs-on: ubuntu-latest
@@ -800,7 +541,6 @@ jobs:
         with:
           enable-cache: true
       - name: Build the client (proves packaging metadata is valid)
-
 
         run: |
           uv python install 3.12
@@ -819,7 +559,3 @@ jobs:
           path: reports/
           if-no-files-found: ignore
           retention-days: 7
-
-
-
-

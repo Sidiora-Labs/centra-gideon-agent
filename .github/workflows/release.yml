@@ -1,5 +1,5 @@
 name: Release
-'on':
+"on":
   workflow_dispatch:
     inputs:
       ref:
@@ -27,51 +27,51 @@ jobs:
     outputs:
       version: ${{ steps.ver.outputs.version }}
     steps:
-    - uses: actions/checkout@v7
-      with:
-        ref: ${{ inputs.ref }}
-    - uses: actions/setup-node@v7
-      with:
-        node-version: '24'
-        cache: npm
-    - name: Build the SPA (npm from repo root)
-      run: |
-        npm ci
-        python tooling/scripts/check_asset_notices.py
-        npm run build
-    - name: Install uv + build backend
-      uses: astral-sh/setup-uv@v7
-    - name: Build sdist + wheel (with apps/console/dist)
-      run: |
-        uv python install 3.12
-        uv build --out-dir dist
-    - name: Verify the wheel contract (SPA packaged + Node-free serve)
-      run: |
-        # Full C4 contract (tooling/scripts/verify_wheel.py): asserts the SPA is in the
-        # wheel, installs it into a scratch venv from the wheel alone (this runner
-        # has Node for the SPA build, but the verify venv installs only the wheel),
-        # boots `gideon gateway --test-mode`, and probes / (200 HTML) +
-        # /api/healthz (200). Replaces the old shallow namelist check.
-        python tooling/scripts/verify_wheel.py --wheel "dist/*.whl"
-    - name: Read the distribution version
-      id: ver
-      run: |
-        python - <<'PY' >> "$GITHUB_OUTPUT"
-        import tomllib
-        from pathlib import Path
-        version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
-        print(f"version={version}")
-        PY
-    - name: SBOM (syft SPDX-JSON over the built dist)
-      uses: anchore/sbom-action@v0
-      with:
-        path: dist/
-        format: spdx-json
-        artifact-name: gideon-sbom.spdx.json
-    - uses: actions/upload-artifact@v7
-      with:
-        name: dist
-        path: dist/
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Build the SPA (npm from repo root)
+        run: |
+          npm ci
+          python tooling/scripts/check_asset_notices.py
+          npm run build
+      - name: Install uv + build backend
+        uses: astral-sh/setup-uv@v7
+      - name: Build sdist + wheel (with apps/console/dist)
+        run: |
+          uv python install 3.12
+          uv build --out-dir dist
+      - name: Verify the wheel contract (SPA packaged + Node-free serve)
+        run: |
+          # Full C4 contract (tooling/scripts/verify_wheel.py): asserts the SPA is in the
+          # wheel, installs it into a scratch venv from the wheel alone (this runner
+          # has Node for the SPA build, but the verify venv installs only the wheel),
+          # boots `gideon gateway --test-mode`, and probes / (200 HTML) +
+          # /api/healthz (200). Replaces the old shallow namelist check.
+          python tooling/scripts/verify_wheel.py --wheel "dist/*.whl"
+      - name: Read the distribution version
+        id: ver
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          print(f"version={version}")
+          PY
+      - name: SBOM (syft SPDX-JSON over the built dist)
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist/
+          format: spdx-json
+          artifact-name: gideon-sbom.spdx.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
   pypi:
     needs: build
     runs-on: ubuntu-latest
@@ -79,23 +79,24 @@ jobs:
     permissions:
       id-token: write
     steps:
-    - name: Require the configured Python publishing destination
-      env:
-        REPOSITORY_URL: ${{ vars.GIDEON_PYPI_REPOSITORY_URL }}
-      run: test -n "$REPOSITORY_URL" || { echo "Configure GIDEON_PYPI_REPOSITORY_URL before publishing" >&2; exit
-        1; }
-    - uses: actions/download-artifact@v8
-      with:
-        name: dist
-        path: dist/
-    - name: Keep only gideon distributions
-      run: |
-        find dist -maxdepth 1 -type f ! -name 'gideon_agent_harness-*' ! -name 'gideon-agent-harness-*' -delete
-        ls -la dist
-    - uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        skip-existing: true
-        repository-url: ${{ vars.GIDEON_PYPI_REPOSITORY_URL }}
+      - name: Require the configured Python publishing destination
+        env:
+          REPOSITORY_URL: ${{ vars.GIDEON_PYPI_REPOSITORY_URL }}
+        run:
+          test -n "$REPOSITORY_URL" || { echo "Configure GIDEON_PYPI_REPOSITORY_URL before publishing" >&2; exit
+          1; }
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - name: Keep only gideon distributions
+        run: |
+          find dist -maxdepth 1 -type f ! -name 'gideon_agent_harness-*' ! -name 'gideon-agent-harness-*' -delete
+          ls -la dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+          repository-url: ${{ vars.GIDEON_PYPI_REPOSITORY_URL }}
     if: ${{ inputs.publish_python }}
   pypi-client:
     needs: build
@@ -104,25 +105,26 @@ jobs:
     permissions:
       id-token: write
     steps:
-    - name: Require the configured Python publishing destination
-      env:
-        REPOSITORY_URL: ${{ vars.GIDEON_PYPI_REPOSITORY_URL }}
-      run: test -n "$REPOSITORY_URL" || { echo "Configure GIDEON_PYPI_REPOSITORY_URL before publishing" >&2; exit
-        1; }
-    - uses: actions/checkout@v7
-      with:
-        ref: ${{ inputs.ref }}
-    - name: Install uv + build the client
-      uses: astral-sh/setup-uv@v7
-    - name: Build client sdist + wheel
-      run: |
-        uv python install 3.12
-        uv build packages/python-client --out-dir dist-client
-    - uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        packages-dir: dist-client/
-        skip-existing: true
-        repository-url: ${{ vars.GIDEON_PYPI_REPOSITORY_URL }}
+      - name: Require the configured Python publishing destination
+        env:
+          REPOSITORY_URL: ${{ vars.GIDEON_PYPI_REPOSITORY_URL }}
+        run:
+          test -n "$REPOSITORY_URL" || { echo "Configure GIDEON_PYPI_REPOSITORY_URL before publishing" >&2; exit
+          1; }
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Install uv + build the client
+        uses: astral-sh/setup-uv@v7
+      - name: Build client sdist + wheel
+        run: |
+          uv python install 3.12
+          uv build packages/python-client --out-dir dist-client
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist-client/
+          skip-existing: true
+          repository-url: ${{ vars.GIDEON_PYPI_REPOSITORY_URL }}
     if: ${{ inputs.publish_python }}
   images:
     needs: build
@@ -133,220 +135,224 @@ jobs:
     strategy:
       matrix:
         include:
-        - name: gateway
-          dockerfile: infrastructure/docker/Dockerfile.backend
-          smoke: gideon --version
-        - name: web
-          dockerfile: infrastructure/docker/Dockerfile.web
-          smoke: nginx -v
+          - name: gateway
+            dockerfile: deploy/docker/Dockerfile.backend
+            smoke: gideon --version
+          - name: web
+            dockerfile: deploy/docker/Dockerfile.web
+            smoke: nginx -v
     steps:
-    - name: Require the configured image destination
-      env:
-        REGISTRY: ${{ vars.GIDEON_IMAGE_REGISTRY }}
-        NAMESPACE: ${{ vars.GIDEON_IMAGE_NAMESPACE }}
-      run: test -n "$REGISTRY" && test -n "$NAMESPACE" || { echo "Configure GIDEON_IMAGE_REGISTRY and GIDEON_IMAGE_NAMESPACE"
-        >&2; exit 1; }
-    - uses: actions/checkout@v7
-      with:
-        ref: ${{ inputs.ref }}
-    - uses: docker/setup-qemu-action@v4
-    - uses: docker/setup-buildx-action@v4
-    - uses: docker/login-action@v4
-      with:
-        registry: ${{ vars.GIDEON_IMAGE_REGISTRY }}
-        username: ${{ vars.GIDEON_IMAGE_USERNAME || github.actor }}
-        password: ${{ secrets.GIDEON_IMAGE_TOKEN || secrets.GITHUB_TOKEN }}
-    - uses: docker/build-push-action@v7
-      with:
-        context: .
-        file: ${{ matrix.dockerfile }}
-        platforms: linux/amd64,linux/arm64
-        push: true
-        tags: |
-          ${{ vars.GIDEON_IMAGE_REGISTRY }}/${{ vars.GIDEON_IMAGE_NAMESPACE }}/gideon-${{ matrix.name }}:${{ needs.build.outputs.version }}
-          ${{ vars.GIDEON_IMAGE_REGISTRY }}/${{ vars.GIDEON_IMAGE_NAMESPACE }}/gideon-${{ matrix.name }}:latest
-    - name: Smoke both arches (release-blocking)
-      env:
-        IMAGE: ${{ vars.GIDEON_IMAGE_REGISTRY }}/${{ vars.GIDEON_IMAGE_NAMESPACE }}/gideon-${{ matrix.name }}:${{
-          needs.build.outputs.version }}
-        SMOKE: ${{ matrix.smoke }}
-      run: "set -euo pipefail\nfor arch in amd64 arm64; do\n  echo \"::group::smoke linux/$arch \u2014 $IMAGE \u2014\
-        \ $SMOKE\"\n  docker pull --quiet --platform \"linux/$arch\" \"$IMAGE\"\n  # --entrypoint '' bypasses the\
-        \ image ENTRYPOINT (tini/nginx-entrypoint)\n  # so the smoke command runs directly instead of starting the\
-        \ service.\n  docker run --rm --platform \"linux/$arch\" --entrypoint '' \"$IMAGE\" \\\n    sh -lc \"$SMOKE\"\
-        \n  echo \"::endgroup::\"\ndone\n"
+      - name: Require the configured image destination
+        env:
+          REGISTRY: ${{ vars.GIDEON_IMAGE_REGISTRY }}
+          NAMESPACE: ${{ vars.GIDEON_IMAGE_NAMESPACE }}
+        run:
+          test -n "$REGISTRY" && test -n "$NAMESPACE" || { echo "Configure GIDEON_IMAGE_REGISTRY and GIDEON_IMAGE_NAMESPACE"
+          >&2; exit 1; }
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ vars.GIDEON_IMAGE_REGISTRY }}
+          username: ${{ vars.GIDEON_IMAGE_USERNAME || github.actor }}
+          password: ${{ secrets.GIDEON_IMAGE_TOKEN || secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ vars.GIDEON_IMAGE_REGISTRY }}/${{ vars.GIDEON_IMAGE_NAMESPACE }}/gideon-${{ matrix.name }}:${{ needs.build.outputs.version }}
+            ${{ vars.GIDEON_IMAGE_REGISTRY }}/${{ vars.GIDEON_IMAGE_NAMESPACE }}/gideon-${{ matrix.name }}:latest
+      - name: Smoke both arches (release-blocking)
+        env:
+          IMAGE:
+            ${{ vars.GIDEON_IMAGE_REGISTRY }}/${{ vars.GIDEON_IMAGE_NAMESPACE }}/gideon-${{ matrix.name }}:${{
+            needs.build.outputs.version }}
+          SMOKE: ${{ matrix.smoke }}
+        run:
+          "set -euo pipefail\nfor arch in amd64 arm64; do\n  echo \"::group::smoke linux/$arch \u2014 $IMAGE \u2014\
+          \ $SMOKE\"\n  docker pull --quiet --platform \"linux/$arch\" \"$IMAGE\"\n  # --entrypoint '' bypasses the\
+          \ image ENTRYPOINT (tini/nginx-entrypoint)\n  # so the smoke command runs directly instead of starting the\
+          \ service.\n  docker run --rm --platform \"linux/$arch\" --entrypoint '' \"$IMAGE\" \\\n    sh -lc \"$SMOKE\"\
+          \n  echo \"::endgroup::\"\ndone\n"
     if: ${{ inputs.publish_images }}
     environment: release-images
   desktop-linux:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v7
-      with:
-        ref: ${{ inputs.ref }}
-    - uses: actions/setup-node@v7
-      with:
-        node-version: '24'
-        cache: npm
-    - name: Install uv + the venv the Makefile's pyinstaller target expects
-      uses: astral-sh/setup-uv@v7
-    - name: Create .venv for the bundled backend build
-      run: |
-        uv python install 3.12
-        npm ci
-        npm run build --workspace=apps/console
-        uv sync --locked --no-editable --python 3.12 --extra anthropic --extra openai --extra slack
-        uv pip install --python .venv/bin/python pyinstaller
-    - name: Build unsigned AppImage + deb
-      run: make desktop-dist-linux
-    - name: Smoke the artifacts (release-blocking)
-      run: |
-        set -euo pipefail
-        cd apps/desktop/dist
-        ls -la
-        chmod +x ./Gideon-*.AppImage
-        ./Gideon-*.AppImage --appimage-extract > /dev/null
-        test -f squashfs-root/resources/app.asar
-        BACKEND=squashfs-root/resources/backend-dist/gideon-backend/gideon-backend
-        test -x "$BACKEND"
-        "$BACKEND" --version
-        python3 ../../../tooling/scripts/smoke_packaged_desktop.py "$BACKEND"
-        # deb: correct package name + the same two load-bearing paths present.
-        dpkg-deb --info gideon-desktop_*.deb | grep -q "Package: gideon-desktop"
-        dpkg-deb --contents gideon-desktop_*.deb | grep -q "resources/app.asar"
-        dpkg-deb --contents gideon-desktop_*.deb | grep -q "backend-dist/gideon-backend/gideon-backend"
-    - uses: actions/upload-artifact@v7
-      with:
-        name: desktop-linux
-        path: |
-          apps/desktop/dist/*.AppImage
-          apps/desktop/dist/*.deb
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install uv + the venv the Makefile's pyinstaller target expects
+        uses: astral-sh/setup-uv@v7
+      - name: Create .venv for the bundled backend build
+        run: |
+          uv python install 3.12
+          npm ci
+          npm run build --workspace=apps/console
+          uv sync --locked --no-editable --python 3.12 --extra anthropic --extra openai --extra slack
+          uv pip install --python .venv/bin/python pyinstaller
+      - name: Build unsigned AppImage + deb
+        run: make desktop-dist-linux
+      - name: Smoke the artifacts (release-blocking)
+        run: |
+          set -euo pipefail
+          cd apps/desktop/dist
+          ls -la
+          chmod +x ./Gideon-*.AppImage
+          ./Gideon-*.AppImage --appimage-extract > /dev/null
+          test -f squashfs-root/resources/app.asar
+          BACKEND=squashfs-root/resources/backend-dist/gideon-backend/gideon-backend
+          test -x "$BACKEND"
+          "$BACKEND" --version
+          python3 ../../../tooling/scripts/smoke_packaged_desktop.py "$BACKEND"
+          # deb: correct package name + the same two load-bearing paths present.
+          dpkg-deb --info gideon-desktop_*.deb | grep -q "Package: gideon-desktop"
+          dpkg-deb --contents gideon-desktop_*.deb | grep -q "resources/app.asar"
+          dpkg-deb --contents gideon-desktop_*.deb | grep -q "backend-dist/gideon-backend/gideon-backend"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-linux
+          path: |
+            apps/desktop/dist/*.AppImage
+            apps/desktop/dist/*.deb
   desktop-mac:
     runs-on: macos-14
     env:
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
-    - uses: actions/checkout@v7
-      with:
-        ref: ${{ inputs.ref }}
-    - uses: pnpm/action-setup@v6
-      with:
-        version: 9
-    - uses: actions/setup-node@v7
-      with:
-        node-version: '24'
-        cache: pnpm
-        cache-dependency-path: |
-          pnpm-lock.yaml
-          apps/console/pnpm-lock.yaml
-          apps/desktop/pnpm-lock.yaml
-    - name: Install locked frontend and desktop dependencies
-      run: |
-        pnpm install --frozen-lockfile
-        pnpm --dir apps/console install --frozen-lockfile
-        pnpm --dir apps/desktop install --frozen-lockfile
-    - uses: astral-sh/setup-uv@v7
-    - name: Prepare native arm64 backend environment
-      run: |
-        test "$(uname -m)" = arm64
-        uv python install 3.12
-        npm ci
-        npm run build --workspace=apps/console
-        uv sync --locked --no-editable --python 3.12 --extra anthropic --extra openai --extra slack
-        uv pip install --python .venv/bin/python pyinstaller
-    - name: Stage native backend and unpacked desktop
-      run: |
-        pnpm --dir apps/console run build
-        .venv/bin/pyinstaller tooling/packaging/runtime-bundle.spec --noconfirm
-        mkdir -p apps/desktop/backend-dist
-        cp -R dist/gideon-backend apps/desktop/backend-dist/
-        pnpm --dir apps/desktop run dist --arm64 --dir --config.asar=false --config.mac.identity=null --publish never
-    - name: Package unsigned arm64 DMG from unpacked application
-      run: pnpm --dir apps/desktop run dist --arm64 --prepackaged dist/mac-arm64/Gideon.app --config.mac.identity=null --publish never
-    - name: Smoke mounted arm64 DMG
-      run: bash tooling/scripts/smoke_desktop_mac.sh apps/desktop/dist/*.dmg
-    - uses: actions/upload-artifact@v7
-      with:
-        name: desktop-mac
-        path: apps/desktop/dist/*.dmg
-        if-no-files-found: error
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            apps/console/pnpm-lock.yaml
+            apps/desktop/pnpm-lock.yaml
+      - name: Install locked frontend and desktop dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir apps/console install --frozen-lockfile
+          pnpm --dir apps/desktop install --frozen-lockfile
+      - uses: astral-sh/setup-uv@v7
+      - name: Prepare native arm64 backend environment
+        run: |
+          test "$(uname -m)" = arm64
+          uv python install 3.12
+          npm ci
+          npm run build --workspace=apps/console
+          uv sync --locked --no-editable --python 3.12 --extra anthropic --extra openai --extra slack
+          uv pip install --python .venv/bin/python pyinstaller
+      - name: Stage native backend and unpacked desktop
+        run: |
+          pnpm --dir apps/console run build
+          .venv/bin/pyinstaller tooling/packaging/runtime-bundle.spec --noconfirm
+          mkdir -p apps/desktop/backend-dist
+          cp -R dist/gideon-backend apps/desktop/backend-dist/
+          pnpm --dir apps/desktop run dist --arm64 --dir --config.asar=false --config.mac.identity=null --publish never
+      - name: Package unsigned arm64 DMG from unpacked application
+        run: pnpm --dir apps/desktop run dist --arm64 --prepackaged dist/mac-arm64/Gideon.app --config.mac.identity=null --publish never
+      - name: Smoke mounted arm64 DMG
+        run: bash tooling/scripts/smoke_desktop_mac.sh apps/desktop/dist/*.dmg
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-mac
+          path: apps/desktop/dist/*.dmg
+          if-no-files-found: error
   notes:
     needs:
-    - build
-    - pypi
-    - pypi-client
-    - images
-    - desktop-linux
-    - desktop-mac
+      - build
+      - pypi
+      - pypi-client
+      - images
+      - desktop-linux
+      - desktop-mac
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-    - uses: actions/checkout@v7
-      with:
-        ref: ${{ inputs.ref }}
-    - uses: actions/download-artifact@v8
-      with:
-        name: dist
-        path: dist/
-    - uses: actions/download-artifact@v8
-      with:
-        pattern: desktop-*
-        merge-multiple: true
-        path: desktop-dist/
-    - name: Extract this version's CHANGELOG section
-      run: |
-        python - <<'PY' > release-notes.md
-        import re, os, pathlib
-        ver = os.environ["RELEASE_REF"].lstrip("v")
-        text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
-        # Body under "## [<ver>] ...header..." up to the next "## " heading (a
-        # top-level release heading, NOT a "### " subsection) or end of file.
-        m = re.search(rf"^## \[{re.escape(ver)}\][^\n]*\n(.*?)(?=^## \[|\Z)", text, re.S | re.M)
-        print(m.group(1).strip() if m else f"Release {ver}.")
-        PY
-      env:
-        RELEASE_REF: ${{ inputs.ref }}
-    - name: Create GitHub Release
-      env:
-        GH_TOKEN: ${{ github.token }}
-        RELEASE_REF: ${{ inputs.ref }}
-      run: |
-        gh release create "$RELEASE_REF" dist/* desktop-dist/* --verify-tag \
-          --title "$RELEASE_REF" \
-          --notes-file release-notes.md \
-          $([ "${RELEASE_REF}" != "${RELEASE_REF%rc*}" ] && echo --prerelease)
-    if: ${{ always() && inputs.create_release && needs.build.result == 'success' && needs.desktop-linux.result ==
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: desktop-dist/
+      - name: Extract this version's CHANGELOG section
+        run: |
+          python - <<'PY' > release-notes.md
+          import re, os, pathlib
+          ver = os.environ["RELEASE_REF"].lstrip("v")
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          # Body under "## [<ver>] ...header..." up to the next "## " heading (a
+          # top-level release heading, NOT a "### " subsection) or end of file.
+          m = re.search(rf"^## \[{re.escape(ver)}\][^\n]*\n(.*?)(?=^## \[|\Z)", text, re.S | re.M)
+          print(m.group(1).strip() if m else f"Release {ver}.")
+          PY
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          gh release create "$RELEASE_REF" dist/* desktop-dist/* --verify-tag \
+            --title "$RELEASE_REF" \
+            --notes-file release-notes.md \
+            $([ "${RELEASE_REF}" != "${RELEASE_REF%rc*}" ] && echo --prerelease)
+    if:
+      ${{ always() && inputs.create_release && needs.build.result == 'success' && needs.desktop-linux.result ==
       'success' && needs.desktop-mac.result == 'success' && (!inputs.publish_python || (needs.pypi.result == 'success' && needs.pypi-client.result == 'success'))
       && (!inputs.publish_images || needs.images.result == 'success') }}
     environment: release
   website-follow:
     needs:
-    - notes
+      - notes
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-    - name: Notify the configured website workflow
-      env:
-        GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
-        WEBSITE_REPOSITORY: ${{ vars.GIDEON_WEBSITE_REPOSITORY }}
-        WEBSITE_WORKFLOW: ${{ vars.GIDEON_WEBSITE_WORKFLOW }}
-      run: |
-        test -n "$GH_TOKEN" && test -n "$WEBSITE_WORKFLOW" || { echo "Website dispatch is not configured"; exit 0; }
-        gh workflow run "$WEBSITE_WORKFLOW" --repo "$WEBSITE_REPOSITORY"
+      - name: Notify the configured website workflow
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+          WEBSITE_REPOSITORY: ${{ vars.GIDEON_WEBSITE_REPOSITORY }}
+          WEBSITE_WORKFLOW: ${{ vars.GIDEON_WEBSITE_WORKFLOW }}
+        run: |
+          test -n "$GH_TOKEN" && test -n "$WEBSITE_WORKFLOW" || { echo "Website dispatch is not configured"; exit 0; }
+          gh workflow run "$WEBSITE_WORKFLOW" --repo "$WEBSITE_REPOSITORY"
     if: ${{ vars.GIDEON_WEBSITE_REPOSITORY != '' }}
   attest:
     needs:
-    - build
+      - build
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       attestations: write
       contents: read
     steps:
-    - uses: actions/download-artifact@v8
-      with:
-        name: dist
-        path: dist/
-    - uses: actions/attest-build-provenance@v4
-      with:
-        subject-path: dist/*
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*

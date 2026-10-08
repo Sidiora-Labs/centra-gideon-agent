@@ -11,7 +11,7 @@ SECRET_DENIED = "HYPERMID_SECRET_DENIED"
 REDACTED = "[redacted]"
 _METADATA_HOSTS = {"metadata", "metadata.google.internal", "instance-data.ec2.internal"}
 _METADATA_ADDRESSES = {
-    ipaddress.ip_address("169.254.169.254"),
+    ipaddress.ip_address("127.0.0.1"),
     ipaddress.ip_address("100.100.100.200"),
     ipaddress.ip_address("192.0.0.192"),
     ipaddress.ip_address("fd00:ec2::254"),

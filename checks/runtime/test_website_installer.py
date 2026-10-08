@@ -507,7 +507,7 @@ class TestOfflineArgumentPaths:
         proc = self._run(sandbox_env, "--container")
         assert proc.returncode == 0, proc.stderr
         assert (
-            "docker build -f infrastructure/docker/Dockerfile.backend --target single"
+            "docker build -f deploy/docker/Dockerfile.backend --target single"
             in proc.stdout
         )
         assert "docker run -d --name gideon" in proc.stdout

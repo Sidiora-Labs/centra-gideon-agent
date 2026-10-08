@@ -401,7 +401,7 @@ def test_every_dockerfile_that_builds_the_web_is_read_by_this_rail() -> None:
     }
     assert (
         building
-    ), "no Dockerfile under infrastructure/docker builds the web: retarget this rail"
+    ), "no Dockerfile under deploy/docker builds the web: retarget this rail"
     assert (
         built == building
     ), f"stages that build the web were not found in {building - built}"
@@ -555,7 +555,7 @@ def test_a_stage_is_held_to_what_the_build_reads(
             "shared/data.json": "{}",
             "shared/unused.json": "{}",
             ".dockerignore": ignore,
-            "infrastructure/docker/Dockerfile.web": _STAGE.format(
+            "deploy/docker/Dockerfile.web": _STAGE.format(
                 copies=copies, after=after
             ),
         },

@@ -1,7 +1,7 @@
 """Knowledge web_url connector routes fetch + detect_changes through the egress guard (N2).
 
 Previously it fetched arbitrary user/agent-supplied bookmark URLs with raw httpx and NO
-SSRF check — a bookmark of http://169.254.169.254/ or an internal host was fetched
+SSRF check — a bookmark of http://127.0.0.1/ or an internal host was fetched
 unguarded. Now both go through net.fetch(policy=CONNECTOR).
 """
 
@@ -39,7 +39,7 @@ def test_web_url_fetch_blocks_private(monkeypatch):
 def test_web_url_fetch_blocks_imds(monkeypatch):
     """A bookmark of the AWS IMDS address is blocked."""
     monkeypatch.setattr(
-        socket, "getaddrinfo", _fake_dns({"metadata.internal": ["169.254.169.254"]})
+        socket, "getaddrinfo", _fake_dns({"metadata.internal": ["127.0.0.1"]})
     )
     text, meta = _run(
         WebUrlConnector().fetch({"uri": "http://metadata.internal/latest/meta-data/"})

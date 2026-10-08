@@ -1,18 +1,4 @@
 #!/usr/bin/env bash
-                                                                                
-#
-                                                                                     
-                                                                                   
-                                         
-#
-        
-                                                                             
-                                                     
-#
-                                                                            
-                                                                                  
-                                                                              
-
 set -euo pipefail
 
 PROMPT="${PROMPT:-Reply with exactly the word: OK}"

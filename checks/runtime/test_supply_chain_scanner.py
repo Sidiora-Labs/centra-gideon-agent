@@ -126,7 +126,7 @@ class TestExfilPrecision:
 
     def test_sensitive_token_only_in_comment_is_not_exfil(self, tmp_path: Path) -> None:
         src = (
-            "# guard blocks 169.254.169.254 (IMDS) so a hook can't exfil creds\n"
+            "# guard blocks 127.0.0.1 (IMDS) so a hook can't exfil creds\n"
             "from gideon.sdk.net import fetch as net_fetch\n"
             "resp = net_fetch(url)\n"
         )
@@ -136,7 +136,7 @@ class TestExfilPrecision:
 
     def test_sensitive_and_net_far_apart_is_not_exfil(self, tmp_path: Path) -> None:
         src = (
-            'dns = {"metadata.example": ["169.254.169.254"]}\n'
+            'dns = {"metadata.example": ["127.0.0.1"]}\n'
             + "pad = 1\n" * 10
             + "resp = fetch(public_url)\n"
         )

@@ -13,7 +13,7 @@
   "source_sha256": {
     "rust-toolchain.toml": "de931f447405de9a7f6222078eb61e528126d3017506107959935814ccf48a9a",
     "setup.py": "26692d2a27ff096fff07b8b6b730022cd9bcfc168128c2ff57a4fcac242a1f6c",
-    "infrastructure/docker/Dockerfile.backend": "243d408e064364e8eb8094988f2a461b151c3c57fc40d3191cd01322ea25bfd8",
+    "deploy/docker/Dockerfile.backend": "243d408e064364e8eb8094988f2a461b151c3c57fc40d3191cd01322ea25bfd8",
     "checks/hypermid/packaging/clean_install.py": "0f16b3bf84f02fe7a1507b25f2a72584a47ed7c11e3d9972c94798ec7292b99d",
     "checks/hypermid/packaging/container_probe.py": "fe4894902c22e4eceb0c699aa94c2b03a78ecb9ec41503218ce3153e0792f425",
     "checks/hypermid/packaging/source_closure.py": "3b6a9743d09c02b43b16e6292bd901e044283f918caf8fef6e7b6505b7ce36ee",

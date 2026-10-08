@@ -7,7 +7,7 @@ import shlex
 
 STARTED_BY_ENV = "GIDEON_CONTAINER_STARTED_BY"
 COMPOSE_SERVICE = "gideon-gateway"
-COMPOSE_FILE = "infrastructure/compose/compose.yaml"
+COMPOSE_FILE = "deploy/compose/compose.yaml"
 
 
 def in_container() -> bool:
@@ -81,7 +81,7 @@ def update_commands(tag: str = "") -> list[str]:
         if image.endswith(":local") and web.endswith(":local"):
             return [
                 "# From the original checkout, keep the same Compose project, files, .env and volume overrides.",
-                f"{_compose()} -f infrastructure/compose/compose.build.yaml up -d --build",
+                f"{_compose()} -f deploy/compose/compose.build.yaml up -d --build",
             ]
         prefix = (
             f"GIDEON_GATEWAY_IMAGE={shlex.quote(_tagged(image, tag))} "
@@ -100,7 +100,7 @@ def update_commands(tag: str = "") -> list[str]:
     name = shlex.quote(_name())
     previous = _name() + "-previous"
     prepare = (
-        f"docker build -f infrastructure/docker/Dockerfile.backend --target {'single' if single else 'runtime'} -t {shlex.quote(image)} ."
+        f"docker build -f deploy/docker/Dockerfile.backend --target {'single' if single else 'runtime'} -t {shlex.quote(image)} ."
         if image.endswith(":local")
         else f"docker pull {shlex.quote(image)}"
     )

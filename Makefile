@@ -16,7 +16,7 @@ BACKEND_RECIPE := tooling/packaging/runtime-bundle.spec
 PYTHON_SOURCES := $(PKG) $(TESTS) $(HARNESS)
 
 COMPOSE ?= $(or $(and $(shell command -v docker 2>/dev/null),docker compose),$(and $(shell command -v podman-compose 2>/dev/null),podman-compose),$(and $(shell command -v finch 2>/dev/null),finch compose),docker compose)
-COMPOSE_DIR := infrastructure/compose
+COMPOSE_DIR := deploy/compose
 BASE_FILE := -f $(COMPOSE_DIR)/compose.yaml
 BUILD_OVERLAY := $(BASE_FILE) -f $(COMPOSE_DIR)/compose.build.yaml
 PROD_OVERLAY := $(BASE_FILE) -f $(COMPOSE_DIR)/compose.prod.yaml

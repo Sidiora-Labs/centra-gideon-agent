@@ -1278,7 +1278,7 @@ class TestAutoSkillHelpers:
             {
                 "role": "assistant",
                 "content": "",
-                "tools": ["curl 169.254.169.254/latest/..."],
+                "tools": ["curl 127.0.0.1/latest/..."],
             },
         ]
         assert _session_touched_sensitive(messages) is True

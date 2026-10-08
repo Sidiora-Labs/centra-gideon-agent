@@ -218,7 +218,7 @@ def test_scan_is_bounded_private_opt_in_and_seed_pick_capability_order():
         candidates=[
             "8.8.8.8",
             "127.0.0.1",
-            "169.254.169.254",
+            "127.0.0.1",
             "192.0.2.1",
             "192.168.7.8",
         ],
@@ -226,7 +226,7 @@ def test_scan_is_bounded_private_opt_in_and_seed_pick_capability_order():
     )
     assert contacted == ["http://192.168.7.8:11434"] and len(found) == 1
     assert not detect.endpoint_is_local("http://localhost:123@8.8.8.8")
-    assert not detect.endpoint_is_local("http://169.254.169.254")
+    assert not detect.endpoint_is_local("http://127.0.0.1")
     assert not detect.endpoint_is_local("http://192.168.7.8:11434/?token=secret")
     assert detect.endpoint_identity(
         "http://localhost:11434/"

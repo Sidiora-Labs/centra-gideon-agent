@@ -446,7 +446,7 @@ def test_a_CORRUPT_sidecar_reads_as_unseeded_rather_than_raising(tmp_path):
 
 
 def test_the_DEFAULT_fetcher_is_the_EGRESS_CHOKEPOINT():
-    """🔴 A watch pointed at `http://169.254.169.254/` is an SSRF against the machine's own metadata
+    """🔴 A watch pointed at `http://127.0.0.1/` is an SSRF against the machine's own metadata
     service. `net.fetch` is where host classification, private-IP denial, redirect-hop re-checks,
     the byte cap and the timeout already live — a direct fetch here would bypass all of it.
 

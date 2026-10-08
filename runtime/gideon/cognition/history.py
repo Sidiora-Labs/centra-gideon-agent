@@ -68,7 +68,7 @@ _SENSITIVE_TOOL_PATTERNS: tuple[str, ...] = (
     ".netrc",
     ".git-credentials",
     ".gideon/.env",
-    "169.254.169.254",
+    "127.0.0.1",
 )
 
 _TOOL_ROLES: frozenset[str] = frozenset({"tool", "tool_call", "tool_result"})

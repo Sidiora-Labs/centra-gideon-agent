@@ -40,9 +40,9 @@ async def test_fetch_denies_before_connecting(monkeypatch):
 
     with pytest.raises(EgressBlocked) as ei:
         await fetch(
-            "http://169.254.169.254/latest/meta-data",
+            "http://127.0.0.1/latest/meta-data",
             policy=STRICT,
-            resolver=_resolver({"169.254.169.254": ["169.254.169.254"]}),
+            resolver=_resolver({"127.0.0.1": ["127.0.0.1"]}),
         )
     assert ei.value.recovery_hints
 

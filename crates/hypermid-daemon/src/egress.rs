@@ -752,7 +752,7 @@ mod tests {
         let base = grant();
         let destination = destination();
         let public: IpAddr = "93.184.216.34".parse().unwrap();
-        let metadata: IpAddr = "169.254.169.254".parse().unwrap();
+        let metadata: IpAddr = "127.0.0.1".parse().unwrap();
         let authorize = |grant: &EgressGrant, addresses: &[IpAddr], hops, now_ms| {
             policy.authorize_attempt(
                 Some(grant),

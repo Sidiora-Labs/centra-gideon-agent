@@ -12,7 +12,7 @@ This guide covers single-container and Docker Compose deployments: ports, volume
 From a checkout, build the combined image and start one container:
 
 ```bash
-docker build -f infrastructure/docker/Dockerfile.backend --target single -t gideon:local .
+docker build -f deploy/docker/Dockerfile.backend --target single -t gideon:local .
 docker run -d --name gideon --restart unless-stopped -p 127.0.0.1:10000:10000 -v gideon_home:/data gideon:local
 docker logs gideon
 ```
@@ -25,7 +25,7 @@ The existing two-service Compose path remains available from the same checkout:
 
 ```bash
 cp .env.example .env         # fill in provider keys / options (all optional)
-docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build gideon-gateway gideon-web
+docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.build.yaml up -d --build gideon-gateway gideon-web
 ```
 
 Two Compose services come up:
@@ -39,7 +39,7 @@ Set `GIDEON_GATEWAY_IMAGE` and `GIDEON_WEB_IMAGE` to complete image references w
 are using published images. Build the local defaults with `compose.build.yaml`:
 
 ```bash
-docker compose -f infrastructure/compose/compose.yaml -f infrastructure/compose/compose.build.yaml up -d --build gideon-gateway gideon-web
+docker compose -f deploy/compose/compose.yaml -f deploy/compose/compose.build.yaml up -d --build gideon-gateway gideon-web
 ```
 
 ## Ports
@@ -100,7 +100,7 @@ to the gateway logs at startup, and it can be regenerated at any time:
 docker exec gideon gideon token
 ```
 
-For Compose, use `docker compose -f infrastructure/compose/compose.yaml exec gideon-gateway gideon token`.
+For Compose, use `docker compose -f deploy/compose/compose.yaml exec gideon-gateway gideon token`.
 
 ## Owner login (a password instead of a token URL)
 
@@ -120,7 +120,7 @@ docker exec gideon gideon auth enable
 docker restart gideon
 ```
 
-For Compose, run `docker compose -f infrastructure/compose/compose.yaml exec gideon-gateway gideon auth enable`, then `docker compose -f infrastructure/compose/compose.yaml restart gideon-gateway`. For the single container, supply `--env-file .env` on its first
+For Compose, run `docker compose -f deploy/compose/compose.yaml exec gideon-gateway gideon auth enable`, then `docker compose -f deploy/compose/compose.yaml restart gideon-gateway`. For the single container, supply `--env-file .env` on its first
 `docker run` so the login values reach the gateway.
 
 Three things worth knowing:
@@ -158,7 +158,7 @@ docker cp 'gideon:/data/snapshots/<file>.tar.gz' .
 ```
 
 Replace `<file>` with the name printed by `gideon snapshot --list`. For Compose,
-replace `docker exec gideon` with `docker compose -f infrastructure/compose/compose.yaml exec gideon-gateway`, and use `docker compose -f infrastructure/compose/compose.yaml cp 'gideon-gateway:/data/snapshots/<file>.tar.gz' .` to copy the archive out.
+replace `docker exec gideon` with `docker compose -f deploy/compose/compose.yaml exec gideon-gateway`, and use `docker compose -f deploy/compose/compose.yaml cp 'gideon-gateway:/data/snapshots/<file>.tar.gz' .` to copy the archive out.
 
 For a full replacement restore, stop the gateway and run the restore in a temporary
 container using the same volume:
@@ -178,15 +178,15 @@ There is no in-place self-update. For Compose with published image references:
 
 ```bash
 # set GIDEON_GATEWAY_IMAGE and GIDEON_WEB_IMAGE to published image references first
-docker compose -f infrastructure/compose/compose.yaml pull
-docker compose -f infrastructure/compose/compose.yaml up -d
+docker compose -f deploy/compose/compose.yaml pull
+docker compose -f deploy/compose/compose.yaml up -d
 ```
 
 For the single-container checkout build, rebuild the image and recreate the named
 container with the same `gideon_home` volume:
 
 ```bash
-docker build -f infrastructure/docker/Dockerfile.backend --target single -t gideon:local .
+docker build -f deploy/docker/Dockerfile.backend --target single -t gideon:local .
 docker stop gideon && docker rm gideon
 docker run -d --name gideon --restart unless-stopped -p 127.0.0.1:10000:10000 -v gideon_home:/data gideon:local
 ```

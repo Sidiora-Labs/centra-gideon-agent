@@ -29,7 +29,7 @@ SOURCE_ROOTS = (
     "checks/hypermid",
     "clients",
     "crates",
-    "infrastructure/docker",
+    "deploy/docker",
     "runtime",
     "spec/hypermid/schemas",
 )

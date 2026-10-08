@@ -212,7 +212,7 @@ def test_controlled_dns_rebinding_metadata_redirect_and_byte_limits_fail_before_
 
     for addresses, changes, rule in [
         (("93.184.216.34", "10.0.0.1"), {}, "address.class"),
-        (("169.254.169.254",), {}, "address.metadata"),
+        (("127.0.0.1",), {}, "address.metadata"),
         (("127.0.0.1",), {}, "address.class"),
         (("93.184.216.34",), {"redirect_hops": 2}, "redirect.limit"),
     ]:

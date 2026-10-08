@@ -163,6 +163,6 @@ wave = 8
 owner_lane = "integration"
 requires = ["int-07", "base-08", "fab-08-integration", "ctx-gideon-integration", "mem-release", "ux-native", "sec-08"]
 reqs = ["int-08.1", "int-08.2", "int-08.3"]
-touches = ["Cargo.lock", "pyproject.toml", "setup.py", "infrastructure/docker/Dockerfile.backend", "infrastructure/website/install.sh", "runtime/gideon/hypermid/__init__.py", "runtime/gideon/engine/lifecycle.py", "runtime/gideon/interfaces/cli/main.py", "apps/console/src/features/settings/HypermidPanel.tsx", "checks/hypermid/verify_wave_08.py", "checks/hypermid/fixtures/n_minus_one_protocol.json", "checks/hypermid/fixtures/recovery_journal.jsonl", "spec/hypermid/release-readiness.kvx"]
+touches = ["Cargo.lock", "pyproject.toml", "setup.py", "deploy/docker/Dockerfile.backend", "infrastructure/website/install.sh", "runtime/gideon/hypermid/__init__.py", "runtime/gideon/engine/lifecycle.py", "runtime/gideon/interfaces/cli/main.py", "apps/console/src/features/settings/HypermidPanel.tsx", "checks/hypermid/verify_wave_08.py", "checks/hypermid/fixtures/n_minus_one_protocol.json", "checks/hypermid/fixtures/recovery_journal.jsonl", "spec/hypermid/release-readiness.kvx"]
 verify_cmd = "PYTHONPATH=runtime python checks/hypermid/verify_wave_08.py"
 acceptance = "The packaged OSS product passes the complete real-path conformance journey with explicit limitations and no dependency on a separate deployment environment."

@@ -170,7 +170,7 @@ def test_dockerfile_nginx_routes_the_exported_assistant_artifact():
     assert (
         _ARTIFACT / "index.html"
     ).is_file(), "build the assistant web artifact first"
-    dockerfile = (_REPOSITORY / "infrastructure/docker/Dockerfile.web").read_text()
+    dockerfile = (_REPOSITORY / "deploy/docker/Dockerfile.web").read_text()
     lines = dockerfile.splitlines()
     start = next(
         i for i, line in enumerate(lines) if line.startswith("RUN printf '%s\\n'")
@@ -195,7 +195,7 @@ def test_dockerfile_nginx_routes_the_exported_assistant_artifact():
 
         template = temp_root / "default.conf.template"
         shutil.copyfile(
-            _REPOSITORY / "infrastructure/docker/nginx.conf.template", template
+            _REPOSITORY / "deploy/docker/nginx.conf.template", template
         )
         routing_fragment = temp_root / "assistant-routing.conf"
         insertion = insertion.replace(

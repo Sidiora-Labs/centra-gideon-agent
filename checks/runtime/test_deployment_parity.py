@@ -182,7 +182,7 @@ def compose_gateway():
     compose_file = compose_dir / "compose.yaml"
     build_overlay = compose_dir / "compose.build.yaml"
     if not compose_file.exists():
-        pytest.skip("infrastructure/compose/compose.yaml not found")
+        pytest.skip("deploy/compose/compose.yaml not found")
 
     root_env = repo_root / ".env"
     env_example = repo_root / ".env.example"
@@ -252,7 +252,7 @@ def test_compose_path_endpoint_responds(compose_gateway, endpoint):
 
 def _deployment_commands():
     commands = []
-    for compose in sorted((_REPO / "infrastructure/compose").glob("compose*.yaml")):
+    for compose in sorted((_REPO / "deploy/compose").glob("compose*.yaml")):
         services = (yaml.safe_load(compose.read_text()) or {}).get("services") or {}
         for name, service in services.items():
             for key in ("entrypoint", "command"):
@@ -260,7 +260,7 @@ def _deployment_commands():
                 argv = shlex.split(argv) if isinstance(argv, str) else argv
                 if argv and argv[0] == "gideon":
                     commands.append((f"{compose.name}:{name}.{key}", argv))
-    for dockerfile in sorted((_REPO / "infrastructure/docker").glob("Dockerfile*")):
+    for dockerfile in sorted((_REPO / "deploy/docker").glob("Dockerfile*")):
         for line in dockerfile.read_text().splitlines():
             match = re.match(r"\s*(CMD|ENTRYPOINT)\s+(\[.*\])\s*$", line)
             if match:

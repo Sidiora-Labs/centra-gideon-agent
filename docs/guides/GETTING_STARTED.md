@@ -187,7 +187,7 @@ From a source checkout, build an image that includes the gateway and console, th
 with a persistent volume:
 
 ```bash
-docker build -f infrastructure/docker/Dockerfile.backend --target single -t gideon:local .
+docker build -f deploy/docker/Dockerfile.backend --target single -t gideon:local .
 docker run -d --name gideon --restart unless-stopped -p 127.0.0.1:10000:10000 -v gideon_home:/data gideon:local
 ```
 

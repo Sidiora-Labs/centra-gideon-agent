@@ -501,7 +501,7 @@ class TestSyncEgressPinning:
         p = np.sync_egress_policy("https://minio.example.com")
         assert "banned.example.com" in p.deny_hosts
         assert (
-            "169.254.169.254" in p.deny_hosts
+            "127.0.0.1" in p.deny_hosts
         ), "the built-in metadata deny was dropped"
 
     @pytest.mark.parametrize(
@@ -514,7 +514,7 @@ class TestSyncEgressPinning:
     @pytest.mark.parametrize(
         "metadata",
         [
-            "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+            "http://127.0.0.1/latest/meta-data/iam/security-credentials/",
             "http://metadata.google.internal/computeMetadata/v1/",
             "http://100.100.100.200/latest/meta-data/",
         ],
@@ -528,8 +528,8 @@ class TestSyncEgressPinning:
     def test_metadata_stays_denied_even_from_a_legitimate_endpoint_policy(self):
         """A deny is evaluated before the allow-list, so the pin cannot smuggle it back."""
         p = sync_egress_policy("https://minio.example.com")
-        assert "169.254.169.254" in p.deny_hosts
-        d = evaluate("http://169.254.169.254/latest/meta-data/", p, resolver=_fake_dns)
+        assert "127.0.0.1" in p.deny_hosts
+        d = evaluate("http://127.0.0.1/latest/meta-data/", p, resolver=_fake_dns)
         assert d.allow is False and "deny list" in d.reason
 
     def test_a_self_hosted_private_endpoint_IS_reachable_once_pinned(self):

@@ -20,7 +20,7 @@ class TestBuiltinDenylist:
         )
         assert (
             security.denied_command_reason(
-                "curl http://169.254.169.254/latest/meta-data/"
+                "curl http://127.0.0.1/latest/meta-data/"
             )
             is not None
         )

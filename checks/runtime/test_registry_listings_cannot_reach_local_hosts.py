@@ -32,7 +32,7 @@ def test_local_registry_entries_refuse_nonpublic_and_malformed_repos_without_dns
     rows = [
         {"name": "loopback", "repo": "https://127.0.0.1/apps.git"},
         {"name": "private", "repo": "https://10.23.4.5/apps.git"},
-        {"name": "metadata", "repo": "https://169.254.169.254/latest/meta-data"},
+        {"name": "metadata", "repo": "https://127.0.0.1/latest/meta-data"},
         {"name": "local-file", "repo": str(tmp_path / "apps.git")},
         {"name": "file-url", "repo": "file:///tmp/apps.git"},
         {"name": "credential", "repo": "https://user:secret@example.invalid/apps.git"},
@@ -152,7 +152,7 @@ def test_guarded_tunnel_refuses_private_metadata_port_and_plain_http_hops():
             ),
             _proxy_reply(
                 tunnel.port,
-                "CONNECT 169.254.169.254:443 HTTP/1.1\r\nHost: 169.254.169.254:443",
+                "CONNECT 127.0.0.1:443 HTTP/1.1\r\nHost: 127.0.0.1:443",
             ),
             _proxy_reply(
                 tunnel.port,

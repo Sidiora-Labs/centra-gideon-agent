@@ -287,7 +287,7 @@ def qualify(
                     "--target",
                     "single",
                     "-f",
-                    "infrastructure/docker/Dockerfile.backend",
+                    "deploy/docker/Dockerfile.backend",
                     "-t",
                     image,
                     ".",

@@ -57,7 +57,7 @@ def test_containerized_gateway_stop_reports_host_action_without_lsof_or_ps(
             monkeypatch.setenv("GIDEON_INSTALL_KIND", "container")
             for started_by, base in (
                 ("docker-run", "docker"),
-                ("compose", "docker compose -f infrastructure/compose/compose.yaml"),
+                ("compose", "docker compose -f deploy/compose/compose.yaml"),
             ):
                 monkeypatch.setenv(container_host.STARTED_BY_ENV, started_by)
                 for action, verb in (

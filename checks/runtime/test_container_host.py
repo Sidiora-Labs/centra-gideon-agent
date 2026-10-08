@@ -46,11 +46,11 @@ def assert_install_commands(monkeypatch):
         in commands[2]
     )
     monkeypatch.setenv(container_host.STARTED_BY_ENV, "compose")
-    compose = "docker compose -f infrastructure/compose/compose.yaml"
+    compose = "docker compose -f deploy/compose/compose.yaml"
     assert container_host.stop_command() == compose + " stop gideon-gateway"
     assert container_host.restart_command() == compose + " restart gideon-gateway"
     assert container_host.update_commands("0.2")[1] == (
-        compose + " -f infrastructure/compose/compose.build.yaml up -d --build"
+        compose + " -f deploy/compose/compose.build.yaml up -d --build"
     )
     monkeypatch.setenv("GIDEON_GATEWAY_IMAGE", "registry.example/gideon-api:1.0")
     monkeypatch.setenv("GIDEON_WEB_IMAGE", "registry.example/gideon-web:1.0")
@@ -61,9 +61,9 @@ def assert_install_commands(monkeypatch):
             "GIDEON_WEB_IMAGE=registry.example/gideon-web:0.2 " + compose + " " + action
         )
     assert "down" not in "\n".join(commands)
-    compose_source = Path("infrastructure/compose/compose.yaml").read_text()
+    compose_source = Path("deploy/compose/compose.yaml").read_text()
     assert "GIDEON_CONTAINER_STARTED_BY: compose" in compose_source
     assert "gideon_home:/data:z" in compose_source
-    dockerfile = Path("infrastructure/docker/Dockerfile.backend").read_text()
+    dockerfile = Path("deploy/docker/Dockerfile.backend").read_text()
     assert "GIDEON_CONTAINER_STARTED_BY=docker-run" in dockerfile
     assert "GIDEON_CONTAINER_IMAGE=gideon:local" in dockerfile

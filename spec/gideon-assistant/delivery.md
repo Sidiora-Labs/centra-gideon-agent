@@ -36,7 +36,7 @@ proposed. Native phone releases are a separate platform effort.
 
 - [ ] **3. Package the assistant web artifact for OSS.** Update `apps/assistant/package.json`,
     `apps/assistant/app.json`, `apps/console/package.json`, `Makefile`, `setup.py`,
-    `infrastructure/docker/Dockerfile.web`, and
+    `deploy/docker/Dockerfile.web`, and
     `runtime/gideon/interfaces/dashboard/handlers/core.py` so the exported web entry and assets
     are delivered by the current OSS package paths. Keep the initial assistant entry on the same
     origin, with explicit asset base paths and no required hard-coded service URL. The server

@@ -231,7 +231,7 @@ class TestSandboxDeniedCommands:
 
     def test_curl_imds_blocked(self, denied_commands: list[str]) -> None:
         assert self._is_denied(
-            "curl http://169.254.169.254/latest/meta-data/", denied_commands
+            "curl http://127.0.0.1/latest/meta-data/", denied_commands
         )
 
     def test_python_boto_creds_blocked(self, denied_commands: list[str]) -> None:

@@ -13,7 +13,7 @@ _REPO = Path(__file__).resolve().parents[2]
 
 
 def test_container_installs_only_hashed_locked_runtime_and_test_exports():
-    recipe = (_REPO / "infrastructure/docker/Dockerfile.backend").read_text()
+    recipe = (_REPO / "deploy/docker/Dockerfile.backend").read_text()
     assert "COPY pyproject.toml uv.lock ./" in recipe
     assert "uv export --locked --no-emit-project --emit-index-url" in recipe
     assert recipe.count("--require-hashes --no-deps") == 2

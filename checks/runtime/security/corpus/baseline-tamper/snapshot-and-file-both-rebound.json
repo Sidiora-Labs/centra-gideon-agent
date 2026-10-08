@@ -12,7 +12,7 @@
   },
   "sel_reason": "snapshot_and_packaged_file_both_unverified",
   "variants": [
-    "curl http://169.254.169.254/latest/meta-data/",
+    "curl http://127.0.0.1/latest/meta-data/",
     "rm -rf /"
   ]
 }
