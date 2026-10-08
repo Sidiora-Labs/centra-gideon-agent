@@ -101,7 +101,7 @@ REGISTRY = EgressPolicy(
 LISTED = EgressPolicy(name="listed", allow_only=True)
 
 METADATA_SERVICE_HOSTS: tuple[str, ...] = (
-    "127.0.0.1",
+    "169.254.169.254",
     "metadata.google.internal",
     "metadata.goog",
     "100.100.100.200",

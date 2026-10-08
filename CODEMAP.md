@@ -9,13 +9,13 @@ Read this first. It is derived from the code graph: purpose lines are the code's
 
 | Language | Files | Lines |
 |---|---:|---:|
-| python | 4,395 | 1,419,137 |
+| python | 4,395 | 1,419,175 |
 | typescript | 2,412 | 287,801 |
 | rust | 233 | 75,338 |
 | javascript | 87 | 14,057 |
 | swift | 5 | 1,520 |
 
-7,132 source files, 1,797,853 lines (test fixtures not counted: 7 more).
+7,132 source files, 1,797,891 lines (test fixtures not counted: 7 more).
 
 Build and test:
 
@@ -78,13 +78,13 @@ Build and test:
   - `apps/mobile/` — 18 files, 1,008 lines, mostly javascript. A Capacitor shell that opens the gateway's served `/#/companion` route.
 - `assets/` — 3 files, 88 lines, mostly python
   - `assets/identity/` — 3 files, 88 lines, mostly python
-- `checks/` — 2,428 files, 716,457 lines, mostly python (tests)
+- `checks/` — 2,428 files, 716,495 lines, mostly python (tests)
   - `checks/capabilities/` — 10 files, 751 lines, mostly javascript
   - `checks/catalogs/` — 3 files
   - `checks/fixtures/` — 1 file (test fixtures)
   - `checks/harness/` — 66 files, 5,964 lines, mostly python. `checks/harness` contains repository tooling for specification references, command profiles, static boundary checks, recorded event replay, and measurements.
   - `checks/hypermid/` — 98 files, 22,885 lines, mostly python (tests)
-  - `checks/runtime/` — 2,249 files, 686,857 lines, mostly python (tests). Pytest collects runtime tests from `checks/runtime` by default.
+  - `checks/runtime/` — 2,249 files, 686,895 lines, mostly python (tests). Pytest collects runtime tests from `checks/runtime` by default.
 - `clients/` — 6 files, 2,290 lines, mostly swift
   - `clients/hypermid-swift/` — 3 files, 1,229 lines, mostly swift
   - `clients/hypermid-ts/` — 3 files, 1,061 lines, mostly typescript
@@ -106,6 +106,7 @@ Build and test:
   - `examples/registry/` — 29 files, 1,061 lines, mostly python (test fixtures). An example community app-listing format and validation tool.
 - `packages/` — 10 files, 597 lines, mostly python
   - `packages/python-client/` — 10 files, 597 lines, mostly python. An async Python HTTP client for a running Gideon gateway.
+- `patches/` — 2 files
 - `runtime/` — 2,372 files, 692,203 lines, mostly python
   - `runtime/gideon/` — 2,372 files, 692,203 lines, mostly python. Gideon's runtime identity and process shutdown coordination.
 - `spec/` — 305 files, 261 lines, mostly python
@@ -1586,7 +1587,7 @@ _Not shown: 33 modules, 3,098 files, 44,983 symbols._
 
 Between top-level directories, from resolved imports and calls (`.` is the root):
 
-- `checks/` → `runtime/`: 236 imports, 29,739 calls
+- `checks/` → `runtime/`: 236 imports, 29,740 calls
 - `apps/` → `runtime/`: 27,542 calls
 - `checks/` → `apps/`: 179 imports, 62 calls
 - `checks/` → `tooling/`: 14 imports, 74 calls

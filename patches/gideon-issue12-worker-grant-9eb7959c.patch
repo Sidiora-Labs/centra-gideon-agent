@@ -1,0 +1,146 @@
+diff --git a/checks/runtime/test_app_worker_runtime.py b/checks/runtime/test_app_worker_runtime.py
+index 4cd1a99db9e8cdac7c405c2f128eccb4795a15fe..cb9c018ba8397f25fdf94772e280591169c30c94 100644
+--- a/checks/runtime/test_app_worker_runtime.py
++++ b/checks/runtime/test_app_worker_runtime.py
+@@ -50,6 +50,11 @@ from typing import Any, Callable, Iterator
+ import pytest
+
+ from gideon.extensions.apps import manager, worker_runtime
++from gideon.extensions.apps.background import (
++    BACKGROUND_TASKS_PERMISSION,
++    WORKER_GRANT_ENV,
++    WorkerContext,
++)
+ from gideon.extensions.apps.manifest import AppManifest
+ from gideon.extensions.apps.worker_runtime import (
+     SupervisedWorker,
+@@ -300,10 +305,14 @@ def notes(monkeypatch: pytest.MonkeyPatch) -> _RecordingState:
+
+
+ def test_a_worker_needs_the_backgroundtasks_grant(
+-    tmp_path: Path, sup: WorkerSupervisor, _stub_background: types.ModuleType
++    tmp_path: Path,
++    sup: WorkerSupervisor,
++    _stub_background: types.ModuleType,
++    monkeypatch: pytest.MonkeyPatch,
+ ) -> None:
+     """No `backgroundTasks` → no worker. The SAME fixture WITH it starts, so this is not
+     a test that would pass against a supervisor which never starts anything."""
++    monkeypatch.setenv(WORKER_GRANT_ENV, BACKGROUND_TASKS_PERMISSION)
+     ungranted = _install_worker_app(
+         tmp_path,
+         "nogrant",
+@@ -738,14 +747,22 @@ def test_a_revoked_permission_stops_the_worker(
+     )
+
+
++@pytest.mark.parametrize("inherited_grant", [None, "forged-parent-grant"])
+ def test_the_worker_child_gets_its_name_and_not_the_gateway_environment(
+-    tmp_path: Path, sup: WorkerSupervisor, monkeypatch: pytest.MonkeyPatch
++    tmp_path: Path,
++    sup: WorkerSupervisor,
++    monkeypatch: pytest.MonkeyPatch,
++    inherited_grant: str | None,
+ ) -> None:
+     """The worker is handed its identity by env (never a guessed path), from an ALLOWLIST.
+
+     Same posture as an app backend, minus `PORT` — a portless child has no use for one.
+     """
+     monkeypatch.setenv("ACME_CLOUD_API_KEY", "planted-value-9e12")
++    if inherited_grant is None:
++        monkeypatch.delenv(WORKER_GRANT_ENV, raising=False)
++    else:
++        monkeypatch.setenv(WORKER_GRANT_ENV, inherited_grant)
+     dump = tmp_path / "env.json"
+     body = (
+         "import json, os, pathlib\n"
+@@ -767,6 +784,11 @@ def test_the_worker_child_gets_its_name_and_not_the_gateway_environment(
+
+     assert env.get("GIDEON_APP_NAME") == "envprobe"
+     assert env.get("GIDEON_APP_WORKER") == "probe"
++    assert env.get(WORKER_GRANT_ENV) == BACKGROUND_TASKS_PERMISSION
++    ctx = WorkerContext.from_env(env)
++    assert ctx.app_name == "envprobe"
++    assert ctx.worker_id == "probe"
++    assert ctx.data_dir is None
+     assert "PORT" not in env, "a portless worker was handed a port"
+     assert "GIDEON_APP_SECRET" not in env, (
+         "a worker was handed the proxy-signature secret it has no inbound surface to "
+@@ -778,6 +800,37 @@ def test_the_worker_child_gets_its_name_and_not_the_gateway_environment(
+     assert isinstance(rec, SupervisedWorker)
+
+
++def test_the_supervisor_starts_and_stops_an_sdk_worker(
++    tmp_path: Path, sup: WorkerSupervisor, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    monkeypatch.delenv(WORKER_GRANT_ENV, raising=False)
++    ready = tmp_path / "sdk-ready"
++    body = (
++        "from pathlib import Path\n"
++        "from gideon.sdk.background import BackgroundWorker, run_worker\n"
++        "class Probe(BackgroundWorker):\n"
++        "    def run_once(self, ctx):\n"
++        f"        Path({str(ready)!r}).write_text(ctx.app_name + ':' + ctx.worker_id)\n"
++        "run_worker(Probe())\n"
++    )
++    manifest = _install_worker_app(
++        tmp_path,
++        "sdkprobe",
++        body=body,
++        workers=[worker_runtime.WorkerSpec(name="probe", entry_point="worker.py")],
++    )
++    (rec,) = sup.start(manifest)
++    _wait_for(
++        lambda: (ready.exists() and ready.stat().st_size > 0) or not rec.is_alive(),
++        what="the SDK worker's first unit of work",
++    )
++    assert rec.is_alive(), "the SDK worker exited before doing supervised work"
++    assert ready.read_text() == "sdkprobe:probe"
++    assert sup.stop("sdkprobe") == 1
++    assert rec.proc is not None and rec.proc.returncode == 0
++    assert sup.get("sdkprobe", "probe") is None
++
++
+ def test_the_worker_spawn_actually_goes_through_the_ceiling_shim():
+     """The spawn-ceiling AUDIT pins the classification; this pins the behaviour.
+
+diff --git a/runtime/gideon/extensions/apps/worker_runtime.py b/runtime/gideon/extensions/apps/worker_runtime.py
+index 333c798afa732c3067a73bbf0b6b103928ea65bc..3afdaa9479fcbcdc2d830698f1056a8659760543 100644
+--- a/runtime/gideon/extensions/apps/worker_runtime.py
++++ b/runtime/gideon/extensions/apps/worker_runtime.py
+@@ -65,15 +65,16 @@ from dataclasses import dataclass, field
+ from enum import Enum
+ from pathlib import Path
+
++from gideon.core.periodic_sweep import PeriodicSweep
+ from gideon.extensions.apps.backend_runtime import _TERM_TIMEOUT, BackendSupervisor
+ from gideon.extensions.apps.background import (
+     BACKGROUND_TASKS_PERMISSION,
+     WORKER_DEFAULT_NAME,
+     WORKER_ENTRY_POINT,
++    WORKER_GRANT_ENV,
+ )
+ from gideon.extensions.apps.manager import app_dir
+ from gideon.extensions.apps.manifest import AppManifest
+-from gideon.core.periodic_sweep import PeriodicSweep
+
+ logger = logging.getLogger(__name__)
+
+@@ -152,9 +153,6 @@ def declared_workers(manifest: "AppManifest") -> list[WorkerSpec]:
+     return [WorkerSpec(name=WORKER_DEFAULT_NAME, entry_point=WORKER_ENTRY_POINT)]
+
+
+-WORKER_GRANT_ENV = "GIDEON_APP_WORKER_GRANT"
+-
+-
+ def _declared_workers(manifest: AppManifest) -> list["WorkerSpec"]:
+     """The workers *manifest* declares, per the APE-3 C2 contract.
+
+@@ -485,6 +483,7 @@ class WorkerSupervisor:
+         extra: dict[str, str] = {
+             "GIDEON_APP_NAME": rec.app,
+             WORKER_ID_ENV: rec.worker,
++            WORKER_GRANT_ENV: BACKGROUND_TASKS_PERMISSION,
+         }
+         if storage_ok:
+             extra["GIDEON_APP_DATA_DIR"] = str(app_data_dir(rec.app))

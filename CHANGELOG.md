@@ -4,22 +4,45 @@ All notable changes to this project are recorded here, generated from git histor
 A release is a tag or a version bump; a group is the commit-subject prefix; a task
 reference is the `[spec:<feature>/<task>]` a snapshot or fleet worker tagged the commit with.
 
+## [0.3.1] - 2026-10-08
+
+### Highlights
+
+Release 0.3.1 is a small maintenance update with no user-facing feature changes. It removes the obsolete `.gemini/settings.json`, which held the MCP server configuration, and fixes some whitespace. The README now loads the Gideon image from a public URL.
+
+### 2026-10-08
+
+#### Bug fixes
+
+- paxlabs-inc contributor-inferred 2026-10-08 main-inferred 2176d5bc7285d2928e0eefa9c18c1a853083e288 "Fix  whitespace and delete obsolete Gemini configuration" ([2176d5b](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/2176d5bc7285d2928e0eefa9c18c1a853083e288))
+
+### 2026-10-07
+
+#### Other
+
+- "Sidiora Development Team" contributor-inferred 2026-10-07 main-inferred 56a2de3301d8e694859049cd3f734a7b4597a5d6 "Change image source for Gideon in README" ([56a2de3](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/56a2de3301d8e694859049cd3f734a7b4597a5d6))
+
 ## [0.3.0] - 2026-10-07
 
 ### Highlights
 
-0.3.0 integrates the Hypermid authenticated runtime with daemon bootstrap and Python adapter, ships native platform form controls across knowledge, code, media, and settings surfaces, and strengthens owner-authenticated workflows, identity journeys, and security boundaries throughout the agent fleet.
+Release 0.3.0 is large. Most of its commits extend Hypermid, the memory and context subsystem: installation and packaging, scoped context export and restore, fenced memory maintenance, durable bus federation, and client contracts for Rust, TypeScript and Swift. It also adds native Mail, Slides, Library, Browser preview and Activity workspaces to the Gideon assistant, along with many access-control and redaction fixes. Several commits say their surface is not yet fully qualified, including the new loop default, packaged desktop execution and remote mailbox delivery, so treat those as unverified. The release also corrects release version ordering and prerelease update selection.
 
-- Hypermid authenticated daemon bootstrap with Python adapter, OSS packaging, and security/crash recovery qualification
-- Native platform form controls for knowledge, code, media, settings, creative, wellbeing, and chat surfaces
-- Owner-authenticated workflows covering identity, knowledge, creative, goal, bundle, and communications journeys
-- Workflow run review recovery, revision-safe approvals, trigger input validation, and scoped execution controls
-- Studio media routes, Slides creation/editing, browser preview workspace, and Code/Studio/Activity foundations
+- Hypermid installs and ships through reproducible packaging, added in "Add reproducible Hypermid installation and release packaging."
+- Context can be exported, and snapshots can be backed up and restored, with restore scoped and free of authority.
+- Signed artifacts are verified before installation and activation.
+- New loops default to attended operation, and explicit owner choices are preserved.
+- Captured audio and transcripts are scanned before they are persisted.
 
 ### 2026-10-07
 
+#### Features
+
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred ba6eab8bd3df4f26d27cebfafe420bd97ca8b0c4 "Add initial project configuration for Codify in codify.kvx" ([ba6eab8](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/ba6eab8bd3df4f26d27cebfafe420bd97ca8b0c4))
+
 #### Bug fixes
 
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 0282b78b552510295f8274904f2b96e9bd62ef9f "Correct container platform and remote access guidance" ([0282b78](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/0282b78b552510295f8274904f2b96e9bd62ef9f))
 - dev-paxeer contributor-inferred 2026-10-07 main-inferred 8765ced54745a479df04bca666818396efec1a43 "Correct console contrast and multiline composer accessibility" ([8765ced](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/8765ced54745a479df04bca666818396efec1a43))
 - dev-paxeer contributor-inferred 2026-10-07 main-inferred 5108b931af3a870e44e96bb2e5163327f996a123 "Correct capability store and provider type contracts" ([5108b93](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/5108b931af3a870e44e96bb2e5163327f996a123))
 - dev-paxeer contributor-inferred 2026-10-07 main-inferred 204911ce64798693c26d8486235aa3fcf2b24a97 "Correct memory and security type annotations" ([204911c](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/204911ce64798693c26d8486235aa3fcf2b24a97))
@@ -27,8 +50,32 @@ reference is the `[spec:<feature>/<task>]` a snapshot or fleet worker tagged the
 - dev-paxeer contributor-inferred 2026-10-07 main-inferred 7b8c6d64b0e0e4207ae0d0d01e267f4bbac08241 "Correct runtime lifecycle and storage type contracts" ([7b8c6d6](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/7b8c6d64b0e0e4207ae0d0d01e267f4bbac08241))
 - dev-paxeer contributor-inferred 2026-10-07 main-inferred 65dcc1e9cd3e89a9ad30bf5fa54fd52c3c12f9fe "Correct app lifecycle and provider type contracts" ([65dcc1e](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/65dcc1e9cd3e89a9ad30bf5fa54fd52c3c12f9fe))
 
+#### Documentation
+
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 2662edad1d0a0493d921b6f49978c46c803c2e42 "Document native application configuration and limits" ([2662eda](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/2662edad1d0a0493d921b6f49978c46c803c2e42))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 13047f80ca135b6cf6bd2f250865867d478e92ec "Document forwarded references and text action accessibility" ([13047f8](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/13047f80ca135b6cf6bd2f250865867d478e92ec))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 506bbe4cb5a36f3f2ed09a42cd5179888ca768de "Document workflow authoring and changelog maintenance" ([506bbe4](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/506bbe4cb5a36f3f2ed09a42cd5179888ca768de))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 93a462ecb8e9323322ef99d258bf7985d42768b2 "Document native Windows scope and permission coverage" ([93a462e](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/93a462ecb8e9323322ef99d258bf7985d42768b2))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 0f0b52f01e80d5af9d1b5ed3871aec4f84319137 "Document current runtime and browser verification commands" ([0f0b52f](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/0f0b52f01e80d5af9d1b5ed3871aec4f84319137))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred e952fe9d572c5fb58ae91d48c6310cf196e9dbcd "Document current skill and chat interaction contracts" ([e952fe9](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/e952fe9d572c5fb58ae91d48c6310cf196e9dbcd))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 025ac36cae5408f54ca99360fe013597de256201 "Document current channel and provider ownership" ([025ac36](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/025ac36cae5408f54ca99360fe013597de256201))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 4a60226b7396ee2a09eab1182e62a60b728c5397 "Document native conversation memory and trigger ownership" ([4a60226](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/4a60226b7396ee2a09eab1182e62a60b728c5397))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred e31dc421804a73037f1bcb0594e6317a476840ef "Document current API admission and security boundaries" ([e31dc42](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/e31dc421804a73037f1bcb0594e6317a476840ef))
+
 #### Tests
 
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred df3fab078ae80e58926541b0f1be9b6a27c1b7b2 "Verify native control states and explain unavailable permission removal" ([df3fab0](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/df3fab078ae80e58926541b0f1be9b6a27c1b7b2))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 2d58e000697e99322b93a75acc4d8a9875bee28d "Verify guarded pagination and independent archive review" ([2d58e00](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/2d58e000697e99322b93a75acc4d8a9875bee28d))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 04dd1e51fc84043e8707436cbe178b31fa3dc607 "Verify native panel geometry and accessible state contracts" ([04dd1e5](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/04dd1e51fc84043e8707436cbe178b31fa3dc607))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 4a997c0be315235914382dd4d20c9c2059aa51c5 "Verify native chat outcomes and session navigation" ([4a997c0](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/4a997c0be315235914382dd4d20c9c2059aa51c5))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred f160d9868a84a31de54ecae8ecadc1d255b0397e "Verify session markers against persisted native conversation history" ([f160d98](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/f160d9868a84a31de54ecae8ecadc1d255b0397e))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred aefb27bcf8c2ad770a49c4a7e9914d1293d9de24 "Verify file picker reachability through native control bindings" ([aefb27b](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/aefb27bcf8c2ad770a49c4a7e9914d1293d9de24))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred a95a672be29aaae13493f65fe0b7ea1c01d2de8c "Verify native content boundaries and editor state" ([a95a672](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/a95a672be29aaae13493f65fe0b7ea1c01d2de8c))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 7e23cac46dc3521cf705f1a4e651d119dd133064 "Verify native deletion disclosure and panel contracts" ([7e23cac](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/7e23cac46dc3521cf705f1a4e651d119dd133064))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred f161dd627011628fc0698b63e7091f18f7375dfb "Verify guarded attachment and extraction controls" ([f161dd6](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/f161dd627011628fc0698b63e7091f18f7375dfb))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 39a2a75eba8c50804cf3723a4abb7e3a4bcd416d "Verify guarded chat actions retain focus and user input" ([39a2a75](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/39a2a75eba8c50804cf3723a4abb7e3a4bcd416d))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred e90012f8224965fabb2f5ac1f0ee5bc9703e3213 "Exercise native pack actions and guarded model controls" ([e90012f](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/e90012f8224965fabb2f5ac1f0ee5bc9703e3213))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 519043aa4999ee58879d9689f6a31e952045bfaf "Verify task mutations against native persistence" ([519043a](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/519043aa4999ee58879d9689f6a31e952045bfaf))
 - dev-paxeer contributor-inferred 2026-10-07 main-inferred 8db35db6c76574c78174906611fe7c6271e94d98 "Exercise authenticated navigation through the knowledge shell" ([8db35db](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/8db35db6c76574c78174906611fe7c6271e94d98))
 - dev-paxeer contributor-inferred 2026-10-07 main-inferred ab23b6a3db549fddedc66298979ea788ca4e1518 "Verify workflow history restoration and observable run state" ([ab23b6a](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/ab23b6a3db549fddedc66298979ea788ca4e1518))
 - dev-paxeer contributor-inferred 2026-10-07 main-inferred 29723caf5ceb8f63a2917f5db1868bde0b28650c "Assert native app and commission routing behavior" ([29723ca](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/29723caf5ceb8f63a2917f5db1868bde0b28650c))
@@ -71,6 +118,70 @@ reference is the `[spec:<feature>/<task>]` a snapshot or fleet worker tagged the
 
 #### Other
 
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 24265ef46adb438e724ba15066aa76cfcd197c6a "Refresh bundled API references without changing runtime registrations" ([24265ef](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/24265ef46adb438e724ba15066aa76cfcd197c6a))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred b2b932c02a06f19ea26c80f25df3a91861ee4dfb "Scope self-hosting guides without denying hosted service" ([b2b932c](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/b2b932c02a06f19ea26c80f25df3a91861ee4dfb))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 9219bac3d1c006c64923d1fb6cd328f7d69b7b1a "Clarify self-hosted repository scope and hosted Gideon availability" ([9219bac](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/9219bac3d1c006c64923d1fb6cd328f7d69b7b1a))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 3011763ddac6fe03f3c28e40bdc15869b4aa6130 "Refresh dashboard snapshots for browser control requests" ([3011763](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/3011763ddac6fe03f3c28e40bdc15869b4aa6130))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred c2ce9e4c30c2cf5c51e3bd88d3dfd41ff2098eb9 "Update console design and architecture references" ([c2ce9e4](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/c2ce9e4c30c2cf5c51e3bd88d3dfd41ff2098eb9))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 25d62488ea7384211df78d888a8bd20938e6bc44 "Align contributor examples and documentation navigation" ([25d6248](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/25d62488ea7384211df78d888a8bd20938e6bc44))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred e037641d5097fc7c1a3af327b59b1a6b13ea123b "Update localized getting started guides" ([e037641](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/e037641d5097fc7c1a3af327b59b1a6b13ea123b))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred e749bfc399a9fbfcdd9846c54286f2f75bac0aca "Refresh support security and governance guidance" ([e749bfc](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/e749bfc399a9fbfcdd9846c54286f2f75bac0aca))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 0ec4796fddefed9610709128081ff5d9e4f0d98f "Align clinical color checks and diagram loading announcements" ([0ec4796](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/0ec4796fddefed9610709128081ff5d9e4f0d98f))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred d9da9bdd6a809ad350bd5a63d4294e58ebc31d60 "Wait for confirmed provider revisions between native actions" ([d9da9bd](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/d9da9bdd6a809ad350bd5a63d4294e58ebc31d60))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred f0af368c20b8a43d088f930b01eb84a1f2e5a707 "Warm native console modules before browser outage checks" ([f0af368](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/f0af368c20b8a43d088f930b01eb84a1f2e5a707))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 7b60a7cd89bb82b5a35c0ed184ba8beff0609025 "Update desktop workflow actions" ([7b60a7c](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/7b60a7cd89bb82b5a35c0ed184ba8beff0609025))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred acb048c4da22ea4b6adddb9da4fe9675ad19fca2 "Align interface maintenance guidance with native components" ([acb048c](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/acb048c4da22ea4b6adddb9da4fe9675ad19fca2))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 87fc5998a102df49038442c3a5dc1fa91bbaa2d6 "Refresh asset and trust store documentation" ([87fc599](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/87fc5998a102df49038442c3a5dc1fa91bbaa2d6))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred f2906f50b64e93985b9804d85637e7095eba4f54 "Refresh activity tool and widget interface documentation" ([f2906f5](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/f2906f50b64e93985b9804d85637e7095eba4f54))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred f29ba84be2962b72c5e5072e41ede7491271f46f "Clarify signing and scanner qualification boundaries" ([f29ba84](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/f29ba84be2962b72c5e5072e41ede7491271f46f))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 31ebfa8aceb5d70352069fc99f35fa087aed1b65 "Refresh desktop and companion setup documentation" ([31ebfa8](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/31ebfa8aceb5d70352069fc99f35fa087aed1b65))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 3e529dc6c3f221d281d002e0ba80c39d8aac3017 "Preserve vault save feedback and guarded archive imports" ([3e529dc](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/3e529dc6c3f221d281d002e0ba80c39d8aac3017))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred f6e8da5f379e5b44cd2e98933e4a408ec4c50554 "Describe permission coverage with public technical limitations" ([f6e8da5](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/f6e8da5f379e5b44cd2e98933e4a408ec4c50554))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 36de695c055df262247eac7b683b1c688b0c6be7 "Declare installer compatibility independently of changelog layout" ([36de695](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/36de695c055df262247eac7b683b1c688b0c6be7))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 1e923ee9beef0d42026719276b376454a677fe01 "Prove temporary write targets through native fixture ownership" ([1e923ee](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/1e923ee9beef0d42026719276b376454a677fe01))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 66504171d0c91cd5b8d0afcd02fc1b80c187fc27 "Authenticate native cognition journeys and preserve stimulus checks" ([6650417](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/66504171d0c91cd5b8d0afcd02fc1b80c187fc27))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 12dcdbaa13df5d6ed844a059d02bfb9367f7209c "Preserve native accessible descriptions and focus reveal semantics" ([12dcdba](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/12dcdbaa13df5d6ed844a059d02bfb9367f7209c))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred f6d771ec95ced3c4f876e5c38c3e7dec51e20d14 "Use semantic roles for capability labels and graphics" ([f6d771e](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/f6d771ec95ced3c4f876e5c38c3e7dec51e20d14))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred a84c6c41023fa8886fecb9b4ed1e16fd089c060a "Name native groups and announce loading states" ([a84c6c4](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/a84c6c41023fa8886fecb9b4ed1e16fd089c060a))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred ba67ef085789cba8f643a1d77530c6571d14ae0f "Recognize supplemental visual baseline platforms" ([ba67ef0](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/ba67ef085789cba8f643a1d77530c6571d14ae0f))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred f0d4a56b9cbc9f341fb7f35128a8b82960a81e35 "Expose browser-control requests on the dashboard" ([f0d4a56](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/f0d4a56b9cbc9f341fb7f35128a8b82960a81e35))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred e4cc56ca0ff1362e3666a855d59e6b223083f020 "Preserve graph visibility and native knowledge navigation" ([e4cc56c](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/e4cc56ca0ff1362e3666a855d59e6b223083f020))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 06d77c7983b4ceaa5d421e9772e44c6350a31e25 "Refresh workflow and loop runtime documentation" ([06d77c7](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/06d77c7983b4ceaa5d421e9772e44c6350a31e25))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred f0c0db98e63f2a3baa55ab83391e8ad119b15822 "Expose configuration read errors and native busy state" ([f0c0db9](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/f0c0db98e63f2a3baa55ab83391e8ad119b15822))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 43938fef357cfc23c627b7652626ee66954e6993 "Share revision-aware watched channel settings" ([43938fe](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/43938fef357cfc23c627b7652626ee66954e6993))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred f36e762b11cd839e3279a88080834f2556c9b5df "Refresh client and extension authoring documentation" ([f36e762](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/f36e762b11cd839e3279a88080834f2556c9b5df))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 5e6b9c6f9c4c3a990c06c9f14bfdfc517d0e284b "Disclose loading and capped results across native surfaces" ([5e6b9c6](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/5e6b9c6f9c4c3a990c06c9f14bfdfc517d0e284b))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 861f0b5e01165a0b9e4d17d7747617ddafd1ad2e "Keep authored colors distinct from native interface tokens" ([861f0b5](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/861f0b5e01165a0b9e4d17d7747617ddafd1ad2e))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 5505bedacaa00f0d777d4ddcdcc63688088698ed "Preserve trigger failure labels and current source contracts" ([5505bed](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/5505bedacaa00f0d777d4ddcdcc63688088698ed))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 7e86e76d8feeaa20565256118c2dd55152091cad "Expose all native provider and artifact kinds" ([7e86e76](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/7e86e76d8feeaa20565256118c2dd55152091cad))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred b68e5ef0d557b34ce884382becd2ab604a67da35 "Track native reporting and motion ownership in source checks" ([b68e5ef](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/b68e5ef0d557b34ce884382becd2ab604a67da35))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred e9dbf669b5a48e1e540f204acecce1f24cecbef3 "Format changelog entries by date and change type" ([e9dbf66](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/e9dbf669b5a48e1e540f204acecce1f24cecbef3))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 5bc1283de24c2ba8822a04b0a3ee84badc50845d "Update CLI and configuration references for current runtime options" ([5bc1283](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/5bc1283de24c2ba8822a04b0a3ee84badc50845d))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred e4efe98e5beb4016594ce4eec14ac7504ebf46bb "Generate authenticated Inbox snapshots before frontend CI" ([e4efe98](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/e4efe98e5beb4016594ce4eec14ac7504ebf46bb))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 636f0b0e6301ad9038b2d35eb53a98e1ad1c7425 "Preserve disclosure semantics in native text actions" ([636f0b0](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/636f0b0e6301ad9038b2d35eb53a98e1ad1c7425))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred f5d390dc21190ae005b63e25ec60dcb4aaae1ead "Follow current transcript and action reporting contracts" ([f5d390d](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/f5d390dc21190ae005b63e25ec60dcb4aaae1ead))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 771a63ca1fe2fd973beae349294a5d8d5c39af2f "Preserve literal content while enforcing source whitespace" ([771a63c](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/771a63ca1fe2fd973beae349294a5d8d5c39af2f))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 8ce5657142637888bb70a014d9b32354f081ddb7 "Use natural singular and plural count descriptions" ([8ce5657](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/8ce5657142637888bb70a014d9b32354f081ddb7))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 11646d4124d687da34b1af467cc6d47026f7b58a "Preserve responsive reader and clock sizing on the native type ramp" ([11646d4](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/11646d4124d687da34b1af467cc6d47026f7b58a))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred ae0026dbe6b0c26ee9df16e788fbf58f49d6c093 "Use native typography for creative and personal capabilities" ([ae0026d](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/ae0026dbe6b0c26ee9df16e788fbf58f49d6c093))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred fffea11d57b44f19a9d0d729582c6a1c989863d5 "Align export and scan checks with current native contracts" ([fffea11](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/fffea11d57b44f19a9d0d729582c6a1c989863d5))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 983d01cbe8d0eb30f6a656ac64260946d6ef7361 "Use native typography across application pages" ([983d01c](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/983d01cbe8d0eb30f6a656ac64260946d6ef7361))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred ddbcd94e38244ac51bc0f77249afc9dafd102612 "Use native type roles for shared content and widgets" ([ddbcd94](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/ddbcd94e38244ac51bc0f77249afc9dafd102612))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 20e1ed34b3be80e4f55331d2245da75fb09fe3ef "Apply native typography to chat and workspace surfaces" ([20e1ed3](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/20e1ed34b3be80e4f55331d2245da75fb09fe3ef))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred ca3611f628dd29ce82960be63c80a6265d868f27 "Use native typography across platform capabilities" ([ca3611f](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/ca3611f628dd29ce82960be63c80a6265d868f27))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 0fcda0859ef5ceb278167a88d6a0493bad58de3a "Use native type roles in runtime inspection panels" ([0fcda08](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/0fcda0859ef5ceb278167a88d6a0493bad58de3a))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 1d39377b99cd22b0fe2e2fcae8b25893ef7e95fe "Apply native type roles to runtime lifecycle reviews" ([1d39377](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/1d39377b99cd22b0fe2e2fcae8b25893ef7e95fe))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred c05415d3fd4d069d3288b9ffe9e8e7d76e84a977 "Use native typography for runtime security controls" ([c05415d](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/c05415d3fd4d069d3288b9ffe9e8e7d76e84a977))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 297b435b9a704d15805ffeb2bc68ac605bcd4e9f "Refresh setup and architecture documentation against current runtime" ([297b435](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/297b435b9a704d15805ffeb2bc68ac605bcd4e9f))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 93eb4d3f8eeb0654ab2643e882ec755179d624eb "Order isolated workspace fixture imports consistently" ([93eb4d3](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/93eb4d3f8eeb0654ab2643e882ec755179d624eb))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 5a5b65ebbb7c2c1249a43230f9c58780b39fe1f4 "Follow native settings headings and safety controls" ([5a5b65e](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/5a5b65ebbb7c2c1249a43230f9c58780b39fe1f4))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 19ae127349d15f249acf32770ee78b0494018d49 "Restore visible focus and name keyboard scroll regions" ([19ae127](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/19ae127349d15f249acf32770ee78b0494018d49))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred ab6d1bfb59a324b50d8cacf34eaa11b641b73f67 "Separate clinical record labels for accessible navigation" ([ab6d1bf](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/ab6d1bfb59a324b50d8cacf34eaa11b641b73f67))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 7fe86a8a62de0e4eee354b6e6a4be661c6e1d362 "Validate native theme tokens with portable browser discovery" ([7fe86a8](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/7fe86a8a62de0e4eee354b6e6a4be661c6e1d362))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred d11abf15fec90b5a5932ceace79a07271cbb13b6 "Align shell checks with current identity and navigation state" ([d11abf1](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/d11abf15fec90b5a5932ceace79a07271cbb13b6))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 51f5bcafd479af89a99e4cedef6035624125bec0 "Handle disabled learning summaries and current proposal state" ([51f5bca](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/51f5bcafd479af89a99e4cedef6035624125bec0))
+- dev-paxeer contributor-inferred 2026-10-07 main-inferred 774d6f75279e701d43898ab1bc0f5cb35da23831 "Restore keyboard navigation across workspace and runtime tabs" ([774d6f7](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/774d6f75279e701d43898ab1bc0f5cb35da23831))
+- dependabot[bot] contributor-inferred 2026-10-07 main-inferred ce0d475e23e9f57e71768777821ec07f249999db "Bump the actions group across 1 directory with 3 updates" ([ce0d475](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/ce0d475e23e9f57e71768777821ec07f249999db))
 - dev-paxeer contributor-inferred 2026-10-07 main-inferred 92fa3fd117dc5f7d7655fd8e93a3da018cfe0470 "Route clipboard writes through native failure reporting" ([92fa3fd](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/92fa3fd117dc5f7d7655fd8e93a3da018cfe0470))
 - dev-paxeer contributor-inferred 2026-10-07 main-inferred cb5f87f1c4f8544b329ba376434d691da4a9195f "Follow native routes and motion contracts in source checks" ([cb5f87f](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/cb5f87f1c4f8544b329ba376434d691da4a9195f))
 - dev-paxeer contributor-inferred 2026-10-07 main-inferred 4e0f13d33f96fbc8b5c3bd6622352c463e8c155f "Preserve roles references and focus in native loop controls" ([4e0f13d](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/4e0f13d33f96fbc8b5c3bd6622352c463e8c155f))
@@ -1151,13 +1262,13 @@ reference is the `[spec:<feature>/<task>]` a snapshot or fleet worker tagged the
 
 ### Highlights
 
-This release wires creative work documents, clinical records, usage events, and semantic memory into the platform's replication layer, and adds body composition records, lifestyle profiles, and privacy consent tracking to wellbeing. Media gains versioned video timelines with overlays and audio, durable code animations, reviewable sprite frames, and LoRA adapter discovery. Identity adds encrypted selective continuity bundles, canonical identity group transfers, and heartbeat continuity with canonical memory slots. Experience ships the Moltworld v1 adapter, native duplex audio, world foundation controllers, and live source projections in ambient display. Music restores SongBook repertoire breadth, adds beat-grid video composition, monophonic audio transcription with MIDI editing, and musical canons with multipart practice.
+Codify's desktop-v0.1.3 release is large, spanning the code graph, the spec-driven task workflow, and the agent fleet. Much of the work extends the trigger and automation system, adds or hardens integrations for communications, privacy brokers, and calendars, and moves credentials into the OS keychain. Sandboxed runs gain a Docker confinement provider and a cgroup v2 tier. The release also includes a large set of bug fixes, accessibility corrections, and dependency updates.
 
-- Creative work documents, clinical records, usage events, and semantic memory now replicate through canonical domains
-- Wellbeing adds body composition records, lifestyle profiles, privacy consent, and shared health file integration
-- Media renders versioned video timelines with overlays/audio, generates durable code animations, and discovers LoRA adapters
-- Identity transfers canonical groups in encrypted bundles, adds selective continuity bundles, and heartbeat continuity slots
-- Music restores SongBook repertoire, composes beat-grid videos, transcribes monophonic audio, and edits MIDI notes
+- `POST /api/triggers/{id}/fire` adds a webhook endpoint that fires a trigger.
+- Credentials move to the OS keychain with consent (SH-2), with a keychain backend and `.env` fallback (SH-1).
+- Sandboxed runs can use a Docker confinement provider (EI-2) and a cgroup v2 tier.
+- Project knowledge can be projected to markdown that the owner edits back (KL-20).
+- ACP adapter lifecycle is versioned and managed, and `session/load` is reachable from ACP sessions.
 
 ### 2026-09-26
 
@@ -3465,5 +3576,6 @@ This release wires creative work documents, clinical records, usage events, and 
 - paxlabs-inc contributor-inferred 2026-06-01 main-inferred 9daf3e7100d8190d26db6b8d18e0f0164a396315 "**deps:** We bump tar and electron-builder together (#5)" ([9daf3e7](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/9daf3e7100d8190d26db6b8d18e0f0164a396315))
 - paxlabs-inc contributor-inferred 2026-06-01 main-inferred b561e3b55054e6fef3d850969434c35bf1276c80 "Gideon v0.1.0: initial public commit" ([b561e3b](https://github.com/Sidiora-Labs/centra-gideon-agent/commit/b561e3b55054e6fef3d850969434c35bf1276c80))
 
-[0.3.0]: https://github.com/Sidiora-Labs/centra-gideon-agent/compare/gideon-desktop.v0.1.0...0.3.0
+[0.3.1]: https://github.com/Sidiora-Labs/centra-gideon-agent/compare/0.3.0-alpha...0.3.1
+[0.1.3]: https://github.com/Sidiora-Labs/centra-gideon-agent/compare/gideon-desktop.v0.1.0...0.1.3
 [desktop-v0.1.3-20260926]: https://github.com/Sidiora-Labs/centra-gideon-agent/releases/tag/desktop-v0.1.3-20260926

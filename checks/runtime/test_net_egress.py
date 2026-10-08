@@ -16,6 +16,8 @@ from gideon.security.net.guard import classify_host, evaluate
 from gideon.security.net.policy import (
     CONNECTOR,
     LOOPBACK_INTERNAL,
+    MCP_SERVER,
+    METADATA_SERVICE_HOSTS,
     STRICT,
     WEBHOOK,
     get_policy,
@@ -43,7 +45,7 @@ def _resolver(mapping):
         ("10.0.0.5", False, "private"),
         ("192.168.1.1", False, "private"),
         ("172.16.0.1", False, "private"),
-        ("127.0.0.1", False, "link_local"),
+        ("169.254.169.254", False, "link_local"),
         ("fe80::1", False, "link_local"),
         ("fc00::1", False, "private"),
         ("fd12:3456::1", False, "private"),
@@ -96,7 +98,7 @@ def test_evaluate_blocks_imds():
     d = evaluate(
         "http://metadata/latest",
         STRICT,
-        resolver=_resolver({"metadata": ["127.0.0.1"]}),
+        resolver=_resolver({"metadata": ["169.254.169.254"]}),
     )
     assert d.allow is False
 
@@ -151,7 +153,7 @@ def test_allow_host_rebinding_to_imds_is_refused():
     d = evaluate(
         "http://metadata.example/latest",
         pol,
-        resolver=_resolver({"metadata.example": ["127.0.0.1"]}),
+        resolver=_resolver({"metadata.example": ["169.254.169.254"]}),
     )
     assert d.allow is False
     assert "metadata" in d.reason
@@ -216,3 +218,39 @@ def test_profiles_have_expected_postures():
     assert CONNECTOR.max_bytes >= STRICT.max_bytes
     assert get_policy("strict") is STRICT
     assert get_policy("unknown-name") is STRICT
+
+
+@pytest.mark.parametrize(
+    "host", ["127.0.0.1", "[::1]", "[::ffff:127.0.0.1]", "localhost"]
+)
+@pytest.mark.parametrize("scheme", ["http", "ws"])
+def test_internal_loopback_is_not_metadata(host, scheme):
+    policy = LOOPBACK_INTERNAL.with_overrides(
+        allow_schemes=("http", "https", "ws", "wss")
+    )
+    decision = evaluate(f"{scheme}://{host}:9222/devtools/page/test", policy)
+    assert decision.allow is True
+    assert decision.pinned_ips
+    assert all(classify_host(ip).category == "loopback" for ip in decision.pinned_ips)
+
+
+def test_metadata_hosts_exclude_loopback():
+    assert "169.254.169.254" in METADATA_SERVICE_HOSTS
+    assert "127.0.0.1" not in METADATA_SERVICE_HOSTS
+    assert evaluate("http://127.0.0.1:7777/mcp", MCP_SERVER).allow is True
+    decision = evaluate("http://127.0.0.1:7777/mcp", STRICT)
+    assert decision.allow is False
+    assert decision.category == "loopback"
+
+
+@pytest.mark.parametrize("base", [STRICT, WEBHOOK, LOOPBACK_INTERNAL, MCP_SERVER])
+@pytest.mark.parametrize(
+    "host",
+    ["169.254.169.254", "100.100.100.200", "[::ffff:169.254.169.254]", "[fe80::1]"],
+)
+def test_metadata_is_blocked_even_with_allowlist_and_private_access(base, host):
+    policy = base.with_overrides(allow_hosts=(host.strip("[]"),), allow_private=True)
+    decision = evaluate(f"http://{host}/latest/meta-data/", policy)
+    assert decision.allow is False
+    assert decision.category == "metadata"
+    assert decision.pinned_ips == []
