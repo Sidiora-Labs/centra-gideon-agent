@@ -11,7 +11,7 @@ Gideon is a personal AI agent platform. This repository is its open-source, self
 
 Gideon also offers a hosted service, its primary managed offering. The instructions here are for people who want to self-host or develop Gideon. You control your state directory and model providers, including API providers, OpenAI-compatible endpoints, AWS Bedrock and local models.
 
-> **Open-source runtime:** The Python package in this checkout declares **v0.1.3**. For self-hosted upgrades, run `gideon snapshot` first and read [CHANGELOG.md](CHANGELOG.md). Hosted service releases are managed separately.
+> **Open-source runtime:** The Python package in this checkout declares **v0.3.1**. For self-hosted upgrades, run `gideon snapshot` first and read [CHANGELOG.md](CHANGELOG.md). Hosted service releases are managed separately.
 
 ## What it does
 
