@@ -1,0 +1,7 @@
+[finding.preflight-graph-unavailable]
+revision = "0ce97a341945aeed5052115b66c4d230b07ab3cd"
+command = "cg guard"
+exit_code = 1
+log_path = "/tmp/gideon-code-preflight-20261027/guard.log"
+observed = "No initialized graph; cortex_guard unavailable; cg done always runs verify then requires graph for touches. Remote publication blocked; no duplicate gate or forced completion."
+assumption = "Local reversible implementation may proceed; native completion and remote publication remain unqualified until tooling is explicitly reconciled."

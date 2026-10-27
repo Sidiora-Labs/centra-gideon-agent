@@ -1,0 +1,32 @@
+{
+  "kind": "implementation_preflight",
+  "product_qualification": false,
+  "input_revision": "0ce97a341945aeed5052115b66c4d230b07ab3cd",
+  "receipts": [
+    {
+      "command": [
+        "cg",
+        "guard"
+      ],
+      "exit_code": 1,
+      "log_path": "/tmp/gideon-code-preflight-20261027/guard.log"
+    },
+    {
+      "command": [
+        "cg",
+        "spec",
+        "next",
+        "-f",
+        "gideon-code"
+      ],
+      "exit_code": 0,
+      "log_path": "/tmp/gideon-code-preflight-20261027/next.log"
+    }
+  ],
+  "tooling": {
+    "native_spec_start": "Supported without graph; rendering adapters deliberately absent and markdown mirrors disabled.",
+    "native_spec_done": "Always runs verify_cmd before required touches graph checks. No receipt-reuse mode; no initialized graph. Never invoke after a separately passed verify at unchanged revision.",
+    "guard": "cortex_guard unavailable; cg guard exits 1 without initialized graph. No documented no-index init. Remote publication blocked, local reversible work permitted."
+  },
+  "authorization": "Explicit user implementation by subagents; prune remains separately approved."
+}

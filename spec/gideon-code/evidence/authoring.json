@@ -1,0 +1,1114 @@
+{
+  "acceptance_clauses": 110,
+  "coverage": {
+    "edit.1": [
+      "edit-exact-bytes",
+      "safe-edit",
+      "patch-parse-preview",
+      "patch-transaction"
+    ],
+    "edit.10": [
+      "edit-checkpoint-custody",
+      "edit-conflict-rewind",
+      "patch-parse-preview"
+    ],
+    "edit.2": [
+      "patch-stage-journal",
+      "patch-recovery-conflicts",
+      "patch-transaction",
+      "wave-6-close",
+      "release-safety-shard"
+    ],
+    "edit.3": [
+      "edit-checkpoint-custody",
+      "edit-conflict-rewind",
+      "safe-edit",
+      "wave-3-close"
+    ],
+    "edit.4": [
+      "edit-exact-bytes",
+      "patch-parse-preview"
+    ],
+    "edit.5": [
+      "edit-exact-bytes",
+      "patch-parse-preview"
+    ],
+    "edit.6": [
+      "edit-checkpoint-custody",
+      "patch-stage-journal"
+    ],
+    "edit.7": [
+      "patch-stage-journal",
+      "patch-recovery-conflicts"
+    ],
+    "edit.8": [
+      "edit-conflict-rewind",
+      "patch-recovery-conflicts"
+    ],
+    "edit.9": [
+      "edit-checkpoint-custody",
+      "patch-recovery-conflicts"
+    ],
+    "eval.1": [
+      "eval-case-manifest",
+      "eval-real-baseline-admission",
+      "eval-corpus",
+      "wave-8-close"
+    ],
+    "eval.10": [
+      "release-campaign-plan",
+      "release-safety-shard"
+    ],
+    "eval.2": [
+      "eval-independent-scoring",
+      "release-campaign-plan",
+      "release-repair-shard-1",
+      "release-repair-shard-2",
+      "release-repair-shard-3",
+      "release-repair-shard-4",
+      "doctor-release",
+      "wave-8-close"
+    ],
+    "eval.3": [
+      "release-doctor-consumer",
+      "release-explore-python",
+      "release-explore-rust",
+      "release-explore-typescript",
+      "release-repair-shard-1",
+      "release-repair-shard-2",
+      "release-repair-shard-3",
+      "release-repair-shard-4",
+      "release-safety-shard",
+      "doctor-release",
+      "wave-8-close"
+    ],
+    "eval.4": [
+      "eval-case-manifest"
+    ],
+    "eval.5": [
+      "eval-real-baseline-admission"
+    ],
+    "eval.6": [
+      "eval-independent-scoring",
+      "eval-real-baseline-admission",
+      "release-repair-shard-1",
+      "release-repair-shard-2",
+      "release-repair-shard-3",
+      "release-repair-shard-4"
+    ],
+    "eval.7": [
+      "eval-case-manifest",
+      "eval-independent-scoring",
+      "release-campaign-plan",
+      "release-explore-python",
+      "release-explore-rust",
+      "release-explore-typescript",
+      "release-repair-shard-1",
+      "release-repair-shard-2",
+      "release-repair-shard-3",
+      "release-repair-shard-4"
+    ],
+    "eval.8": [
+      "eval-independent-scoring",
+      "release-campaign-plan",
+      "release-explore-python",
+      "release-explore-rust",
+      "release-explore-typescript",
+      "release-repair-shard-1",
+      "release-repair-shard-2",
+      "release-repair-shard-3",
+      "release-repair-shard-4"
+    ],
+    "eval.9": [
+      "repair-command-receipts",
+      "eval-independent-scoring"
+    ],
+    "exec.1": [
+      "exec-owned-process",
+      "exec-output-spooling",
+      "safe-exec",
+      "background-owned-registry",
+      "background-output-cancel",
+      "background-exec",
+      "wave-6-close"
+    ],
+    "exec.10": [
+      "session-reconcile-resume",
+      "exec-owned-process",
+      "background-owned-registry"
+    ],
+    "exec.2": [
+      "repair-baseline-evidence",
+      "repair-bounded-controller",
+      "repair-loop",
+      "wave-3-close"
+    ],
+    "exec.3": [
+      "repair-command-receipts",
+      "repair-bounded-controller",
+      "repair-loop",
+      "wave-3-close"
+    ],
+    "exec.4": [
+      "exec-owned-process"
+    ],
+    "exec.5": [
+      "exec-owned-process",
+      "background-output-cancel"
+    ],
+    "exec.6": [
+      "session-result-objects",
+      "exec-output-spooling",
+      "background-output-cancel"
+    ],
+    "exec.7": [
+      "repair-baseline-evidence",
+      "repair-command-receipts"
+    ],
+    "exec.8": [
+      "repair-baseline-evidence",
+      "repair-command-receipts"
+    ],
+    "exec.9": [
+      "stream-budget-admission",
+      "repair-bounded-controller"
+    ],
+    "explore.1": [
+      "explore-ranged-read",
+      "explore-search-pagination",
+      "explore-tools",
+      "codemap-parse-cache",
+      "codemap-agent-consumer",
+      "code-map",
+      "wave-2-close"
+    ],
+    "explore.2": [
+      "context-scoped-instructions",
+      "context-compaction-pairing",
+      "context-instructions",
+      "wave-2-close"
+    ],
+    "explore.3": [
+      "release-explore-python",
+      "release-explore-rust",
+      "release-explore-typescript",
+      "doctor-release",
+      "wave-8-close"
+    ],
+    "explore.4": [
+      "explore-ranged-read"
+    ],
+    "explore.5": [
+      "explore-confined-paths",
+      "explore-ranged-read",
+      "explore-search-pagination"
+    ],
+    "explore.6": [
+      "codemap-parse-cache",
+      "codemap-agent-consumer"
+    ],
+    "explore.7": [
+      "explore-search-pagination"
+    ],
+    "explore.8": [
+      "context-scoped-instructions",
+      "extensions-scoped-skills"
+    ],
+    "explore.9": [
+      "context-scoped-instructions",
+      "context-compaction-pairing"
+    ],
+    "extensions.1": [
+      "agents-bound-packet",
+      "agents-real-worktree",
+      "worktree-agents",
+      "wave-7-close"
+    ],
+    "extensions.10": [
+      "agents-real-worktree",
+      "agents-immutable-submission"
+    ],
+    "extensions.2": [
+      "agents-immutable-submission",
+      "agents-parent-integration",
+      "worktree-agents",
+      "wave-7-close"
+    ],
+    "extensions.3": [
+      "extensions-real-mcp",
+      "extensions-scoped-skills",
+      "extensions-policy-hooks",
+      "mcp-skills",
+      "wave-7-close"
+    ],
+    "extensions.4": [
+      "agents-bound-packet",
+      "agents-real-worktree"
+    ],
+    "extensions.5": [
+      "agents-immutable-submission"
+    ],
+    "extensions.6": [
+      "agents-immutable-submission",
+      "agents-parent-integration"
+    ],
+    "extensions.7": [
+      "agents-parent-integration"
+    ],
+    "extensions.8": [
+      "extensions-real-mcp"
+    ],
+    "extensions.9": [
+      "extensions-scoped-skills",
+      "extensions-policy-hooks"
+    ],
+    "freeze.1": [
+      "freeze-tracked",
+      "freeze-import-edges",
+      "freeze-source-budget",
+      "freeze-inventory",
+      "wave-0-close"
+    ],
+    "freeze.2": [
+      "freeze-carried-corpus",
+      "freeze-vectors",
+      "wave-0-close"
+    ],
+    "freeze.3": [
+      "freeze-archive-identity",
+      "freeze-vectors",
+      "wave-0-close"
+    ],
+    "freeze.4": [
+      "freeze-tracked",
+      "freeze-import-edges"
+    ],
+    "freeze.5": [
+      "freeze-carried-corpus"
+    ],
+    "freeze.6": [
+      "freeze-tracked",
+      "freeze-archive-identity"
+    ],
+    "freeze.7": [
+      "freeze-source-budget"
+    ],
+    "interactive.1": [
+      "interactive-command-router",
+      "interactive-safe-projection",
+      "interactive-session",
+      "wave-6-close"
+    ],
+    "interactive.2": [
+      "interactive-safe-projection",
+      "interactive-human-approval",
+      "interactive-session"
+    ],
+    "interactive.3": [
+      "interactive-command-router"
+    ],
+    "interactive.4": [
+      "interactive-human-approval"
+    ],
+    "interactive.5": [
+      "interactive-safe-projection"
+    ],
+    "interactive.6": [
+      "interactive-command-router"
+    ],
+    "interactive.7": [
+      "interactive-safe-projection",
+      "release-doctor-consumer"
+    ],
+    "local.1": [
+      "local-host-bootstrap",
+      "local-provider-config",
+      "local-turn",
+      "wave-1-close",
+      "boundary-import-reachability",
+      "boundary-isolated-wheel",
+      "artifact-boundary"
+    ],
+    "local.2": [
+      "local-anthropic-adapter",
+      "local-openai-adapter",
+      "local-turn",
+      "stream-turn"
+    ],
+    "local.3": [
+      "local-host-bootstrap",
+      "stream-event-projection",
+      "stream-turn",
+      "wave-1-close"
+    ],
+    "local.4": [
+      "local-provider-config",
+      "local-anthropic-adapter",
+      "local-openai-adapter",
+      "release-doctor-consumer"
+    ],
+    "local.5": [
+      "local-anthropic-adapter",
+      "local-openai-adapter",
+      "stream-cancel-lifecycle"
+    ],
+    "local.6": [
+      "local-anthropic-adapter",
+      "local-openai-adapter",
+      "stream-event-projection"
+    ],
+    "local.7": [
+      "stream-budget-admission"
+    ],
+    "local.8": [
+      "stream-cancel-lifecycle"
+    ],
+    "local.9": [
+      "local-host-bootstrap",
+      "stream-event-projection"
+    ],
+    "parallel.1": [
+      "freeze-tracked",
+      "freeze-import-edges",
+      "freeze-source-budget",
+      "freeze-archive-identity",
+      "freeze-carried-corpus",
+      "local-host-bootstrap",
+      "local-provider-config",
+      "session-journal-lock",
+      "session-result-objects",
+      "local-anthropic-adapter",
+      "local-openai-adapter",
+      "stream-budget-admission",
+      "stream-cancel-lifecycle",
+      "stream-event-projection",
+      "session-reconcile-resume",
+      "explore-confined-paths",
+      "explore-ranged-read",
+      "explore-search-pagination",
+      "codemap-parse-cache",
+      "codemap-agent-consumer",
+      "context-scoped-instructions",
+      "context-compaction-pairing",
+      "edit-bound-policy",
+      "edit-checkpoint-custody",
+      "edit-exact-bytes",
+      "edit-conflict-rewind",
+      "exec-confinement-adapter",
+      "exec-owned-process",
+      "exec-output-spooling",
+      "repair-baseline-evidence",
+      "repair-command-receipts",
+      "repair-bounded-controller",
+      "boundary-import-reachability",
+      "boundary-isolated-wheel",
+      "prune-archive-recovery",
+      "prune-canonical-manifest",
+      "prune-approval-preflight",
+      "cutover-durable-executor",
+      "background-owned-registry",
+      "background-output-cancel",
+      "interactive-command-router",
+      "interactive-safe-projection",
+      "interactive-human-approval",
+      "patch-parse-preview",
+      "patch-stage-journal",
+      "patch-recovery-conflicts",
+      "agents-bound-packet",
+      "agents-real-worktree",
+      "agents-immutable-submission",
+      "agents-parent-integration",
+      "extensions-real-mcp",
+      "extensions-scoped-skills",
+      "extensions-policy-hooks",
+      "wave-7-close",
+      "eval-case-manifest",
+      "eval-independent-scoring",
+      "eval-real-baseline-admission",
+      "release-doctor-consumer",
+      "release-campaign-plan",
+      "release-explore-python",
+      "release-explore-rust",
+      "release-explore-typescript",
+      "release-repair-shard-1",
+      "release-repair-shard-2",
+      "release-repair-shard-3",
+      "release-repair-shard-4",
+      "release-safety-shard"
+    ],
+    "parallel.10": [
+      "freeze-tracked",
+      "freeze-import-edges",
+      "freeze-source-budget",
+      "freeze-archive-identity",
+      "freeze-carried-corpus",
+      "local-host-bootstrap",
+      "local-provider-config",
+      "session-journal-lock",
+      "session-result-objects",
+      "local-anthropic-adapter",
+      "local-openai-adapter",
+      "stream-budget-admission",
+      "stream-cancel-lifecycle",
+      "stream-event-projection",
+      "session-reconcile-resume",
+      "explore-confined-paths",
+      "explore-ranged-read",
+      "explore-search-pagination",
+      "codemap-parse-cache",
+      "codemap-agent-consumer",
+      "context-scoped-instructions",
+      "context-compaction-pairing",
+      "edit-bound-policy",
+      "edit-checkpoint-custody",
+      "edit-exact-bytes",
+      "edit-conflict-rewind",
+      "exec-confinement-adapter",
+      "exec-owned-process",
+      "exec-output-spooling",
+      "repair-baseline-evidence",
+      "repair-command-receipts",
+      "repair-bounded-controller",
+      "boundary-import-reachability",
+      "boundary-isolated-wheel",
+      "prune-archive-recovery",
+      "prune-canonical-manifest",
+      "prune-approval-preflight",
+      "cutover-durable-executor",
+      "background-owned-registry",
+      "background-output-cancel",
+      "interactive-command-router",
+      "interactive-safe-projection",
+      "interactive-human-approval",
+      "patch-parse-preview",
+      "patch-stage-journal",
+      "patch-recovery-conflicts",
+      "agents-bound-packet",
+      "agents-real-worktree",
+      "agents-immutable-submission",
+      "agents-parent-integration",
+      "extensions-real-mcp",
+      "extensions-scoped-skills",
+      "extensions-policy-hooks",
+      "wave-7-close",
+      "eval-case-manifest",
+      "eval-independent-scoring",
+      "eval-real-baseline-admission",
+      "release-doctor-consumer",
+      "release-campaign-plan",
+      "release-explore-python",
+      "release-explore-rust",
+      "release-explore-typescript",
+      "release-repair-shard-1",
+      "release-repair-shard-2",
+      "release-repair-shard-3",
+      "release-repair-shard-4",
+      "release-safety-shard"
+    ],
+    "parallel.2": [
+      "freeze-tracked",
+      "freeze-import-edges",
+      "freeze-source-budget",
+      "freeze-archive-identity",
+      "freeze-carried-corpus",
+      "local-host-bootstrap",
+      "local-provider-config",
+      "session-journal-lock",
+      "session-result-objects",
+      "local-anthropic-adapter",
+      "local-openai-adapter",
+      "stream-budget-admission",
+      "stream-cancel-lifecycle",
+      "stream-event-projection",
+      "session-reconcile-resume",
+      "explore-confined-paths",
+      "explore-ranged-read",
+      "explore-search-pagination",
+      "codemap-parse-cache",
+      "codemap-agent-consumer",
+      "context-scoped-instructions",
+      "context-compaction-pairing",
+      "edit-bound-policy",
+      "edit-checkpoint-custody",
+      "edit-exact-bytes",
+      "edit-conflict-rewind",
+      "exec-confinement-adapter",
+      "exec-owned-process",
+      "exec-output-spooling",
+      "repair-baseline-evidence",
+      "repair-command-receipts",
+      "repair-bounded-controller",
+      "boundary-import-reachability",
+      "boundary-isolated-wheel",
+      "prune-archive-recovery",
+      "prune-canonical-manifest",
+      "prune-approval-preflight",
+      "cutover-durable-executor",
+      "background-owned-registry",
+      "background-output-cancel",
+      "interactive-command-router",
+      "interactive-safe-projection",
+      "interactive-human-approval",
+      "patch-parse-preview",
+      "patch-stage-journal",
+      "patch-recovery-conflicts",
+      "agents-bound-packet",
+      "agents-real-worktree",
+      "agents-immutable-submission",
+      "agents-parent-integration",
+      "extensions-real-mcp",
+      "extensions-scoped-skills",
+      "extensions-policy-hooks",
+      "wave-7-close",
+      "eval-case-manifest",
+      "eval-independent-scoring",
+      "eval-real-baseline-admission",
+      "release-doctor-consumer",
+      "release-campaign-plan",
+      "release-explore-python",
+      "release-explore-rust",
+      "release-explore-typescript",
+      "release-repair-shard-1",
+      "release-repair-shard-2",
+      "release-repair-shard-3",
+      "release-repair-shard-4",
+      "release-safety-shard"
+    ],
+    "parallel.3": [
+      "freeze-tracked",
+      "freeze-import-edges",
+      "freeze-source-budget",
+      "freeze-archive-identity",
+      "freeze-carried-corpus",
+      "local-host-bootstrap",
+      "local-provider-config",
+      "session-journal-lock",
+      "session-result-objects",
+      "local-anthropic-adapter",
+      "local-openai-adapter",
+      "stream-budget-admission",
+      "stream-cancel-lifecycle",
+      "stream-event-projection",
+      "session-reconcile-resume",
+      "wave-1-close",
+      "explore-confined-paths",
+      "explore-ranged-read",
+      "explore-search-pagination",
+      "codemap-parse-cache",
+      "codemap-agent-consumer",
+      "context-scoped-instructions",
+      "context-compaction-pairing",
+      "edit-bound-policy",
+      "edit-checkpoint-custody",
+      "edit-exact-bytes",
+      "edit-conflict-rewind",
+      "exec-confinement-adapter",
+      "exec-owned-process",
+      "exec-output-spooling",
+      "repair-baseline-evidence",
+      "repair-command-receipts",
+      "repair-bounded-controller",
+      "boundary-import-reachability",
+      "boundary-isolated-wheel",
+      "prune-archive-recovery",
+      "prune-canonical-manifest",
+      "prune-approval-preflight",
+      "cutover-durable-executor",
+      "background-owned-registry",
+      "background-output-cancel",
+      "interactive-command-router",
+      "interactive-safe-projection",
+      "interactive-human-approval",
+      "patch-parse-preview",
+      "patch-stage-journal",
+      "patch-recovery-conflicts",
+      "agents-bound-packet",
+      "agents-real-worktree",
+      "agents-immutable-submission",
+      "agents-parent-integration",
+      "extensions-real-mcp",
+      "extensions-scoped-skills",
+      "extensions-policy-hooks",
+      "eval-case-manifest",
+      "eval-independent-scoring",
+      "eval-real-baseline-admission",
+      "release-doctor-consumer",
+      "release-campaign-plan",
+      "release-explore-python",
+      "release-explore-rust",
+      "release-explore-typescript",
+      "release-repair-shard-1",
+      "release-repair-shard-2",
+      "release-repair-shard-3",
+      "release-repair-shard-4",
+      "release-safety-shard"
+    ],
+    "parallel.4": [
+      "local-turn"
+    ],
+    "parallel.5": [
+      "freeze-tracked",
+      "freeze-import-edges",
+      "freeze-source-budget",
+      "freeze-archive-identity",
+      "freeze-carried-corpus",
+      "local-host-bootstrap",
+      "local-provider-config",
+      "session-journal-lock",
+      "session-result-objects",
+      "local-anthropic-adapter",
+      "local-openai-adapter",
+      "local-turn",
+      "stream-budget-admission",
+      "stream-cancel-lifecycle",
+      "stream-event-projection",
+      "session-reconcile-resume",
+      "explore-confined-paths",
+      "explore-ranged-read",
+      "explore-search-pagination",
+      "codemap-parse-cache",
+      "codemap-agent-consumer",
+      "context-scoped-instructions",
+      "context-compaction-pairing",
+      "edit-bound-policy",
+      "edit-checkpoint-custody",
+      "edit-exact-bytes",
+      "edit-conflict-rewind",
+      "exec-confinement-adapter",
+      "exec-owned-process",
+      "exec-output-spooling",
+      "repair-baseline-evidence",
+      "repair-command-receipts",
+      "repair-bounded-controller",
+      "boundary-import-reachability",
+      "boundary-isolated-wheel",
+      "prune-archive-recovery",
+      "prune-canonical-manifest",
+      "prune-approval-preflight",
+      "cutover-durable-executor",
+      "background-owned-registry",
+      "background-output-cancel",
+      "interactive-command-router",
+      "interactive-safe-projection",
+      "interactive-human-approval",
+      "patch-parse-preview",
+      "patch-stage-journal",
+      "patch-recovery-conflicts",
+      "agents-bound-packet",
+      "agents-real-worktree",
+      "agents-immutable-submission",
+      "agents-parent-integration",
+      "extensions-real-mcp",
+      "extensions-scoped-skills",
+      "extensions-policy-hooks",
+      "eval-case-manifest",
+      "eval-independent-scoring",
+      "eval-real-baseline-admission",
+      "release-doctor-consumer",
+      "release-campaign-plan",
+      "release-explore-python",
+      "release-explore-rust",
+      "release-explore-typescript",
+      "release-repair-shard-1",
+      "release-repair-shard-2",
+      "release-repair-shard-3",
+      "release-repair-shard-4",
+      "release-safety-shard"
+    ],
+    "parallel.6": [
+      "freeze-tracked",
+      "freeze-import-edges",
+      "freeze-source-budget",
+      "freeze-archive-identity",
+      "freeze-carried-corpus",
+      "local-host-bootstrap",
+      "local-provider-config",
+      "session-journal-lock",
+      "session-result-objects",
+      "local-anthropic-adapter",
+      "local-openai-adapter",
+      "stream-budget-admission",
+      "stream-cancel-lifecycle",
+      "stream-event-projection",
+      "session-reconcile-resume",
+      "explore-confined-paths",
+      "explore-ranged-read",
+      "explore-search-pagination",
+      "codemap-parse-cache",
+      "codemap-agent-consumer",
+      "context-scoped-instructions",
+      "context-compaction-pairing",
+      "edit-bound-policy",
+      "edit-checkpoint-custody",
+      "edit-exact-bytes",
+      "edit-conflict-rewind",
+      "exec-confinement-adapter",
+      "exec-owned-process",
+      "exec-output-spooling",
+      "repair-baseline-evidence",
+      "repair-command-receipts",
+      "repair-bounded-controller",
+      "wave-3-close",
+      "boundary-import-reachability",
+      "boundary-isolated-wheel",
+      "prune-archive-recovery",
+      "prune-canonical-manifest",
+      "prune-approval-preflight",
+      "cutover-durable-executor",
+      "background-owned-registry",
+      "background-output-cancel",
+      "interactive-command-router",
+      "interactive-safe-projection",
+      "interactive-human-approval",
+      "patch-parse-preview",
+      "patch-stage-journal",
+      "patch-recovery-conflicts",
+      "agents-bound-packet",
+      "agents-real-worktree",
+      "agents-immutable-submission",
+      "agents-parent-integration",
+      "extensions-real-mcp",
+      "extensions-scoped-skills",
+      "extensions-policy-hooks",
+      "eval-case-manifest",
+      "eval-independent-scoring",
+      "eval-real-baseline-admission",
+      "release-doctor-consumer",
+      "release-campaign-plan",
+      "release-explore-python",
+      "release-explore-rust",
+      "release-explore-typescript",
+      "release-repair-shard-1",
+      "release-repair-shard-2",
+      "release-repair-shard-3",
+      "release-repair-shard-4",
+      "release-safety-shard"
+    ],
+    "parallel.7": [
+      "freeze-tracked",
+      "freeze-import-edges",
+      "freeze-source-budget",
+      "freeze-archive-identity",
+      "freeze-carried-corpus",
+      "local-host-bootstrap",
+      "local-provider-config",
+      "session-journal-lock",
+      "session-result-objects",
+      "local-anthropic-adapter",
+      "local-openai-adapter",
+      "stream-budget-admission",
+      "stream-cancel-lifecycle",
+      "stream-event-projection",
+      "session-reconcile-resume",
+      "explore-confined-paths",
+      "explore-ranged-read",
+      "explore-search-pagination",
+      "codemap-parse-cache",
+      "codemap-agent-consumer",
+      "context-scoped-instructions",
+      "context-compaction-pairing",
+      "edit-bound-policy",
+      "edit-checkpoint-custody",
+      "edit-exact-bytes",
+      "edit-conflict-rewind",
+      "exec-confinement-adapter",
+      "exec-owned-process",
+      "exec-output-spooling",
+      "repair-baseline-evidence",
+      "repair-command-receipts",
+      "repair-bounded-controller",
+      "wave-3-close",
+      "boundary-import-reachability",
+      "boundary-isolated-wheel",
+      "prune-archive-recovery",
+      "prune-canonical-manifest",
+      "prune-approval-preflight",
+      "cutover-durable-executor",
+      "background-owned-registry",
+      "background-output-cancel",
+      "interactive-command-router",
+      "interactive-safe-projection",
+      "interactive-human-approval",
+      "patch-parse-preview",
+      "patch-stage-journal",
+      "patch-recovery-conflicts",
+      "agents-bound-packet",
+      "agents-real-worktree",
+      "agents-immutable-submission",
+      "agents-parent-integration",
+      "extensions-real-mcp",
+      "extensions-scoped-skills",
+      "extensions-policy-hooks",
+      "eval-case-manifest",
+      "eval-independent-scoring",
+      "eval-real-baseline-admission",
+      "release-doctor-consumer",
+      "release-campaign-plan",
+      "release-explore-python",
+      "release-explore-rust",
+      "release-explore-typescript",
+      "release-repair-shard-1",
+      "release-repair-shard-2",
+      "release-repair-shard-3",
+      "release-repair-shard-4",
+      "release-safety-shard"
+    ],
+    "parallel.8": [
+      "release-campaign-plan",
+      "release-explore-python",
+      "release-explore-rust",
+      "release-explore-typescript",
+      "release-repair-shard-1",
+      "release-repair-shard-2",
+      "release-repair-shard-3",
+      "release-repair-shard-4",
+      "release-safety-shard",
+      "doctor-release"
+    ],
+    "parallel.9": [
+      "freeze-inventory",
+      "doctor-release"
+    ],
+    "prune.1": [
+      "boundary-import-reachability",
+      "prune-archive-recovery",
+      "prune-canonical-manifest",
+      "prune-manifest",
+      "wave-4-close"
+    ],
+    "prune.10": [
+      "freeze-source-budget",
+      "prune-canonical-manifest"
+    ],
+    "prune.2": [
+      "boundary-import-reachability",
+      "boundary-isolated-wheel",
+      "artifact-boundary",
+      "wave-4-close"
+    ],
+    "prune.3": [
+      "cutover-durable-executor",
+      "prune-cutover",
+      "wave-5-close"
+    ],
+    "prune.4": [
+      "prune-canonical-manifest"
+    ],
+    "prune.5": [
+      "prune-approval-preflight"
+    ],
+    "prune.6": [
+      "prune-archive-recovery",
+      "prune-approval-preflight",
+      "cutover-durable-executor"
+    ],
+    "prune.7": [
+      "cutover-durable-executor"
+    ],
+    "prune.8": [
+      "prune-canonical-manifest",
+      "cutover-durable-executor"
+    ],
+    "prune.9": [
+      "freeze-archive-identity",
+      "prune-archive-recovery",
+      "cutover-durable-executor"
+    ],
+    "safety.1": [
+      "explore-confined-paths",
+      "explore-tools"
+    ],
+    "safety.10": [
+      "context-scoped-instructions",
+      "edit-bound-policy"
+    ],
+    "safety.2": [
+      "edit-bound-policy",
+      "safe-edit",
+      "exec-confinement-adapter",
+      "safe-exec",
+      "interactive-session"
+    ],
+    "safety.3": [
+      "stream-cancel-lifecycle",
+      "exec-owned-process",
+      "safe-exec",
+      "wave-3-close",
+      "background-output-cancel",
+      "background-exec",
+      "release-safety-shard"
+    ],
+    "safety.4": [
+      "edit-bound-policy",
+      "interactive-human-approval"
+    ],
+    "safety.5": [
+      "explore-confined-paths",
+      "edit-bound-policy",
+      "edit-exact-bytes"
+    ],
+    "safety.6": [
+      "explore-confined-paths"
+    ],
+    "safety.7": [
+      "exec-confinement-adapter"
+    ],
+    "safety.8": [
+      "edit-bound-policy",
+      "exec-confinement-adapter",
+      "agents-bound-packet",
+      "extensions-real-mcp",
+      "extensions-policy-hooks"
+    ],
+    "safety.9": [
+      "edit-bound-policy",
+      "interactive-human-approval"
+    ],
+    "session.1": [
+      "session-journal-lock",
+      "session-reconcile-resume",
+      "session-resume",
+      "wave-1-close"
+    ],
+    "session.2": [
+      "session-journal-lock",
+      "session-result-objects",
+      "session-resume",
+      "context-instructions"
+    ],
+    "session.3": [
+      "session-journal-lock"
+    ],
+    "session.4": [
+      "session-reconcile-resume",
+      "release-safety-shard"
+    ],
+    "session.5": [
+      "session-result-objects",
+      "explore-ranged-read",
+      "context-compaction-pairing",
+      "exec-output-spooling"
+    ],
+    "session.6": [
+      "session-journal-lock"
+    ],
+    "session.7": [
+      "session-journal-lock",
+      "session-result-objects"
+    ],
+    "session.8": [
+      "session-reconcile-resume",
+      "background-owned-registry"
+    ]
+  },
+  "errors": [],
+  "native_spec_sha256": "f7423ac7ba3b5b67cc2c2ea938421dad3d5379d96e6e8feadbabc6934082fa07",
+  "requirements": 12,
+  "runtime_scenario_status": "UNRUN",
+  "schema_version": 1,
+  "scope": "Specification authoring only; no product build, acceptance command, provider call or runtime test executed",
+  "sources_sha256": {
+    "README.md": "9994bf427f08f9f8d4e2c7a232985c74c32f778fdbd4ebb2f8260da4bd98b150",
+    "architecture.md": "6f3b554a0af91657024d938e8920dca18059504e49a908eac41035710d4ddd60",
+    "case-index.json": "0d83d0bbe43bc6753dbf20b3fcc4b614c7d183380945c8f7b91e62073aa44c6c",
+    "delegation-extensions.md": "e5d778b4010b9136927943ae9bdd99d2308d2982a6dd0ea5a37ce2d3fb7688c2",
+    "extraction-cutover.md": "2d061eddc5b9d43659626ed03928d509e45b374cf9cc4aed5e8b4583716615b8",
+    "parallel-execution.md": "794a986e7309534284fec1d291edc1f284a67eb8e602d2b9914b4a8ee7c5b9dd",
+    "runtime-contract.md": "121af578215838b0f203130ac46d4d22f0a02edab67a0cd006878e9a2587192f",
+    "spec.kvx": "f7423ac7ba3b5b67cc2c2ea938421dad3d5379d96e6e8feadbabc6934082fa07",
+    "storage-context.md": "f0de7d71c2cf10f957676f6fff0154fab70c6222bbddac39a9965b3f8f622b3c",
+    "tools-security.md": "b5d54f3fcc0f566b19fb00d5df96db8683771d532091ef39bd8d8450dbfddf45",
+    "tools/validate_pack.py": "83fe6cdcade55baea01cae1c0613777f9c81b03a9d8eb98dc720f2b334204df0",
+    "traceability.md": "e2983e84422b42d4839a0ba2d058b54b74e902e4d21e7ec0a2401e6656514d19",
+    "verification-evaluation.md": "26601a88dae6842f606caf0aa555b2dda6c30fc75a8c783109e291e1f44570c6"
+  },
+  "status": "pass",
+  "tasks": 96,
+  "unordered_write_conflicts": [],
+  "vertical_packets": 66,
+  "waves": {
+    "0": {
+      "packet_frontier_widths": {
+        "1": 1,
+        "2": 2,
+        "4": 2
+      },
+      "tasks": 8
+    },
+    "1": {
+      "packet_frontier_widths": {
+        "1": 1,
+        "2": 3,
+        "3": 2,
+        "5": 3,
+        "7": 1
+      },
+      "tasks": 14
+    },
+    "2": {
+      "packet_frontier_widths": {
+        "1": 1,
+        "2": 2,
+        "4": 2,
+        "5": 2
+      },
+      "tasks": 11
+    },
+    "3": {
+      "packet_frontier_widths": {
+        "1": 1,
+        "2": 1,
+        "3": 1,
+        "4": 1,
+        "6": 1,
+        "7": 1,
+        "8": 1,
+        "10": 2,
+        "11": 1
+      },
+      "tasks": 14
+    },
+    "4": {
+      "packet_frontier_widths": {
+        "1": 1,
+        "2": 1,
+        "4": 2,
+        "5": 1
+      },
+      "tasks": 8
+    },
+    "5": {
+      "packet_frontier_widths": {
+        "1": 1
+      },
+      "tasks": 3
+    },
+    "6": {
+      "packet_frontier_widths": {
+        "1": 4,
+        "2": 3,
+        "3": 1
+      },
+      "tasks": 12
+    },
+    "7": {
+      "packet_frontier_widths": {
+        "1": 3,
+        "2": 2,
+        "3": 1,
+        "4": 1
+      },
+      "tasks": 10
+    },
+    "8": {
+      "packet_frontier_widths": {
+        "1": 1,
+        "2": 2,
+        "4": 1,
+        "5": 1,
+        "6": 8
+      },
+      "tasks": 16
+    }
+  }
+}

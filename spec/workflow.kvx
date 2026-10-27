@@ -1,0 +1,14 @@
+[meta]
+name = "Gideon implementation task board"
+active_feature = "gideon-code"
+source_of_truth = "spec/gideon-code/spec.kvx"
+
+[mode]
+name = "parallel"
+
+[limits]
+max_in_progress = 30
+
+[render]
+markdown_mirror = false
+mirror_to_kiro = false

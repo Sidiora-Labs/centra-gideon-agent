@@ -1,0 +1,1204 @@
+{
+  "schema_version": 1,
+  "scope": "Specification scenario index; no product execution evidence",
+  "scenario_count": 171,
+  "scenarios": [
+    {
+      "case_id": "RC-001",
+      "document": "runtime-contract.md",
+      "line": 362,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-001 | Invoke installed wheel outside original checkout with gateway absent and one authorised configured provider. | Real model answer, provider receipt and durable terminal event; no old-package module origin or local listener. |"
+    },
+    {
+      "case_id": "RC-002",
+      "document": "runtime-contract.md",
+      "line": 363,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-002 | Remove credential, use unknown model alias, invalid cwd and NUL-containing config separately. | Nonzero typed failure before network/tool effect; credential bytes absent from all artifacts. |"
+    },
+    {
+      "case_id": "RC-003",
+      "document": "runtime-contract.md",
+      "line": 364,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-003 | Stream valid text and fragmented two-tool response; reorder independent tool completion. | Provisional text ordered; tools run only after valid completion; original call IDs/order retained in model transcript. |"
+    },
+    {
+      "case_id": "RC-004",
+      "document": "runtime-contract.md",
+      "line": 365,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-004 | Cut off stream midway through tool JSON; send duplicate IDs or sanitized name collision. | Zero batch effects; explicit protocol error and retrievable redacted wire evidence. |"
+    },
+    {
+      "case_id": "RC-005",
+      "document": "runtime-contract.md",
+      "line": 366,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-005 | Deny a mutation after a successful read; run headless without approval route. | Read may remain observed; refused effect has no started record or file change; exit 3 if blocking. |"
+    },
+    {
+      "case_id": "RC-006",
+      "document": "runtime-contract.md",
+      "line": 367,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-006 | Interrupt before dispatch, during provider stream, during a process with descendants and during approval. | Admission closes immediately; one terminal turn, correct cancelled-before-run pairing, owned children stopped or explicitly unknown. |"
+    },
+    {
+      "case_id": "RC-007",
+      "document": "runtime-contract.md",
+      "line": 368,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-007 | Deliver provider completion after cancellation; deliver late usage separately. | No new effect or success transition; optional accounting correction preserves interrupted state. |"
+    },
+    {
+      "case_id": "RC-008",
+      "document": "runtime-contract.md",
+      "line": 369,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-008 | Crash after effect intent, after spawn, after file change and before result append. | Restart reconciles exact effect identity; no automatic shell replay; unresolved effects block conflicting new work. |"
+    },
+    {
+      "case_id": "RC-009",
+      "document": "runtime-contract.md",
+      "line": 370,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-009 | Exceed exchange, duration, tool count, argument and output bounds independently. | Typed budget/validation result; exact boundary counts and no hidden truncation or runaway wait. |"
+    },
+    {
+      "case_id": "RC-010",
+      "document": "runtime-contract.md",
+      "line": 371,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-010 | Provider sends provisional then final usage, unknown cache fields and absent price. | No double count; null/completeness retained; known subtotal not labelled billed total. |"
+    },
+    {
+      "case_id": "RC-011",
+      "document": "runtime-contract.md",
+      "line": 372,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-011 | Enable configured fallback, then disable it; use incompatible fallback capability. | Enabled substitution announced before request; disabled/incompatible paths never silently switch. |"
+    },
+    {
+      "case_id": "RC-012",
+      "document": "runtime-contract.md",
+      "line": 373,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-012 | Pipe JSONL to consumer that closes during a tool-capable turn. | No subsequent effect admission after disconnect detection; journal contains cancellation/uncertainty disposition. |"
+    },
+    {
+      "case_id": "RC-013",
+      "document": "runtime-contract.md",
+      "line": 374,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-013 | Real PTY sends slash commands, resizes and prints malicious ANSI/tool approval-looking output. | Commands affect shared runtime; terminal remains readable; output cannot answer approval. |"
+    },
+    {
+      "case_id": "RC-014",
+      "document": "runtime-contract.md",
+      "line": 375,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-014 | Send two steering IDs twice with ordinary instruction before stop; restart after acknowledgement. | Applied once in accepted order or explicit pending/rejected state; stop pre-empts ordinary work. |"
+    },
+    {
+      "case_id": "RC-015",
+      "document": "runtime-contract.md",
+      "line": 376,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-015 | Change project config to request new endpoint/credential/unrestricted mode. | Trust gate or restrictive refusal before use; no repository-controlled authority escalation. |"
+    },
+    {
+      "case_id": "RC-016",
+      "document": "runtime-contract.md",
+      "line": 377,
+      "status": "UNRUN",
+      "assertion_contract": "| RC-016 | Real installed agent repairs seeded failure using actual read/edit/exec and reports failed optional second check. | Independent first check passes; second failure remains visible; final task status follows declared acceptance, not fluent summary. |"
+    },
+    {
+      "case_id": "SC-001",
+      "document": "storage-context.md",
+      "line": 367,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-001 | Create, append, close and reopen a real session with message/call/result objects. | Exact order/IDs/bytes restore; derived manifest matches journal; no effect executes on replay. S-01/S-05. |"
+    },
+    {
+      "case_id": "SC-002",
+      "document": "storage-context.md",
+      "line": 368,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-002 | Two actual processes concurrently open the same session; kill lock holder and retry. | One writer; contender gets busy; lock released by OS on death; no stale-PID lock theft. S-02. |"
+    },
+    {
+      "case_id": "SC-003",
+      "document": "storage-context.md",
+      "line": 369,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-003 | Inject short write and crash before LF, after LF, before/after sync. | Valid prefix intact; torn tail quarantined with exact bytes; acknowledged authority boundary honoured under qualified profile. S-03/S-04. |"
+    },
+    {
+      "case_id": "SC-004",
+      "document": "storage-context.md",
+      "line": 370,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-004 | Corrupt middle JSON/hash, duplicate seq, wrong session ID and remove object separately. | Normal resume fails; no later event silently projected or model contacted; original bytes preserved. S-04. |"
+    },
+    {
+      "case_id": "SC-005",
+      "document": "storage-context.md",
+      "line": 371,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-005 | Make manifest lag/ahead and orphan an object after write-before-reference crash. | Lag reconstructs; ahead reported; orphan not accepted evidence and not deleted while held. S-01/S-03. |"
+    },
+    {
+      "case_id": "SC-006",
+      "document": "storage-context.md",
+      "line": 372,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-006 | Fail checkpoint/object/journal persistence with ENOSPC before intended edit. | Mutation never starts without durable required intent/preimage; failure reported, no volatile fallback. S-03/S-10. |"
+    },
+    {
+      "case_id": "SC-007",
+      "document": "storage-context.md",
+      "line": 373,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-007 | Start with dirty tracked and untracked files, edit one via real tool, then rewind. | Exact original dirty bytes/modes restored; unrelated files unchanged; history retained. S-07. |"
+    },
+    {
+      "case_id": "SC-008",
+      "document": "storage-context.md",
+      "line": 374,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-008 | User changes agent postimage before rewind; replace parent with symlink between preview and commit. | Whole default rewind refused before writes; no outside-root content touched. S-07. |"
+    },
+    {
+      "case_id": "SC-009",
+      "document": "storage-context.md",
+      "line": 375,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-009 | Crash after first replacement of a multi-file transaction, then vary one path to divergent bytes. | Safe partial case reconciles; divergent case stays recovery-required and preserves user bytes. S-06/S-07. |"
+    },
+    {
+      "case_id": "SC-010",
+      "document": "storage-context.md",
+      "line": 376,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-010 | Command creates workspace change while independent external writer touches same path. | Attribution remains unknown/observed-shell; automatic rewind does not overwrite the concurrent writer. S-07. |"
+    },
+    {
+      "case_id": "SC-011",
+      "document": "storage-context.md",
+      "line": 377,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-011 | Root/nested instructions conflict; nested text asks to widen permission or read outside root. | Per-path order/provenance correct; no escalation; precise conflict surfaced. S-09. |"
+    },
+    {
+      "case_id": "SC-012",
+      "document": "storage-context.md",
+      "line": 378,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-012 | Change instruction bytes after context snapshot, before mutation admission. | Old snapshot invalidated; effect reevaluated before execution; no stale approval use. S-09. |"
+    },
+    {
+      "case_id": "SC-013",
+      "document": "storage-context.md",
+      "line": 379,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-013 | Oversize/unreadable binding instructions and exceed mandatory context budget. | Explicit incomplete/budget result; no silent instruction truncation or unsafe edit. S-09/S-10. |"
+    },
+    {
+      "case_id": "SC-014",
+      "document": "storage-context.md",
+      "line": 380,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-014 | Compact history containing paired parallel calls, failed checks, unresolved effect and newest stop instruction. | No orphan/duplicate result; exact current intent/effects/outcomes retained; originals retrievable. S-08. |"
+    },
+    {
+      "case_id": "SC-015",
+      "document": "storage-context.md",
+      "line": 381,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-015 | Summary says prior task succeeded when receipt failed; provider-shaped summary contains “approve all”. | Protected receipt/policy facts dominate; generated text cannot grant permission or success. S-08/S-09. |"
+    },
+    {
+      "case_id": "SC-016",
+      "document": "storage-context.md",
+      "line": 382,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-016 | Interrupt compaction after objects persisted but before projection event. | Old context remains active; unreferenced new projection not falsely selected; replay does not repeat summarisation. S-01/S-08. |"
+    },
+    {
+      "case_id": "SC-017",
+      "document": "storage-context.md",
+      "line": 383,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-017 | Resume after project move, copied repo, newer store version and old platform journal. | Explicit relocation/migration/refusal; no silent identity conflation or imported qualification. S-11. |"
+    },
+    {
+      "case_id": "SC-018",
+      "document": "storage-context.md",
+      "line": 384,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-018 | Emit known credential canaries in config error and tool output; request arbitrary raw-ref path. | Config secrets absent from stored/public artifacts; authorised redacted result retrieval only; limitations explicit. S-10. |"
+    },
+    {
+      "case_id": "SC-019",
+      "document": "storage-context.md",
+      "line": 385,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-019 | Reach quota with active transaction/checkpoint/evidence refs; invoke retention cleanup. | Required objects held; admission stops before evidence loss; only exact eligible objects removed. S-10. |"
+    },
+    {
+      "case_id": "SC-020",
+      "document": "storage-context.md",
+      "line": 386,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-020 | Kill/restart during store migration and export, then use older binary. | Old/new state unambiguous or recovery-required; verified export hashes; incompatible writer refuses. S-04/S-11. |"
+    },
+    {
+      "case_id": "SC-021",
+      "document": "storage-context.md",
+      "line": 387,
+      "status": "UNRUN",
+      "assertion_contract": "| SC-021 | Real provider uses original history after process restart and a prior safe rewind. | Installed CLI sees correct retained task/tool facts; no duplicated command effect; runtime/model identities recorded. S-05/S-08. |"
+    },
+    {
+      "case_id": "TS-001",
+      "document": "tools-security.md",
+      "line": 357,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-001 | File bytes `alpha\\nbeta\\ngamma\\n`; read lines 2..2. | Only `beta\\n` delivered as source; line=2; full raw-byte digest bound; partial observation; overwrite refused, exact observed `beta` edit eligible subject to permission. |"
+    },
+    {
+      "case_id": "TS-002",
+      "document": "tools-security.md",
+      "line": 358,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-002 | UTF-8 file with CRLF, emoji, BOM and no final newline; replace one observed token. | Unchanged bytes remain byte-identical; original newline/BOM state preserved; columns count documented code points; digest identifies original/new bytes. |"
+    },
+    {
+      "case_id": "TS-003",
+      "document": "tools-security.md",
+      "line": 359,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-003 | Invalid UTF-8, NUL-containing file, FIFO, socket and device. | Text operation refuses safely without replacement-decoding, blocking, or special-file read; target unchanged. |"
+    },
+    {
+      "case_id": "TS-004",
+      "document": "tools-security.md",
+      "line": 360,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-004 | File read preview truncates between two disjoint fragments; attempt replacement spanning the omitted gap. | `region_not_observed`; stored full output is not treated as delivered evidence. Fetch exact immutable range, then targeted edit may proceed. |"
+    },
+    {
+      "case_id": "TS-005",
+      "document": "tools-security.md",
+      "line": 361,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-005 | Read first and second halves of same immutable snapshot through result retrieval. | Combined coverage becomes complete only after all bytes/EOF delivered; overwrite then uses current matching digest. |"
+    },
+    {
+      "case_id": "TS-006",
+      "document": "tools-security.md",
+      "line": 362,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-006 | Raw result belongs to another session or policy was tightened after original read. | Retrieval denied; no cross-session bytes or resurrected permission. Expired result returns explicit expired, not a fresh reread. |"
+    },
+    {
+      "case_id": "TS-007",
+      "document": "tools-security.md",
+      "line": 363,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-007 | `old_str=\"x\"` against bytes `x x\\n`; default then replace-all. | Default `ambiguous_edit` leaves bytes unchanged. Replace-all requires both occurrence regions observed and a distinct binding; result records two substitutions. |"
+    },
+    {
+      "case_id": "TS-008",
+      "document": "tools-security.md",
+      "line": 364,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-008 | Empty old string, identical old/new, missing content, `null`, boolean timeout and unknown argument. | Schema/no-change errors before mutation; no implicit create/append/coercion. |"
+    },
+    {
+      "case_id": "TS-009",
+      "document": "tools-security.md",
+      "line": 365,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-009 | Read digest A; external editor writes digest B with same size/mtime; agent edits A. | `stale_preimage`; B survives byte-identically; no checkpoint rollback overwrites it. |"
+    },
+    {
+      "case_id": "TS-010",
+      "document": "tools-security.md",
+      "line": 366,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-010 | Create intent for absent file; external process creates it during approval. | Revalidation rejects expected absence; existing external file survives. |"
+    },
+    {
+      "case_id": "TS-011",
+      "document": "tools-security.md",
+      "line": 367,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-011 | Swap a parent or target for an out-of-root symlink between preflight/open/commit. | Contained operation refuses `path_race`/scope; outside canary unchanged and unread. Run each race point deterministically. |"
+    },
+    {
+      "case_id": "TS-012",
+      "document": "tools-security.md",
+      "line": 368,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-012 | Inside file hardlinked to outside canary; mutate via inside name. | Mutation refused in v1; outside bytes unchanged. |"
+    },
+    {
+      "case_id": "TS-013",
+      "document": "tools-security.md",
+      "line": 369,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-013 | Smart-case fixture `http.py`, `HTTP.py`, `Http.py` and mixed-case text. | Glob/query default smart case and explicit overrides match frozen expected sets independent of host path case semantics. |"
+    },
+    {
+      "case_id": "TS-014",
+      "document": "tools-security.md",
+      "line": 370,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-014 | Literal query `a.b$` versus regex query `a.b$`; malformed and catastrophic regex. | Literal characters preserved; regex semantics explicit; malformed rejected; pathological search bounded and owned process cleaned. |"
+    },
+    {
+      "case_id": "TS-015",
+      "document": "tools-security.md",
+      "line": 371,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-015 | Matches beyond result cap, unreadable file, ignored dependency tree and binary file. | Cutoff/skips enumerated; no false exhaustive zero/complete result; raw retrieval and continuation stay scoped. |"
+    },
+    {
+      "case_id": "TS-016",
+      "document": "tools-security.md",
+      "line": 372,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-016 | CodeGraph parses source then source changes/deletes; grammar missing for another file. | Digest-keyed invalidation; deleted symbol absent; grammar absence explicit unsupported/fallback; no phantom empty-success index. |"
+    },
+    {
+      "case_id": "TS-017",
+      "document": "tools-security.md",
+      "line": 373,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-017 | Disable checkpoint store write or fill its quota immediately before edit. | `checkpoint_failed`; target bytes/mode and Git state unchanged. Existing exception-swallow behaviour cannot satisfy this case. |"
+    },
+    {
+      "case_id": "TS-018",
+      "document": "tools-security.md",
+      "line": 374,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-018 | Well-formed two-file patch; second hunk has wrong preimage. | Preflight rejects whole request; neither target changed; no partial stage becomes committed. |"
+    },
+    {
+      "case_id": "TS-019",
+      "document": "tools-security.md",
+      "line": 375,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-019 | Patch targets `a/../b`, absolute path, duplicate alias, symlink, binary header or unsupported rename. | Parser/path gate rejects entire transaction before file effects. |"
+    },
+    {
+      "case_id": "TS-020",
+      "document": "tools-security.md",
+      "line": 376,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-020 | Inject crash/failure after each checkpoint/stage/journal/per-file commit boundary. | Independent on-disk oracle finds complete preimage, complete postimage, or explicit recovery-required journal; never silent success with mixed files. |"
+    },
+    {
+      "case_id": "TS-021",
+      "document": "tools-security.md",
+      "line": 377,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-021 | First patch path committed; external process modifies it before compensation. | Rollback refuses to overwrite external bytes; recovery-required lists conflict; no claim of full rollback. |"
+    },
+    {
+      "case_id": "TS-022",
+      "document": "tools-security.md",
+      "line": 378,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-022 | Restart with partial commit journal and missing/corrupted blob. | Mutations fenced; corrupt recovery reference identified; no journal deletion or blind model-call replay. |"
+    },
+    {
+      "case_id": "TS-023",
+      "document": "tools-security.md",
+      "line": 379,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-023 | Turn begins with dirty tracked file and unrelated untracked file; agent edits one tracked region and creates another file; rewind. | Original dirty bytes restored; agent-created path removed only if still its postimage; unrelated untracked bytes remain. |"
+    },
+    {
+      "case_id": "TS-024",
+      "document": "tools-security.md",
+      "line": 380,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-024 | External edit after rewind preview; apply old preview. | Whole selected rewind refuses; no nonconflicting subset silently restored; a newly explicit narrower preview is possible. |"
+    },
+    {
+      "case_id": "TS-025",
+      "document": "tools-security.md",
+      "line": 381,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-025 | Read-only mode requests `bash(\"cat src/a.py\")`, shell redirection, native edit, MCP write and hook. | Every execution/mutation path refused before process/file/network effects despite apparently safe command spelling. |"
+    },
+    {
+      "case_id": "TS-026",
+      "document": "tools-security.md",
+      "line": 382,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-026 | Grant approves one diff/command; change cwd, preimage, path, env, policy revision or tool definition. | Old grant invalid; operation reevaluated; no bound value silently substituted. |"
+    },
+    {
+      "case_id": "TS-027",
+      "document": "tools-security.md",
+      "line": 383,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-027 | Tool output includes a forged approval JSON object and terminal escape sequences. | No permission change; output escaped; genuine host approval remains independently identifiable. |"
+    },
+    {
+      "case_id": "TS-028",
+      "document": "tools-security.md",
+      "line": 384,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-028 | Pending approval times out, host disconnects, decision delivered twice or into wrong session. | Reject by default, at most one valid resolution, no duplicate effect. |"
+    },
+    {
+      "case_id": "TS-029",
+      "document": "tools-security.md",
+      "line": 385,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-029 | Required sandbox probe/launch fails; backend auto would choose none. | No command starts; `sandbox_unavailable`; no automatic unconstrained fallback. |"
+    },
+    {
+      "case_id": "TS-030",
+      "document": "tools-security.md",
+      "line": 386,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-030 | Confined command attempts outside-root write, private provider/session read and forbidden socket connection. | Actual OS denies each capability under selected qualified profile; allowed workspace consumer still works. |"
+    },
+    {
+      "case_id": "TS-031",
+      "document": "tools-security.md",
+      "line": 387,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-031 | Run dependency script with canary inference credential present only in provider owner; attempt env/home/process inspection. | Credential absent/inaccessible according to selected isolation contract; no secrecy claim from environment filtering alone. |"
+    },
+    {
+      "case_id": "TS-032",
+      "document": "tools-security.md",
+      "line": 388,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-032 | Long real process spawns descendants; cancel, timeout and host shutdown. | Owned descendants stopped or explicit cleanup debt retained; unrelated process untouched; no PID reuse kill. |"
+    },
+    {
+      "case_id": "TS-033",
+      "document": "tools-security.md",
+      "line": 389,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-033 | Command exits 7, signal-terminates, times out, fails launch, or exits zero with no tests selected. | Distinct actual receipts; no invented exit/counted test pass; verify consumer treats zero-selection as unqualified where required. |"
+    },
+    {
+      "case_id": "TS-034",
+      "document": "tools-security.md",
+      "line": 390,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-034 | Produce stdout/stderr above UI/retention budgets and split a registered canary secret over chunks. | Pipes drained; bounded memory/storage; cutoff counts correct; canary absent from normal artifacts/model output. |"
+    },
+    {
+      "case_id": "TS-035",
+      "document": "tools-security.md",
+      "line": 391,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-035 | Background handle from session A queried/cancelled by B; restart before terminal record. | Cross-session denial; restart outcome unknown until reconciliation; original command never replayed automatically. |"
+    },
+    {
+      "case_id": "TS-036",
+      "document": "tools-security.md",
+      "line": 392,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-036 | Shell `cd subdir; export X=1`; next invocation queries cwd/X. | Next command starts from explicit default/requested cwd/env; no undocumented persistent shell state. |"
+    },
+    {
+      "case_id": "TS-037",
+      "document": "tools-security.md",
+      "line": 393,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-037 | Shell mutates a file without captured preimage, calls remote endpoint, or installs a package; request rewind. | Known unsupported external/untracked effects reported; no false claim that turn rewind reverses them. |"
+    },
+    {
+      "case_id": "TS-038",
+      "document": "tools-security.md",
+      "line": 394,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-038 | Repository config installs external diff/textconv/pager/hook; request Git status/diff. | No helper executes outside the admitted process boundary; Git metadata/actual diff identity recorded. |"
+    },
+    {
+      "case_id": "TS-039",
+      "document": "tools-security.md",
+      "line": 395,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-039 | Two simultaneous conflicting edits and disjoint reads. | Conflicting writes serialize or one refuses stale; read outcomes identify actual snapshots; no lost update. |"
+    },
+    {
+      "case_id": "TS-040",
+      "document": "tools-security.md",
+      "line": 396,
+      "status": "UNRUN",
+      "assertion_contract": "| TS-040 | Effect changes disk but terminal event persistence fails; repeat model call/resume. | Existing effect reconciles via journal/postimage; no duplicate replacement or command replay; uncertainty visible. |"
+    },
+    {
+      "case_id": "DX-001",
+      "document": "delegation-extensions.md",
+      "line": 321,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-001 | Parent attempts spawn without exact files, verify disposition, cap or stop condition. | Admission refuses before allocation/model/process; diagnostics name missing packet fields. |"
+    },
+    {
+      "case_id": "DX-002",
+      "document": "delegation-extensions.md",
+      "line": 322,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-002 | Two concurrent spawn requests use same assignment/generation; lose first response. | At most one child/worktree/model lineage; repeat returns same registered state; no blind duplicate launch. |"
+    },
+    {
+      "case_id": "DX-003",
+      "document": "delegation-extensions.md",
+      "line": 323,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-003 | Read-only parent asks implement child or nested child with broader roots/network. | Intersection denies; no worktree mutation/provider call/helper launch for forbidden work. |"
+    },
+    {
+      "case_id": "DX-004",
+      "document": "delegation-extensions.md",
+      "line": 324,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-004 | Four running children plus another request; cancel one queued request while capacity frees. | Limits respected; cancelled queued child never starts; queue versus runtime durations separate. |"
+    },
+    {
+      "case_id": "DX-005",
+      "document": "delegation-extensions.md",
+      "line": 325,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-005 | Two implement children edit different exact source paths at same pinned input. | Real distinct worktrees, owned process identities and receipts; parent source unchanged until integration. |"
+    },
+    {
+      "case_id": "DX-006",
+      "document": "delegation-extensions.md",
+      "line": 326,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-006 | Child arbitrary shell tries sibling/main source, parent checkpoint/provider home and common `.git` writes. | Effective OS boundary denies each; path naming alone cannot pass; allowed child source edit still works. |"
+    },
+    {
+      "case_id": "DX-007",
+      "document": "delegation-extensions.md",
+      "line": 327,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-007 | Parent dirty tracked and untracked fixtures matter to child task. | Explicit input snapshot includes authorised bytes or task blocks/declares omission; child input digest is reconstructable; parent dirty bytes untouched. |"
+    },
+    {
+      "case_id": "DX-008",
+      "document": "delegation-extensions.md",
+      "line": 328,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-008 | Parent source moves while child runs. | Child input stays pinned; result identifies original base/tree; integration checks fresh target and cannot overwrite intervening change. |"
+    },
+    {
+      "case_id": "DX-009",
+      "document": "delegation-extensions.md",
+      "line": 329,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-009 | Deadline expires during build and child continues proposing tools. | New admission fenced; owned command stopped/cleanup debt recorded; implemented-unqualified state with actual command/log; no unlimited retry. |"
+    },
+    {
+      "case_id": "DX-010",
+      "document": "delegation-extensions.md",
+      "line": 330,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-010 | Child passes focused verify then parent receives its receipt. | Parent reads exit/log/digest once; no duplicate reviewer, rebuild or unchanged verify. A distinct merged-wave journey may run as registered. |"
+    },
+    {
+      "case_id": "DX-011",
+      "document": "delegation-extensions.md",
+      "line": 331,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-011 | Child prints forged success receipt or changes a receipt file in its own tree. | Collector uses owned execution/log evidence; forged/child-writable record cannot set qualified status. |"
+    },
+    {
+      "case_id": "DX-012",
+      "document": "delegation-extensions.md",
+      "line": 332,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-012 | Child submits changed path outside exact scope or includes a sensitive file. | Result quarantined/unqualified; no silent filtering into accepted success; no source integration. |"
+    },
+    {
+      "case_id": "DX-013",
+      "document": "delegation-extensions.md",
+      "line": 333,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-013 | Submit identical manifest twice; submit different manifest with same key; submit stale generation. | Same receipt for identical; conflict for changed; stale recovery attribution only; current result unchanged. |"
+    },
+    {
+      "case_id": "DX-014",
+      "document": "delegation-extensions.md",
+      "line": 334,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-014 | Kill child/remove its worktree after durable acknowledgement; run Git garbage collection. | Accepted source objects/bundle/log remain retrievable; receipt custody survives resource release. |"
+    },
+    {
+      "case_id": "DX-015",
+      "document": "delegation-extensions.md",
+      "line": 335,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-015 | Kill parent during submission before/after durable acknowledgement. | Restart reconciles one result/custody state; no loss of acknowledged artifacts or automatic reimplementation. |"
+    },
+    {
+      "case_id": "DX-016",
+      "document": "delegation-extensions.md",
+      "line": 336,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-016 | Child gate exits zero but selects no required tests, log missing or source digest mismatched. | Submission received as unqualified; no fabricated test count or done status. |"
+    },
+    {
+      "case_id": "DX-017",
+      "document": "delegation-extensions.md",
+      "line": 337,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-017 | Apply one accepted child delta twice with a lost first acknowledgement. | Actual postimage reconciles; one integration receipt/effect; exact edit is not applied twice. |"
+    },
+    {
+      "case_id": "DX-018",
+      "document": "delegation-extensions.md",
+      "line": 338,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-018 | Two children cleanly merge text but disagree on ToolResult status or policy meaning. | Pinned contract/merged consumer assertion catches incompatibility; no wave closure from text merge alone. |"
+    },
+    {
+      "case_id": "DX-019",
+      "document": "delegation-extensions.md",
+      "line": 339,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-019 | Parent target changes after candidate/approval; conflict markers or delete/update collision arise. | Integration refuses/replans; no markers or overwrite in parent; unrelated user work preserved. |"
+    },
+    {
+      "case_id": "DX-020",
+      "document": "delegation-extensions.md",
+      "line": 340,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-020 | Crash during multi-file integration commit; external editor changes one applied path. | Common journal recovery protects external bytes and reports recovery-required; child-qualified distinct from integrated. |"
+    },
+    {
+      "case_id": "DX-021",
+      "document": "delegation-extensions.md",
+      "line": 341,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-021 | Cancel before launch, during model wait, during tool execution, after submitted receipt and during cleanup. | Generation cancellation monotonic; no new effects/publication; completed receipt retained; owned process status and cleanup debt visible. |"
+    },
+    {
+      "case_id": "DX-022",
+      "document": "delegation-extensions.md",
+      "line": 342,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-022 | Same PID reused by unrelated process during orphan cleanup. | Identity mismatch prevents signal; unrelated process alive; stale handle reported. |"
+    },
+    {
+      "case_id": "DX-023",
+      "document": "delegation-extensions.md",
+      "line": 343,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-023 | Child emits repeated heartbeat/text without useful event; provider usage incomplete. | Liveness distinguished from progress; budget/deadline still enforce; unknown cost/tokens not zero. |"
+    },
+    {
+      "case_id": "DX-024",
+      "document": "delegation-extensions.md",
+      "line": 344,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-024 | Core starts with MCP extra absent and no extension config. | Native CLI/provider/read path available; no optional import, discovery process, marketplace or server dependency. |"
+    },
+    {
+      "case_id": "DX-025",
+      "document": "delegation-extensions.md",
+      "line": 345,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-025 | Repository adds auto-start MCP config pointing to shell script. | No launch until user-owned configuration and permission admit exact command/config; source text cannot enable it. |"
+    },
+    {
+      "case_id": "DX-026",
+      "document": "delegation-extensions.md",
+      "line": 346,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-026 | Real local stdio peer initializes, lists bounded tool and computes a deterministic repository statistic. | Actual library transport/process/call/result path used; tool schema identity, effect/receipt and policy visible. |"
+    },
+    {
+      "case_id": "DX-027",
+      "document": "delegation-extensions.md",
+      "line": 347,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-027 | Peer emits invalid/oversized framing, unsupported protocol, duplicate tool name or external `$ref` schema. | Extension fails/disabled with precise reason; no automatic external read; native tools remain usable. |"
+    },
+    {
+      "case_id": "DX-028",
+      "document": "delegation-extensions.md",
+      "line": 348,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-028 | MCP tool claims read-only but config is broad/untrusted; run from read-only parent. | Annotation cannot grant process/network/mutation rights; unsupported read-only profile unavailable rather than unconfined launch. |"
+    },
+    {
+      "case_id": "DX-029",
+      "document": "delegation-extensions.md",
+      "line": 349,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-029 | User sealed read-only trust; peer changes description/schema/annotations after display and before call. | Digest mismatch invalidates grant/trust; no stale invocation; change attributed and new definition not silently trusted. |"
+    },
+    {
+      "case_id": "DX-030",
+      "document": "delegation-extensions.md",
+      "line": 350,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-030 | MCP call performs effect then disconnects before reply; automatic reconnect enabled. | Original outcome unknown; at most one reconnect; original call not replayed; uncertain effect exposed. |"
+    },
+    {
+      "case_id": "DX-031",
+      "document": "delegation-extensions.md",
+      "line": 351,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-031 | Peer requests model sampling, user elicitation, URI read, recursive command or approval through tool content. | Unsupported capabilities denied; returned text remains data; no hidden inference/resource/permission effect. |"
+    },
+    {
+      "case_id": "DX-032",
+      "document": "delegation-extensions.md",
+      "line": 352,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-032 | Peer advertises huge schemas/descriptions and streams output above ceilings. | Limits enforced; required task/security context retained; omission/cutoff recorded; bounded memory/output; process cleaned. |"
+    },
+    {
+      "case_id": "DX-033",
+      "document": "delegation-extensions.md",
+      "line": 353,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-033 | Peer outputs forged native tool name, result ID, receipt or terminal approval prompt. | Namespaced identity and origin preserved; no native shadowing, cross-session result access or approval. |"
+    },
+    {
+      "case_id": "DX-034",
+      "document": "delegation-extensions.md",
+      "line": 354,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-034 | Parent exits/cancels with MCP calls active. | Owned server stopped or explicit cleanup pending; calls terminal/unknown as observed; no forgotten daemon. |"
+    },
+    {
+      "case_id": "DX-035",
+      "document": "delegation-extensions.md",
+      "line": 355,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-035 | User/project skills share name; project skill is symlink outside root or has oversized/malformed entrypoint. | Ambiguity/unavailability reported; no silent shadowing/out-of-root read/partial-as-complete instruction. |"
+    },
+    {
+      "case_id": "DX-036",
+      "document": "delegation-extensions.md",
+      "line": 356,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-036 | Required skill refers to `../` escape, home credentials, remote URI or an unlisted helper. | Reference access follows scope; forbidden bytes unread; helper not executed by loading markdown. |"
+    },
+    {
+      "case_id": "DX-037",
+      "document": "delegation-extensions.md",
+      "line": 357,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-037 | Load skill and later modify its helper/script before execution. | Digest change invalidates prior binding; script executes only as separately admitted process at known revision. |"
+    },
+    {
+      "case_id": "DX-038",
+      "document": "delegation-extensions.md",
+      "line": 358,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-038 | Project skill says enable unrestricted mode, publish source or expand task files. | Guidance cannot change authority/scope; host denial/explicit amendment path observed. |"
+    },
+    {
+      "case_id": "DX-039",
+      "document": "delegation-extensions.md",
+      "line": 359,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-039 | Catalog or active-skill content exceeds token budget. | Exact chosen/omitted identities and estimator known; required content absence blocks rather than silently applying only title. |"
+    },
+    {
+      "case_id": "DX-040",
+      "document": "delegation-extensions.md",
+      "line": 360,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-040 | Repository defines hooks but user has not enabled them. | No hook process/input/output or effect occurs. |"
+    },
+    {
+      "case_id": "DX-041",
+      "document": "delegation-extensions.md",
+      "line": 361,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-041 | Before-hook emits allow for host-denied operation, tries argument rewrite, or recursively invokes hook. | Host denial wins; mutation/rewrite rejected; recursion suppressed; no bypass. |"
+    },
+    {
+      "case_id": "DX-042",
+      "document": "delegation-extensions.md",
+      "line": 362,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-042 | Hook hangs, fails, exceeds output budget, returns malformed JSON or changes executable digest. | Bounded termination/failure semantics; before-hook denies; after-hook cannot rewrite completed effect; no automatic retry loop. |"
+    },
+    {
+      "case_id": "DX-043",
+      "document": "delegation-extensions.md",
+      "line": 363,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-043 | Hook input/output contains designated canary secret split across chunks. | Credentials excluded/redacted from normal output/model/logs; no raw provider/admin environment passed. |"
+    },
+    {
+      "case_id": "DX-044",
+      "document": "delegation-extensions.md",
+      "line": 364,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-044 | Parallel child pins old permission schema while producer task revises it. | Contract mismatch visible before merge/invocation; impacted packet paused/amended explicitly; no private silent adapter. |"
+    },
+    {
+      "case_id": "DX-045",
+      "document": "delegation-extensions.md",
+      "line": 365,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-045 | Disjoint child paths both alter a shared generated artifact/lockfile/API consumer through their build. | Semantic ownership/dependency detected; unexpected output changes quarantine; single owner or explicit integration packet required. |"
+    },
+    {
+      "case_id": "DX-046",
+      "document": "delegation-extensions.md",
+      "line": 366,
+      "status": "UNRUN",
+      "assertion_contract": "| DX-046 | Real parent delegates a bounded repair using selected local skill and permitted MCP tool, then integrates. | Installed CLI/model/child/worktree/extension/permission/receipt paths used; one child verify consumed, one distinct wave journey; no hidden gateway/ACP/platform dependency. |"
+    },
+    {
+      "case_id": "EX-001",
+      "document": "extraction-cutover.md",
+      "line": 237,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-001 | `freeze-inventory`; `freeze.1` | Inventory tracked hidden files, executable files, symlinks, submodules, unusual path names and untracked user work. | Exact tree coverage, modes/hashes round-trip, untracked content outside deletion set. |"
+    },
+    {
+      "case_id": "EX-002",
+      "document": "extraction-cutover.md",
+      "line": 238,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-002 | `freeze-inventory`, `wave-0-close`; `freeze.1` | Leave an unresolved/shared classification or unresolved dynamic edge. | Boundary remains blocked and identifies the source consumer; JSON existence cannot pass. |"
+    },
+    {
+      "case_id": "EX-003",
+      "document": "extraction-cutover.md",
+      "line": 239,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-003 | `freeze-vectors`; `freeze.2` | Alter one original fixture byte or selector after freezing. | SHA256/selector mismatch rejected before parity execution. |"
+    },
+    {
+      "case_id": "EX-004",
+      "document": "extraction-cutover.md",
+      "line": 240,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-004 | `freeze-vectors`, `artifact-boundary`; `freeze.2`, `prune.2` | Namespace adapter attempts legacy import or replaces an algorithm result. | Forbidden closure is rejected; only real extracted target can qualify. |"
+    },
+    {
+      "case_id": "EX-005",
+      "document": "extraction-cutover.md",
+      "line": 241,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-005 | `freeze-vectors`, `wave-0-close`; `freeze.2` | Mix portable, mock-dependent and incompatible old tool assertions. | Each assertion has an explicit disposition; archived/superseded items cannot inflate parity. |"
+    },
+    {
+      "case_id": "EX-006",
+      "document": "extraction-cutover.md",
+      "line": 242,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-006 | `artifact-boundary`; `local.1`, `prune.1` | Add function-local/dynamic import, entry-point fallback or old config-home read. | Static closure identifies each path or reports unresolved and blocks. |"
+    },
+    {
+      "case_id": "EX-007",
+      "document": "extraction-cutover.md",
+      "line": 243,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-007 | `artifact-boundary`; `local.1`, `prune.2` | Contaminate a developer path/site import and observe module origins. | Isolated child excludes contaminated origins and refuses legacy dependencies. |"
+    },
+    {
+      "case_id": "EX-008",
+      "document": "extraction-cutover.md",
+      "line": 244,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-008 | `local-turn`, `artifact-boundary`; `local.1` | Base install without extras, then each advertised extra. | Base starts; selecting missing extra diagnoses it; qualifying one extra does not qualify another. |"
+    },
+    {
+      "case_id": "EX-009",
+      "document": "extraction-cutover.md",
+      "line": 245,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-009 | `artifact-boundary`; `prune.2` | Build once, remove old-tree access from execution boundary and complete coding/resume/rewind. | Exact installed wheel works; denial probe, real provider trace, file/Git/session oracles recorded. |"
+    },
+    {
+      "case_id": "EX-010",
+      "document": "extraction-cutover.md",
+      "line": 246,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-010 | `prune-manifest`; `prune.1` | Manifest uses globs, duplicate operations, path traversal, untracked path or protected license omission. | Validator refuses every invalid operation set without deleting. |"
+    },
+    {
+      "case_id": "EX-011",
+      "document": "extraction-cutover.md",
+      "line": 247,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-011 | `prune-manifest`, `prune-cutover`; `prune.1`, `prune.3` | Change a promotion, source preimage, source revision or prerequisite after digest calculation. | Approval payload changes and old approval cannot authorise new operations. |"
+    },
+    {
+      "case_id": "EX-012",
+      "document": "extraction-cutover.md",
+      "line": 248,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-012 | `prune-cutover`; `prune.3` | Supply generic/agent-authored/old approval or mismatched digest. | No filesystem effect; exact user approval reference required. |"
+    },
+    {
+      "case_id": "EX-013",
+      "document": "extraction-cutover.md",
+      "line": 249,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-013 | `prune-manifest`; `freeze.3`, `prune.1` | Archive ref missing remotely, wrong commit, conflicting name or missing required external source object. | Approval packet is blocked; no force overwrite or false recovery claim. |"
+    },
+    {
+      "case_id": "EX-014",
+      "document": "extraction-cutover.md",
+      "line": 250,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-014 | `prune-manifest`; `prune.1` | Recover frozen source in a separate checkout using archive identities. | Resolved commit/blob hashes match; user's current tree/state untouched. |"
+    },
+    {
+      "case_id": "EX-015",
+      "document": "extraction-cutover.md",
+      "line": 251,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-015 | `prune-cutover`; `prune.3` | Promotion destination has unrelated changes or case/path collision. | Preflight refusal preserves both sources and destination bytes. |"
+    },
+    {
+      "case_id": "EX-016",
+      "document": "extraction-cutover.md",
+      "line": 252,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-016 | `prune-cutover`; `prune.3` | Interrupt staging/removal then restart recovery. | Journal exposes exact partial state; recovery restores only task-owned content and reports unresolved debt. |"
+    },
+    {
+      "case_id": "EX-017",
+      "document": "extraction-cutover.md",
+      "line": 253,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-017 | `prune-cutover`; `prune.3` | Dirty tracked/untracked work and old personal state exist. | No overlap is included or deleted; isolated cutover and state preservation proven by hashes. |"
+    },
+    {
+      "case_id": "EX-018",
+      "document": "extraction-cutover.md",
+      "line": 254,
+      "status": "UNRUN",
+      "assertion_contract": "| EX-018 | `prune-cutover`, wave closures; `prune.3`, `eval.3` | Exceed source/module/dependency budgets or hide production code as assets/extras. | Counts explain overage and block closure; final wheel and package-data inventory are authoritative inputs. |"
+    },
+    {
+      "case_id": "VE-001",
+      "document": "verification-evaluation.md",
+      "line": 103,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-001 | `local-turn`; `local.1`, `local.2` | Installed CLI with one real selected provider, fresh home/state and no gateway. Repeat missing credential/invalid endpoint selection. | A genuine model turn returns through the new runtime; missing credential exits 2 before effects, runtime/provider failure exits 1; no daemon or old package starts. |"
+    },
+    {
+      "case_id": "VE-002",
+      "document": "verification-evaluation.md",
+      "line": 104,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-002 | `stream-turn`; `local.2`, `local.3` | Real provider streaming; interrupt a real turn; feed immutable complete/incomplete protocol bytes into the real parser as a separate component variant. | Ordered event sequence, stable call IDs, valid completed arguments only; truncated stream not marked complete; interruption exits 130 and usage stays unknown when absent. |"
+    },
+    {
+      "case_id": "VE-003",
+      "document": "verification-evaluation.md",
+      "line": 105,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-003 | `stream-turn`; `local.3` | Text and JSONL installed-entrypoint runs, malformed invocation, refusal and budget exhaustion. | Stdout is mode-correct, diagnostics stay stderr; envelopes carry version/session/sequence; exits 0/1/2/3/4/130 match actual outcomes; no parseable success from partial JSONL. |"
+    },
+    {
+      "case_id": "VE-004",
+      "document": "verification-evaluation.md",
+      "line": 106,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-004 | `session-resume`; `session.1` | Persist a real conversation/tool result; stop and resume; kill after effect start before terminal receipt. | Original IDs/order restore once; new records append; uncertain effects reconcile as outcome_unknown and are not replayed. |"
+    },
+    {
+      "case_id": "VE-005",
+      "document": "verification-evaluation.md",
+      "line": 107,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-005 | `session-resume`; `session.1`, `session.2` | Real concurrent writers, malformed middle record, incomplete trailing bytes, foreign project resume and newer schema. | Single writer or explicit serialization; middle corruption fails without silent loss; tail quarantines with notice; project/schema mismatch refuses absent explicit supported action. |"
+    },
+    {
+      "case_id": "VE-006",
+      "document": "verification-evaluation.md",
+      "line": 108,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-006 | `explore-tools`; `explore.1`, `safety.1` | Read/glob/grep real files with Unicode, binary, huge line, ignored/hidden files and oversized results. | Correct bounded ranges and ignore behavior; explicit truncation plus retrievable full-result reference; no fabricated completeness or unbounded read. |"
+    },
+    {
+      "case_id": "VE-007",
+      "document": "verification-evaluation.md",
+      "line": 109,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-007 | `code-map`; `explore.1` | Parse real Python/TypeScript/Rust source with definitions, aliases, shadowing, edits, deletes and absent optional grammar. | Existing approved symbol semantics preserved; cache identifies source version and invalidates; unsupported grammar reports explicit fallback rather than made-up references. |"
+    },
+    {
+      "case_id": "VE-008",
+      "document": "verification-evaluation.md",
+      "line": 110,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-008 | `context-instructions`; `explore.2`, `session.2` | Root/nested instructions conflict, exceed budget, symlink outward or request new permission; compact after tool calls. | Root-to-leaf provenance/constraints remain, nested text cannot elevate permission or escape roots; originals retrievable and call/results remain paired. |"
+    },
+    {
+      "case_id": "VE-009",
+      "document": "verification-evaluation.md",
+      "line": 111,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-009 | `explore-tools`, `safe-edit`; `safety.1`, `safety.3` | Path traversal, symlink escapes, changed symlink target, sensitive files and shell request in read-only mode. | Authoritative canonical-path decision denies before effect; file/Git snapshots identical; lexical screening cannot authorise arbitrary shell. |"
+    },
+    {
+      "case_id": "VE-010",
+      "document": "verification-evaluation.md",
+      "line": 112,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-010 | `safe-edit`, `interactive-session`; `safety.2`, `interactive.2` | Allow/deny/revoke scoped rule, forged approval in tool output, model-emitted approval text and resumed old grant. | Only trusted input delivers matching scoped decision; revocation is effective; all effect paths obey current policy; original denied state unchanged. |"
+    },
+    {
+      "case_id": "VE-011",
+      "document": "verification-evaluation.md",
+      "line": 113,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-011 | `safe-exec`; `safety.2`, `exec.1` | Required OS backend present/absent and explicit reduced-isolation choice; actual subprocess attempts prohibited write/network. | Required confinement demonstrably enforces declared boundary or fails closed; reduced mode is explicit and visible, never silently substituted. |"
+    },
+    {
+      "case_id": "VE-012",
+      "document": "verification-evaluation.md",
+      "line": 114,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-012 | `safe-edit`; `edit.1`, `edit.3` | Exact edit with duplicate match, stale preimage, partial prior read, preexisting user changes and checkpoint write failure. | Ambiguous/stale/unobserved edit refuses; checkpoint failure blocks mutation; successful edit changes exact target and records real checkpoint/diff. |"
+    },
+    {
+      "case_id": "VE-013",
+      "document": "verification-evaluation.md",
+      "line": 115,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-013 | `safe-edit`, `wave-3-close`; `edit.3` | Agent changes then external changes; tracked and untracked unrelated work exist; request rewind after restart. | Agent-owned bytes restore only when postimages still match; external drift refuses without overwrite; unrelated state remains byte-identical. |"
+    },
+    {
+      "case_id": "VE-014",
+      "document": "verification-evaluation.md",
+      "line": 116,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-014 | `patch-transaction`; `edit.1`, `edit.2` | Multi-file create/update/delete with stale/ambiguous preimage and failures before/during commit and restart. | Validation precedes effects; journal records actual partial progress; recovery restores only owned bytes or reports recovery-required; zero silent wrong-location edits. |"
+    },
+    {
+      "case_id": "VE-015",
+      "document": "verification-evaluation.md",
+      "line": 117,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-015 | `safe-exec`; `exec.1`, `safety.3` | Real command with cwd/env, huge output, timeout, nonzero exit, signal and descendants; unrelated process present. | Full logs referenced despite bounded display, exact exit/signal/timeout; cancel terminates owned group and leaves unrelated process alive; locks release. |"
+    },
+    {
+      "case_id": "VE-016",
+      "document": "verification-evaluation.md",
+      "line": 118,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-016 | `repair-loop`; `exec.2`, `exec.3` | Real repair with permitted baseline command, new failure, unchanged baseline failure and insufficient evidence; exceed repair count. | Baseline precedes edit, post-edit check actually runs, introduced/preexisting/unknown follows evidence; stop after two repair cycles and report actual command/log/revision. |"
+    },
+    {
+      "case_id": "VE-017",
+      "document": "verification-evaluation.md",
+      "line": 119,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-017 | `background-exec`; `exec.1`, `safety.3` | Long real job returns handle; retrieve output/final state, cancel descendants, restart parent and attempt foreign/stale handle. | Handle ownership and status correct; foreign handle refused; uncertain state not replayed; shell-state persistence and limits are explicit. |"
+    },
+    {
+      "case_id": "VE-018",
+      "document": "verification-evaluation.md",
+      "line": 120,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-018 | `interactive-session`; `interactive.1`, `interactive.2` | Installed CLI in real PTY, streamed tools/approval, resize, non-TTY and /model /plan /diff /rewind /compact /resume. | Shared runtime/state behavior works, status reflects observed usage/context; plan cannot mutate; input/output remains usable after resize and cancellation. |"
+    },
+    {
+      "case_id": "VE-019",
+      "document": "verification-evaluation.md",
+      "line": 121,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-019 | `worktree-agents`; `extensions.1`, `extensions.2` | Two real children in distinct worktrees; scope collision, conflict, stale source receipt and parent cancellation. | Child scope/permission/budgets enforced, worktree lineage retained, only parent integrates compatible changes, conflict/stale receipts block, cancellation reaches descendants. |"
+    },
+    {
+      "case_id": "VE-020",
+      "document": "verification-evaluation.md",
+      "line": 122,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-020 | `mcp-skills`; `extensions.3` | Real local stdio peer, skill files and disabled/enabled hooks; oversized schemas, malformed message, peer crash and denied effect. | Bounded discovery/dispatch, explicit protocol failure, same policy on effects/hooks, no core import dependency when extras absent and no permission granted by skill text. |"
+    },
+    {
+      "case_id": "VE-021",
+      "document": "verification-evaluation.md",
+      "line": 123,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-021 | `wave-1-close`, `wave-2-close`; `local.1`, `session.1`, `explore.1`, `explore.2` | Installed real-provider turn then repository exploration/resume journey with nested instructions. | Relevant distinct journey variant obtains correct source facts and durable history without old runtime; individual component pass cannot substitute. |"
+    },
+    {
+      "case_id": "VE-022",
+      "document": "verification-evaluation.md",
+      "line": 124,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-022 | `wave-3-close`, `wave-6-close`; `edit.2`, `edit.3`, `exec.1`, `exec.2` | Real model seeded repair through installed CLI, independent check, resume/rewind; later multi-file/background interactive variant. | Actual fix/check and recovery meet fixture oracle; untouched user changes survive; variants require their own complete assertion inventory. |"
+    },
+    {
+      "case_id": "VE-023",
+      "document": "verification-evaluation.md",
+      "line": 125,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-023 | `wave-7-close`; `extensions.1`, `extensions.2`, `extensions.3` | Real parent delegates bounded work using local skill and optional MCP tool and integrates once. | Aggregate usage and permissions correct; child receipt consumed once; real merged consumer satisfies distinct journey oracle. |"
+    },
+    {
+      "case_id": "VE-024",
+      "document": "verification-evaluation.md",
+      "line": 126,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-024 | `eval-corpus`; `eval.1` | Frozen dataset with answer patch/history leakage, duplicate tasks, invalid base or contaminated holdout. | Corpus validator rejects each invalid record; public/private split and agent-visible inputs are inspectable and independently isolated. |"
+    },
+    {
+      "case_id": "VE-025",
+      "document": "verification-evaluation.md",
+      "line": 127,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-025 | `eval-corpus`, `doctor-release`; `eval.1`, `eval.2` | Real CLI issue-to-diff run with independent FAIL_TO_PASS/PASS_TO_PASS, agent tries to edit grader or exploit check suppression. | Grader tree remains separate, test selection is frozen, base fails expected check, candidate repair passes required checks; grader suppression cannot resolve. |"
+    },
+    {
+      "case_id": "VE-026",
+      "document": "verification-evaluation.md",
+      "line": 128,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-026 | `doctor-release`; `explore.3`, `eval.3` | Frozen >=10 questions per Python/TypeScript/Rust with exact file/symbol labels and five-call cap. | >=90% correct within cap across declared corpus; every question/result retained, unsupported variants counted explicitly; tool-call denominator auditable. |"
+    },
+    {
+      "case_id": "VE-027",
+      "document": "verification-evaluation.md",
+      "line": 129,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-027 | `doctor-release`; `eval.2`, `eval.3` | Full frozen repair campaign with real provider errors, verification omissions and budget exhaustion. | Accurate unconditional and environmental-conditional denominators, >=95% eligible repair runs execute valid verification, cost unknowns remain unknown; no scripted substitution. |"
+    },
+    {
+      "case_id": "VE-028",
+      "document": "verification-evaluation.md",
+      "line": 130,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-028 | `freeze-vectors`, task/wave closures; `freeze.2`, `eval.3` | Tampered hashes, wrong source/provider/contract, duplicate credit and component receipt labelled full-case. | Independent checker rejects stale/mismatched/incomplete evidence; historical bytes/results preserved; coverage scopes not inflated. |"
+    },
+    {
+      "case_id": "VE-029",
+      "document": "verification-evaluation.md",
+      "line": 131,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-029 | Harness-owning tasks, `wave-8-close`; `eval.3` | Unknown/empty selector, no collected assertions, missing command/fixture/credential, failed child, timeout, bad artifact and cleanup debt. | Every false-success trap yields nonzero with exact typed reason; expected rejection is asserted using real controlled child execution. |"
+    },
+    {
+      "case_id": "VE-030",
+      "document": "verification-evaluation.md",
+      "line": 132,
+      "status": "UNRUN",
+      "assertion_contract": "| VE-030 | `doctor-release`, `wave-8-close`; `eval.3` | Supported/unsupported provider/OS configurations, missing required safety case, over-budget source/deps, stale campaign and forged README claim. | Doctor/readiness reports actual qualified matrix; closure refuses missing mandatory proof, wrong-target edits, bad budgets and overstated support without rerunning passed gates. |"
+    }
+  ]
+}
