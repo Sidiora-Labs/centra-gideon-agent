@@ -21,12 +21,62 @@
       ],
       "exit_code": 0,
       "log_path": "/tmp/gideon-code-preflight-20261027/next.log"
+    },
+    {
+      "command": "cg spec start freeze-tracked -f gideon-code",
+      "exit_code": 0,
+      "log_path": "/tmp/gideon-code-preflight-20261027/start.log"
+    },
+    {
+      "command": "cg spec claim freeze-tracked --agent freeze-tracked --ttl 30 -f gideon-code",
+      "exit_code": 0,
+      "log_path": "/tmp/gideon-code-preflight-20261027/claim.log"
+    },
+    {
+      "command": "cg commit -m Record the existing repository as the execution baseline",
+      "exit_code": 0,
+      "log_path": "/tmp/gideon-code-preflight-20261027/snapshot.log"
+    },
+    {
+      "command": "CG_AGENT=freeze-tracked CG_FEATURE=gideon-code cg guard --strict",
+      "exit_code": 0,
+      "log_path": "/tmp/gideon-code-preflight-20261027/guard-baseline.log"
     }
   ],
   "tooling": {
     "native_spec_start": "Supported without graph; rendering adapters deliberately absent and markdown mirrors disabled.",
-    "native_spec_done": "Always runs verify_cmd before required touches graph checks. No receipt-reuse mode; no initialized graph. Never invoke after a separately passed verify at unchanged revision.",
-    "guard": "cortex_guard unavailable; cg guard exits 1 without initialized graph. No documented no-index init. Remote publication blocked, local reversible work permitted."
+    "native_spec_done": "Always executes verify_cmd once, then graph/touches checks. Shared graph now exists; no task symbols require an index. Use CG_AGENT=freeze-tracked and CG_FEATURE=gideon-code from exact task worktree. No standalone verify first, no --force, no duplicate gates.",
+    "guard": "Resolved: graph opened at actual repository and shared linked worktree; native baseline snapshot eabe2ce474a5, then leased strict guard exited 0 with every change inside scope. Source index coverage remains 0 and is not claimed.",
+    "initialization": "cg init created .codegraph; detached process completion code was not retained and no successful initialization exit is claimed. Subsequent cg info, root resolution, claim, snapshot and strict guard returned measured results. No complete index is claimed."
   },
-  "authorization": "Explicit user implementation by subagents; prune remains separately approved."
+  "authorization": "Explicit user implementation by subagents; prune remains separately approved.",
+  "baseline": {
+    "commit": "9abb39ab5010f2d7c986ac86c4f063ff77479b5d",
+    "tree": "170cd82837266547a4a878862740c728ae5e35c1",
+    "publication": "git push origin main exited 0; git ls-remote confirmed exact refs/heads/main",
+    "worktree": "/tmp/gideon-code-freeze-tracked",
+    "branch": "task/gideon-code/freeze-tracked",
+    "dirty_overlay_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "dispatch": {
+    "task": "freeze-tracked",
+    "worker_native_agent": "freeze-tracked",
+    "lease_minutes": 30,
+    "owned_paths": [
+      "lean/scripts/inventory_tracked.py",
+      "lean/checks/packets/test_freeze_tracked.py"
+    ],
+    "input_commit": "9abb39ab5010f2d7c986ac86c4f063ff77479b5d",
+    "packet_sha256": "55b9187f575b58abbaac4f7be1086708ccbed5dae7bfaeba62ba0f48968869c9",
+    "spec_sha256": "01a0686b22e489c7d95e3250065040bfe29b1fe9ce86a2b6a2967b5ab2b6c075",
+    "chapter_sha256": {
+      "architecture.md": "6f3b554a0af91657024d938e8920dca18059504e49a908eac41035710d4ddd60",
+      "parallel-execution.md": "794a986e7309534284fec1d291edc1f284a67eb8e602d2b9914b4a8ee7c5b9dd",
+      "extraction-cutover.md": "2d061eddc5b9d43659626ed03928d509e45b374cf9cc4aed5e8b4583716615b8",
+      "verification-evaluation.md": "26601a88dae6842f606caf0aa555b2dda6c30fc75a8c783109e291e1f44570c6"
+    },
+    "contract_digest": "a522e42377a5069858ef69ceb367a978b808db481d81f41db3412bd8b986ad4e",
+    "gate_custody": "Worker implements and runs compile once; coordinator executes native cg spec done as the single verify invocation from exact worker worktree. No standalone pytest first."
+  },
+  "authoring_evidence": "Original authoring report retained unchanged at its own document hashes; activation metadata intentionally changes spec hash. No fresh authoring check or product gate is claimed."
 }
